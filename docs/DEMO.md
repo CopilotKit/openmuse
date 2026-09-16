@@ -1,6 +1,20 @@
 # Demos
 
-Updated September 16, 2026. Both recordings feature OpenMuse's original capybara mascot and the current composer: the send arrow changes to a stop square inside the input pill while OpenMuse replies, then returns when the run ends. The mobile story explores websites; the desktop story starts with email and continues into related research.
+Updated September 16, 2026. The videos feature OpenMuse's original capybara mascot. The app recordings show the current composer: the send arrow changes to a stop square inside the input pill while OpenMuse replies, then returns when the run ends. The mobile story explores websites; the desktop story starts with email and continues into related research.
+
+## Launch film
+
+[Watch the 30-second launch film](../assets/demos/2026-09-16/launch/launch.mp4) · [Cover image](../assets/demos/2026-09-16/launch/launch.png).
+
+An animated introduction to OpenMuse: meet the capybara, follow email and browser results, see the agent's computer, then view the mobile and desktop interfaces. The film combines illustrative motion graphics with actual app captures; animated cards are presentation scenes, not a continuous recording of a live agent run. It uses original artwork and instrumental music, without Meta footage or audio. Export: 1920 × 1080, 60 fps, H.264 video and AAC audio.
+
+## Product demo
+
+[Watch the 33-second product demo](../assets/demos/2026-09-16/launch/demo.mp4) · [Cover image](../assets/demos/2026-09-16/launch/demo.png).
+
+A 2.5-second animated intro leads into 29 seconds of actual desktop app footage, followed by a 1.5-second repository end card. Ask for the school-trip email, open the message, research Monterey Bay Aquarium, inspect the inline browser and findings, then take control of the same browser session. Export: 1920 × 1080, 60 fps, with original instrumental music.
+
+The footage is edited from the desktop recording below, using its AI Mock model responses, fictional mailbox, and real Chromium page visits. The original 1440 × 810 recording is 25 fps; the 60 fps export supports the intro and framing animations. Waiting is trimmed, playback speed varies, and the completed browser card and research summary are reordered for clarity. This is a product walkthrough, not a live-model benchmark or a demonstration of a connected personal Gmail account.
 
 ## Mobile
 
@@ -34,7 +48,7 @@ Captures are trimmed and paced for readability, including brief slowdowns of the
 
 [Watch the 42-second web MP4](../assets/demos/2026-09-16/web.mp4) · [Animated preview](../assets/demos/2026-09-16/web.gif) · [Cover image](../assets/demos/2026-09-16/web.png).
 
-A separate recording of the actual desktop web app, placed below the mobile demo in the README. Ask **“Check my emails for the school trip”**, open the school's reminder, then ask **“Research Monterey Bay Aquarium and suggest three exhibits”**. The 1440 × 810 browser capture sits inside a 1920 × 1080 canvas with the same cream, blue, and lilac background and OpenMuse 🪁 branding.
+A separate recording of the actual desktop web app, available below the mobile demo in the README's walkthrough section. Ask **“Check my emails for the school trip”**, open the school's reminder, then ask **“Research Monterey Bay Aquarium and suggest three exhibits”**. The 1440 × 810 browser capture sits inside a 1920 × 1080 canvas with the same cream, blue, and lilac background and OpenMuse 🪁 branding.
 
 | Time | Scene |
 | --- | --- |

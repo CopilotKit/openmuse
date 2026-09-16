@@ -12,6 +12,31 @@ Built with CopilotKit React Native for iOS, Android, and web.
 [![CI](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+[![OpenMuse 🪁 — Your agent. Its own computer. Watch the launch film.](assets/demos/2026-09-16/launch/launch.png)](assets/demos/2026-09-16/launch/launch.mp4)
+
+**[Watch the launch film · 30 seconds](assets/demos/2026-09-16/launch/launch.mp4)**
+
+[![OpenMuse 🪁 — From email to research, with the agent's browser inline.](assets/demos/2026-09-16/launch/demo.png)](assets/demos/2026-09-16/launch/demo.mp4)
+
+**[Watch the product demo · 33 seconds](assets/demos/2026-09-16/launch/demo.mp4)**
+
+</div>
+
+> **Alpha, for self-hosting and building on.** Open-ended reasoning, live Google accounts, and CopilotKit Rich Threads require their own configuration. See [what is verified](docs/VERIFICATION.md) and the [roadmap](ROADMAP.md).
+
+## Demo
+
+The **30-second launch film** introduces OpenMuse and its computer. The **33-second product demo** opens with a 2.5-second intro, then follows the desktop app from a school-trip email to aquarium research and browser takeover. Both are 16:9, 1080p videos with music.
+
+On iPhone, ask OpenMuse to find interesting stories on Hacker News and summarize CopilotKit. On desktop, ask it to check the school-trip email, open the message, and research exhibits at Monterey Bay Aquarium. The agent shows email and browser results inline. **Take control** opens that same browser session when you need it.
+
+The 38-second iPhone and 42-second desktop web demos show the current interface, framed in 16:9. The send arrow becomes a stop square inside the input pill while the agent replies, then switches back. Stopping keeps your draft intact. See the [recording notes](docs/DEMO.md) for the model setup and reproduction steps.
+
+[Launch film](assets/demos/2026-09-16/launch/launch.mp4) · [Product demo](assets/demos/2026-09-16/launch/demo.mp4) · [Mobile MP4](assets/demos/2026-09-16/mobile.mp4) · [Web MP4](assets/demos/2026-09-16/web.mp4) · [Recording details and reproduction](docs/DEMO.md)
+
+<details>
+<summary>Mobile and web walkthroughs</summary>
+
 [![OpenMuse 🪁 — Ask it to browse. Watch the 38-second mobile demo.](assets/demos/2026-09-16/mobile.gif)](assets/demos/2026-09-16/mobile.mp4)
 
 **[Watch the mobile demo · 38 seconds](assets/demos/2026-09-16/mobile.mp4)**
@@ -20,17 +45,7 @@ Built with CopilotKit React Native for iOS, Android, and web.
 
 **[Watch the web demo · 42 seconds](assets/demos/2026-09-16/web.mp4)**
 
-</div>
-
-> **Alpha, for self-hosting and building on.** Open-ended reasoning, live Google accounts, and CopilotKit Rich Threads require their own configuration. See [what is verified](docs/VERIFICATION.md) and the [roadmap](ROADMAP.md).
-
-## Demo
-
-On iPhone, ask OpenMuse to find interesting stories on Hacker News and summarize CopilotKit. On desktop, ask it to check the school-trip email, open the message, and research exhibits at Monterey Bay Aquarium. The agent shows email and browser results inline. **Take control** opens that same browser session when you need it.
-
-The 38-second iPhone and 42-second desktop web demos show the current interface, framed in 16:9. The send arrow becomes a stop square inside the input pill while the agent replies, then switches back. Stopping keeps your draft intact. See the [recording notes](docs/DEMO.md) for the model setup and reproduction steps.
-
-[Mobile MP4](assets/demos/2026-09-16/mobile.mp4) · [Web MP4](assets/demos/2026-09-16/web.mp4) · [Recording details and reproduction](docs/DEMO.md)
+</details>
 
 ## What it is
 
