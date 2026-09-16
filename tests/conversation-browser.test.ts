@@ -152,3 +152,62 @@ test("unsubscribing from chat stops queued browser navigation and further model 
   assert.deepEqual(fixture.browserCalls, []);
   assert.equal(requests.length, 1);
 });
+
+test("chat searches and reads actual owner mail without creating a task or sending", async (t) => {
+  const { requests } = await modelFixture(t, (index) =>
+    index === 0
+      ? { name: "search_mail", arguments: { query: "aquarium" } }
+      : index === 1
+        ? { name: "read_mail_thread", arguments: { threadId: "trip-thread" } }
+        : undefined,
+  );
+  const fixture = await chatFixture(t);
+  await fixture.workspace.ensureSample("local-user", fixture.actions);
+  await fixture.workspace.ensureSample("another-owner", fixture.actions);
+  const foreign = (await fixture.workspace.thread("another-owner", "trip-thread"))[0];
+  const actionsBefore = await fixture.db.list("local-user", "actions");
+  await fixture.db.put("another-owner", "mail", {
+    ...foreign,
+    body: "PRIVATE FOREIGN AQUARIUM DETAILS",
+  });
+  const input = runInput();
+  input.messages = [
+    { id: randomUUID(), role: "user", content: "Check my emails for the school trip" },
+  ];
+  const events = (await lastValueFrom(fixture.conversation.run(input).pipe(toArray()))).map(
+    (event) => EventSchemas.parse(event),
+  );
+  const results = events.filter((event) => event.type === EventType.TOOL_CALL_RESULT);
+  assert.equal(results.length, 2);
+  const search = JSON.parse(results[0].content);
+  const read = JSON.parse(results[1].content);
+  assert.equal(search.matches.length, 1);
+  assert.equal(search.matches[0].threadId, "trip-thread");
+  assert.equal("body" in search.matches[0], false);
+  assert.match(read.messages[0].body, /8:15 AM/);
+  assert.equal(read.truncated, false);
+  assert.ok(requests[2].body.includes("8:15 AM"));
+  assert.ok(!JSON.stringify(results).includes("PRIVATE FOREIGN"));
+  assert.equal((await fixture.db.list("local-user", "tasks")).length, 0);
+  assert.deepEqual(await fixture.db.list("local-user", "actions"), actionsBefore);
+});
+
+test("chat mail tools report disconnected mail and refuse another owner's thread", async (t) => {
+  let call = { name: "search_mail", arguments: { query: "aquarium" } as object };
+  await modelFixture(t, (index) => (index % 2 === 0 ? call : undefined));
+  const fixture = await chatFixture(t);
+  await fixture.workspace.ensureSample("another-owner", fixture.actions);
+  await fixture.db.put("local-user", "settings", { id: "google", enabled: false });
+  async function toolError() {
+    const events = (await lastValueFrom(fixture.conversation.run(runInput()).pipe(toArray()))).map(
+      (event) => EventSchemas.parse(event),
+    );
+    const result = events.find((event) => event.type === EventType.TOOL_CALL_RESULT);
+    assert.ok(result && result.type === EventType.TOOL_CALL_RESULT);
+    return JSON.parse(result.content).error;
+  }
+  assert.match(await toolError(), /disconnected/);
+  await fixture.db.put("local-user", "settings", { id: "google", enabled: true });
+  call = { name: "read_mail_thread", arguments: { threadId: "trip-thread" } };
+  assert.match(await toolError(), /not found/);
+});

@@ -1,7 +1,8 @@
 import { ArrowUpRight, Check, ChevronRight, type LucideIcon, X } from "lucide-react-native";
-import { type ReactNode, useId } from "react";
+import type { ReactNode } from "react";
 import {
   ActivityIndicator,
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -14,7 +15,6 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Svg, { Circle, Defs, Ellipse, LinearGradient, Path, Stop } from "react-native-svg";
 export const colors = {
   canvas: "#FCFCFC",
   card: "#FFFFFF",
@@ -399,58 +399,38 @@ export function LinkRow({
     </Pressable>
   );
 }
-/** An original little sky pebble, drawn locally; no Meta artwork. */
-export function Orb({
+/** OpenMuse's original capybara, shared by every assistant surface. */
+export function Mascot({
   size = 42,
   variant = "sky",
 }: {
   size?: number;
   variant?: "sky" | "sand" | "lilac";
 }) {
-  const id = useId().replace(/:/g, "");
-  const pebbleId = `${id}-pebble`,
-    faceId = `${id}-face`;
   const palette = {
-    sky: ["#EDF8FF", "#C7E4F2", "#A2C7DA"],
-    sand: ["#FFF7E8", "#EAD8B7", "#C9B793"],
-    lilac: ["#F7F0FF", "#DCD0F0", "#B7A6D0"],
+    sky: "#ECF5FA",
+    sand: "#FAF0DF",
+    lilac: "#F1ECF9",
   }[variant];
   return (
-    <View accessibilityLabel="OpenMuse" style={{ width: size, height: size }}>
-      <Svg width={size} height={size} viewBox="0 0 80 80">
-        <Defs>
-          <LinearGradient id={pebbleId} x1="0" y1="0" x2="1" y2="1">
-            <Stop offset="0" stopColor={palette[0]} />
-            <Stop offset="0.55" stopColor={palette[1]} />
-            <Stop offset="1" stopColor={palette[2]} />
-          </LinearGradient>
-          <LinearGradient id={faceId} x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#FFFDF4" />
-            <Stop offset="1" stopColor="#F2E7CE" />
-          </LinearGradient>
-        </Defs>
-        <Ellipse cx="40" cy="72" rx="23" ry="4" fill="#132631" opacity="0.05" />
-        <Path
-          d="M17 42C13 20 27 8 42 10C60 9 66 26 63 43C64 53 70 57 66 64C59 77 20 77 14 63C11 57 17 50 17 42Z"
-          fill={`url(#${pebbleId})`}
-        />
-        <Path
-          d="M24 26C29 17 51 17 57 28C63 43 51 53 40 53C26 53 17 41 24 26Z"
-          fill={`url(#${faceId})`}
-        />
-        <Ellipse cx="28" cy="39" rx="4" ry="2.5" fill="#ECC8BA" opacity="0.55" />
-        <Ellipse cx="52" cy="39" rx="4" ry="2.5" fill="#ECC8BA" opacity="0.55" />
-        <Circle cx="32" cy="34" r="1.7" fill="#283238" />
-        <Circle cx="48" cy="34" r="1.7" fill="#283238" />
-        <Path
-          d="M37 40Q40 42 43 40"
-          stroke="#A38D70"
-          strokeWidth="1.4"
-          fill="none"
-          strokeLinecap="round"
-        />
-        <Path d="M27 58Q40 64 54 57" stroke="#92BBCE" strokeWidth="1.2" fill="none" opacity="0.4" />
-      </Svg>
+    <View accessibilityLabel="OpenMuse capybara" style={{ width: size, height: size }}>
+      <View
+        style={{
+          position: "absolute",
+          top: size * 0.15,
+          left: size * 0.12,
+          width: size * 0.76,
+          height: size * 0.76,
+          borderRadius: size,
+          backgroundColor: palette,
+        }}
+      />
+      <Image
+        source={require("../assets/capybara.png")}
+        resizeMode="contain"
+        style={{ width: size, height: size }}
+        accessible={false}
+      />
     </View>
   );
 }

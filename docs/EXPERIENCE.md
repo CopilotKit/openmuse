@@ -19,7 +19,7 @@ OpenMuse follows the interaction principles in [Meta's design essay](https://int
 
 ## Visual language
 
-An airy canvas, distinct gray and sky-blue message bubbles, large touch targets, rounded input and navigation pills, and restrained artifact frames keep attention on the work. The browser and PDF previews are real application content. OpenMuse uses its own locally drawn avatar.
+An airy canvas, distinct gray and sky-blue message bubbles, large touch targets, rounded input and navigation pills, and restrained artifact frames keep attention on the work. Email, browser and PDF previews show actual tool results. OpenMuse uses an original warm tan capybara, bundled locally; sky, sand and lilac backgrounds preserve the avatar color preference. See [artwork provenance](../apps/mobile/assets/README.md).
 
 ## Boundaries
 

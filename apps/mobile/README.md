@@ -4,11 +4,11 @@ A shared React Native workspace for iOS, Android, and the web preview. The clien
 
 ## Demos
 
-[![OpenMuse on iPhone — watch the 38-second demo](../../assets/demos/2026-09-15/mobile.png)](../../assets/demos/2026-09-15/mobile.mp4)
+[![OpenMuse on iPhone — watch the 38-second demo](../../assets/demos/2026-09-16/mobile.png)](../../assets/demos/2026-09-16/mobile.mp4)
 
-[iPhone · 38 seconds](../../assets/demos/2026-09-15/mobile.mp4) · [Desktop web · 40 seconds](../../assets/demos/2026-09-15/web.mp4) · [Recording setup](../../docs/DEMO.md)
+[iPhone · 38 seconds](../../assets/demos/2026-09-16/mobile.mp4) · [Desktop web · 42 seconds](../../assets/demos/2026-09-16/web.mp4) · [Recording setup](../../docs/DEMO.md)
 
-Both recordings show the agent browsing inline in chat, with **Take control** opening the same browser session. Send and Stop share the input pill's primary control.
+Meet OpenMuse's capybara in two different journeys: Hacker News and CopilotKit on iPhone; reading a school-trip email and researching aquarium exhibits on desktop. Results appear inline in chat, with **Take control** opening the same browser session. Send and Stop share the input pill's primary control.
 
 ## Run
 

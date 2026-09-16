@@ -12,13 +12,13 @@ Built with CopilotKit React Native for iOS, Android, and web.
 [![CI](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[![OpenMuse 🪁 — Ask it to browse. Watch the 38-second mobile demo.](assets/demos/2026-09-15/mobile.gif)](assets/demos/2026-09-15/mobile.mp4)
+[![OpenMuse 🪁 — Ask it to browse. Watch the 38-second mobile demo.](assets/demos/2026-09-16/mobile.gif)](assets/demos/2026-09-16/mobile.mp4)
 
-**[Watch the mobile demo · 38 seconds](assets/demos/2026-09-15/mobile.mp4)**
+**[Watch the mobile demo · 38 seconds](assets/demos/2026-09-16/mobile.mp4)**
 
-[![OpenMuse 🪁 on the web — Watch the 40-second desktop demo.](assets/demos/2026-09-15/web.gif)](assets/demos/2026-09-15/web.mp4)
+[![OpenMuse 🪁 on the web — Watch the 42-second desktop demo.](assets/demos/2026-09-16/web.gif)](assets/demos/2026-09-16/web.mp4)
 
-**[Watch the web demo · 40 seconds](assets/demos/2026-09-15/web.mp4)**
+**[Watch the web demo · 42 seconds](assets/demos/2026-09-16/web.mp4)**
 
 </div>
 
@@ -26,11 +26,11 @@ Built with CopilotKit React Native for iOS, Android, and web.
 
 ## Demo
 
-Ask OpenMuse to find interesting stories on Hacker News or summarize CopilotKit. The agent opens and reads the real page, shows its browser inline, and replies in the conversation. **Take control** opens that same session when you need it.
+On iPhone, ask OpenMuse to find interesting stories on Hacker News and summarize CopilotKit. On desktop, ask it to check the school-trip email, open the message, and research exhibits at Monterey Bay Aquarium. The agent shows email and browser results inline. **Take control** opens that same browser session when you need it.
 
-The 38-second iPhone and 40-second desktop web demos show the current interface, framed in 16:9. The send arrow becomes a stop square inside the input pill while the agent replies, then switches back. Stopping keeps your draft intact. See the [recording notes](docs/DEMO.md) for the model setup and reproduction steps.
+The 38-second iPhone and 42-second desktop web demos show the current interface, framed in 16:9. The send arrow becomes a stop square inside the input pill while the agent replies, then switches back. Stopping keeps your draft intact. See the [recording notes](docs/DEMO.md) for the model setup and reproduction steps.
 
-[Mobile MP4](assets/demos/2026-09-15/mobile.mp4) · [Web MP4](assets/demos/2026-09-15/web.mp4) · [Recording details and reproduction](docs/DEMO.md)
+[Mobile MP4](assets/demos/2026-09-16/mobile.mp4) · [Web MP4](assets/demos/2026-09-16/web.mp4) · [Recording details and reproduction](docs/DEMO.md)
 
 ## What it is
 
@@ -42,7 +42,7 @@ The computer combines **persistent Chromium and an optional Linux workspace**. T
 
 | Surface | What runs in this alpha |
 | --- | --- |
-| **Chat** | CopilotKit headless chat with streamed AG-UI events, send/stop in one input pill, a visible follow-up queue, retained drafts, delegated tasks, and inline browser, PDF, plan, and finance cards. |
+| **Chat** | CopilotKit headless chat with streamed AG-UI events, mailbox search and reading, send/stop in one input pill, a visible follow-up queue, retained drafts, delegated tasks, and inline email, browser, PDF, plan, and finance cards. |
 | **Agent computer** | Persistent browser profiles and takeover console; optional isolated Linux terminal, saved command receipts, editable workspace files, and PDF transfer. |
 | **Activity** | Durable task plans, progress, input requests, pause/resume/cancel/retry, approvals, and saved receipts. SQL leases recover interrupted work. |
 | **Ideas** | Suggestions with source evidence; edit, accept, or dismiss. Sent replies and completed matching work are excluded. |

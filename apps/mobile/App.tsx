@@ -39,7 +39,7 @@ import { ComputerDraftProvider } from "./src/computer-drafts";
 import { Details } from "./src/details";
 import { BrowserScreen, CalendarScreen, FilesScreen, MailScreen } from "./src/screens";
 import { ThreadsProvider, ThreadsSheet, useMuseThread } from "./src/threads";
-import { Button, Card, colors, ErrorNotice, Field, IconButton, Orb, s } from "./src/ui";
+import { Button, Card, colors, ErrorNotice, Field, IconButton, Mascot, s } from "./src/ui";
 import { type Detail, useWorkspace, WorkspaceContext } from "./src/workspace";
 
 const nav: { id: Section; label: string; icon: LucideIcon }[] = [
@@ -107,7 +107,7 @@ export default function App() {
           }}
         >
           <View style={{ width: "100%", maxWidth: 420, gap: 22, alignItems: "center" }}>
-            <Orb size={72} />
+            <Mascot size={72} />
             <Text
               style={{ fontSize: 32, color: colors.text, letterSpacing: -1, fontWeight: "500" }}
             >
@@ -191,7 +191,7 @@ function WorkspaceApp({ token }: { token: string }) {
           gap: 18,
         }}
       >
-        <Orb size={56} />
+        <Mascot size={56} />
         {error ? (
           <>
             <ErrorNotice error={error} />
@@ -319,7 +319,7 @@ function WorkspaceShell({
                   opacity: pressed ? 0.65 : 1,
                 })}
               >
-                <Orb size={desktop ? 58 : 49} variant={data?.identity.avatar} />
+                <Mascot size={desktop ? 58 : 49} variant={data?.identity.avatar} />
                 <Text
                   style={{
                     fontSize: 16,

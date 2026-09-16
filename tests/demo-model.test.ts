@@ -18,6 +18,96 @@ const request = (messages: ChatMessage[]): ChatCompletionRequest => ({
   tools: [browseTool],
 });
 
+const mailRequest = (messages: ChatMessage[]): ChatCompletionRequest => ({
+  ...request(messages),
+  tools: ["search_mail", "read_mail_thread", "browse_web"].map((name) => ({
+    type: "function",
+    function: { name, parameters: {} },
+  })),
+});
+
+test("aquarium research distinguishes exhibit entries from navigation and only quotes observed descriptions", () => {
+  const response = demoResponse(
+    request([
+      { role: "user", content: "Research Monterey Bay Aquarium" },
+      {
+        role: "tool",
+        tool_call_id: "call_openmuse_demo_browse_aquarium",
+        content: JSON.stringify({
+          sessionId: "aquarium",
+          url: "https://www.montereybayaquarium.org/visit/exhibits",
+          title: "Exhibits",
+          text: "Kelp forest recovery\nPlayful sea otters.\nEXHIBIT\nKelp Forest\nA view of sunlit kelp.\nExplore exhibit\nEXHIBIT\nOpen Sea\nWatch tuna and turtles.\nExplore exhibit",
+          truncated: false,
+        }),
+      },
+    ]),
+  );
+  assert.ok("content" in response);
+  assert.match(response.content ?? "", /Kelp Forest: A view of sunlit kelp/);
+  assert.match(response.content ?? "", /Open Sea: Watch tuna and turtles/);
+  assert.doesNotMatch(response.content ?? "", /recovery|Playful|Three|Sea Otters:/);
+});
+
+test("the email demo reads the thread returned by search and quotes its actual details", () => {
+  const messages: ChatMessage[] = [
+    { role: "user", content: "Check my emails for the school trip" },
+  ];
+  const search = demoResponse(mailRequest(messages));
+  assert.ok("toolCalls" in search && search.toolCalls);
+  assert.equal(search.toolCalls[0].name, "search_mail");
+  messages.push({
+    role: "tool",
+    tool_call_id: search.toolCalls[0].id,
+    content: JSON.stringify({
+      matches: [{ threadId: "dynamic-thread", subject: "New trip details" }],
+    }),
+  });
+  const read = demoResponse(mailRequest(messages));
+  assert.ok("toolCalls" in read && read.toolCalls);
+  assert.equal(read.toolCalls[0].name, "read_mail_thread");
+  assert.deepEqual(JSON.parse(read.toolCalls[0].arguments), { threadId: "dynamic-thread" });
+  messages.push({
+    role: "tool",
+    tool_call_id: read.toolCalls[0].id,
+    content: JSON.stringify({
+      messages: [
+        {
+          sender: "School Office",
+          subject: "New trip details",
+          body: "The bus now leaves at 9:45 AM. Bring the signed form and your lunch.",
+        },
+      ],
+    }),
+  });
+  const reply = demoResponse(mailRequest(messages));
+  assert.ok("content" in reply);
+  assert.match(reply.content ?? "", /9:45 AM/);
+  assert.doesNotMatch(reply.content ?? "", /8:15 AM/);
+  messages.push({ role: "user", content: "Check my emails for the school trip again" });
+  const next = demoResponse(mailRequest(messages));
+  assert.ok("toolCalls" in next && next.toolCalls);
+  assert.equal(next.toolCalls[0].name, "search_mail");
+});
+
+test("the email demo handles no matches and disconnected mail without inventing details", () => {
+  for (const result of [{ matches: [] }, { error: "Google is disconnected" }]) {
+    const response = demoResponse(
+      mailRequest([
+        { role: "user", content: "Check my emails for the school trip" },
+        {
+          role: "tool",
+          tool_call_id: "call_openmuse_demo_mail_search_failure",
+          content: JSON.stringify(result),
+        },
+      ]),
+    );
+    assert.ok("content" in response);
+    assert.match(response.content ?? "", /didn’t find|couldn’t check/);
+    assert.ok(!("toolCalls" in response));
+  }
+});
+
 test("demo only summarizes browser evidence belonging to the current user turn", () => {
   const history: ChatMessage[] = [
     { role: "user", content: "Find cool stuff on Hacker News" },

@@ -110,6 +110,28 @@ export class WorkspaceService {
     if (!mail.length) throw new AppError("Mail thread not found", 404);
     return mail.sort((a, b) => a.date.localeCompare(b.date));
   }
+  async searchMail(owner: string, query: string) {
+    const connection = await this.connection(owner);
+    if (!connection) throw new AppError("Google is disconnected", 409);
+    if (this.config.mode === "live")
+      return this.cacheMail(
+        owner,
+        await this.google(owner, connection.id).listMail(query || "in:inbox"),
+        connection.id,
+      );
+    const words = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    return (await this.db.list<Mail>(owner, "mail"))
+      .filter(
+        (message) =>
+          !/^Sent\b/i.test(message.label) &&
+          words.every((word) =>
+            `${message.sender} ${message.from} ${message.subject} ${message.body}`
+              .toLowerCase()
+              .includes(word),
+          ),
+      )
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }
   async ensureSample(owner: string, actions: ActionService) {
     if (this.config.mode !== "sample") return;
     const active = this.seeding.get(owner);

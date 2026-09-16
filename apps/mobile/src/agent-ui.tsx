@@ -45,7 +45,7 @@ import {
   ErrorNotice,
   Field,
   LinkRow,
-  Orb,
+  Mascot,
   resultSummary,
   SectionHeading,
   Sheet,
@@ -1773,7 +1773,7 @@ export function AppsScreen() {
                     backgroundColor: avatar === item ? colors.sky : colors.canvas,
                   }}
                 >
-                  <Orb size={62} variant={item} />
+                  <Mascot size={62} variant={item} />
                 </Pressable>
               ))}
             </View>

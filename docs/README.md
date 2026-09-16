@@ -2,7 +2,7 @@
 
 ## Watch OpenMuse
 
-[iPhone demo · 38 seconds](../assets/demos/2026-09-15/mobile.mp4) · [Web demo · 40 seconds](../assets/demos/2026-09-15/web.mp4) · [Recording notes and reproduction](DEMO.md)
+[iPhone demo · 38 seconds](../assets/demos/2026-09-16/mobile.mp4) · [Web demo · 42 seconds](../assets/demos/2026-09-16/web.mp4) · [Recording notes and reproduction](DEMO.md)
 
 The demos follow a request from chat to the agent's inline browser, then show how to take control of that session. The composer uses one control for sending and stopping a reply.
 

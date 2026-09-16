@@ -19,6 +19,8 @@ const pageSchema = z.object({
 });
 
 function targetUrl(prompt: string): string | undefined {
+  if (/monterey|aquarium/i.test(prompt))
+    return "https://www.montereybayaquarium.org/visit/exhibits";
   if (/copilotkit\.ai/i.test(prompt)) return "https://copilotkit.ai";
   if (/hacker\s*news|news\.ycombinator\.com|cool stuff/i.test(prompt))
     return "https://news.ycombinator.com";
@@ -51,6 +53,18 @@ function summarizePage(message: ChatMessage): FixtureResponse {
       .filter((line): line is string => Boolean(line))
       .slice(0, 3);
     introduction = "From the current Hacker News front page:";
+  } else if (new URL(page.url).hostname.endsWith("montereybayaquarium.org")) {
+    excerpts = lines
+      .flatMap((line, index) => {
+        if (lines[index - 1] !== "EXHIBIT" || !/^(Kelp Forest|Open Sea|Sea Otters)$/i.test(line))
+          return [];
+        const description = lines[index + 1];
+        return [
+          description && description !== "Explore exhibit" ? `${line}: ${description}` : line,
+        ];
+      })
+      .slice(0, 3);
+    introduction = "Exhibits from the aquarium’s own guide:";
   } else {
     excerpts = lines
       .filter((line) => line.length >= 45 && /agent|copilotkit|ag.ui|framework/i.test(line))
@@ -71,19 +85,107 @@ function summarizePage(message: ChatMessage): FixtureResponse {
   };
 }
 
-/** Script only the model: the app executes browse_web against its real browser worker. */
+function turnResult(turn: ChatMessage[], name: string, prefix: string) {
+  const ids = new Set(
+    turn.flatMap((message) =>
+      (message.tool_calls ?? [])
+        .filter((call) => call.function.name === name)
+        .map((call) => call.id),
+    ),
+  );
+  return turn.findLast(
+    (message) =>
+      message.role === "tool" &&
+      message.tool_call_id &&
+      (ids.has(message.tool_call_id) || message.tool_call_id.startsWith(prefix)),
+  );
+}
+
+function parseResult(message: ChatMessage): unknown {
+  try {
+    return JSON.parse(getTextContent(message.content) ?? "");
+  } catch {
+    return undefined;
+  }
+}
+
+function demoMailResponse(request: ChatCompletionRequest, turn: ChatMessage[]): FixtureResponse {
+  const read = turnResult(turn, "read_mail_thread", "call_openmuse_demo_mail_read_");
+  if (read) {
+    const parsed = z
+      .object({
+        messages: z.array(z.object({ sender: z.string(), subject: z.string(), body: z.string() })),
+      })
+      .safeParse(parseResult(read));
+    const message = parsed.success ? parsed.data.messages.at(-1) : undefined;
+    if (!message)
+      return {
+        content: "I couldn’t read the school-trip email. Check the mail result and try again.",
+      };
+    const paragraphs = message.body
+      .split(/\n\s*\n/)
+      .map((text) => text.trim())
+      .filter((text) => text.length > 40 && !/local workspace/i.test(text))
+      .slice(0, 2);
+    if (!paragraphs.length)
+      return { content: "The email was found, but it did not include readable trip details." };
+    return {
+      content: `From ${message.sender}:\n“${message.subject}”\n\n${paragraphs.join("\n\n")}\n\nI can look up the aquarium next.`,
+    };
+  }
+  const search = turnResult(turn, "search_mail", "call_openmuse_demo_mail_search_");
+  if (search) {
+    const parsed = z
+      .object({ matches: z.array(z.object({ threadId: z.string(), subject: z.string() })) })
+      .safeParse(parseResult(search));
+    if (!parsed.success)
+      return { content: "I couldn’t check your inbox. Check the mail connection and try again." };
+    const match = parsed.data.matches[0];
+    if (!match) return { content: "I didn’t find a school-trip email in the connected mailbox." };
+    if (!request.tools?.some((tool) => tool.function.name === "read_mail_thread"))
+      return {
+        content: "The email reader is unavailable. Open Mail to read the matching message.",
+      };
+    return {
+      content: "I found the school’s reminder. I’ll read the details.",
+      toolCalls: [
+        {
+          id: `call_openmuse_demo_mail_read_${randomUUID()}`,
+          name: "read_mail_thread",
+          arguments: JSON.stringify({ threadId: match.threadId }),
+        },
+      ],
+    };
+  }
+  if (!request.tools?.some((tool) => tool.function.name === "search_mail"))
+    return { content: "Mail search is unavailable. Connect the mailbox before checking email." };
+  return {
+    content: "I’ll check your inbox for the school trip.",
+    toolCalls: [
+      {
+        id: `call_openmuse_demo_mail_search_${randomUUID()}`,
+        name: "search_mail",
+        arguments: JSON.stringify({ query: "aquarium" }),
+      },
+    ],
+  };
+}
+
+/** Script only the model: the app executes real mailbox reads and browser tools. */
 export function demoResponse(request: ChatCompletionRequest): FixtureResponse {
   const userIndex = request.messages.findLastIndex((message) => message.role === "user");
   const user = request.messages[userIndex];
-  const url = targetUrl(user ? (getTextContent(user.content) ?? "") : "");
+  const prompt = user ? (getTextContent(user.content) ?? "") : "";
+  const turn = request.messages.slice(userIndex + 1);
+  if (/email|inbox/i.test(prompt)) return demoMailResponse(request, turn);
+  const url = targetUrl(prompt);
   if (!url)
     return {
       content:
-        "This recording demo supports “Find cool stuff on Hacker News” and “Summarize https://copilotkit.ai”.",
+        "Try “Find cool stuff on Hacker News”, “Summarize copilotkit.ai”, “Check my emails for the school trip”, or “Research Monterey Bay Aquarium”.",
     };
 
   // Only the latest turn can satisfy this request; older browser reads cannot suppress a new visit.
-  const turn = request.messages.slice(userIndex + 1);
   const calls = new Set(
     turn.flatMap((message) =>
       (message.tool_calls ?? [])
@@ -104,7 +206,9 @@ export function demoResponse(request: ChatCompletionRequest): FixtureResponse {
   return {
     content: url.includes("ycombinator")
       ? "I’ll open Hacker News and read the front page."
-      : "I’ll open CopilotKit and read the page.",
+      : url.includes("montereybayaquarium")
+        ? "I’ll research the exhibits on the aquarium’s own website."
+        : "I’ll open CopilotKit and read the page.",
     toolCalls: [
       {
         id: `call_openmuse_demo_browse_${randomUUID()}`,

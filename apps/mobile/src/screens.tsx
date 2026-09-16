@@ -50,7 +50,7 @@ import {
   ErrorNotice,
   IconButton,
   LinkRow,
-  Orb,
+  Mascot,
   relativeDate,
   resultSummary,
   SectionHeading,
@@ -141,7 +141,7 @@ export function TodayScreen() {
                 borderColor: "#C8DBE6",
               }}
             />
-            <Orb size={94} />
+            <Mascot size={94} />
             <View
               style={[
                 s.row,
