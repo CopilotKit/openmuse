@@ -30,6 +30,19 @@ export interface Config {
   computerDeploymentId?: string;
   allowedOrigins: string[];
 }
+
+const missingIntelligenceKeyMessage =
+  "Live mode requires CPK_INTELLIGENCE_API_KEY for durable Rich Threads. " +
+  "Run `npx copilotkit@latest login` and `npx copilotkit@latest project select`, " +
+  "then set the generated server-only key. " +
+  "See https://docs.copilotkit.ai/intelligence/connect-your-runtime";
+
+export function assertApiDeploymentConfig(config: Config): void {
+  if (config.mode === "live" && !config.intelligenceApiKey?.trim()) {
+    throw new Error(missingIntelligenceKeyMessage);
+  }
+}
+
 export function readConfig(): Config {
   const mode = process.env.WORKSPACE_MODE ?? "sample";
   if (mode !== "sample" && mode !== "live")
