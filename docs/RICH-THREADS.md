@@ -32,9 +32,9 @@ Automatic thread naming is disabled; conversations can be renamed in the menu. I
 
 ## Automatic Learning
 
-Live mode also assigns new interactive `default` agent Threads to the configured Learning container. Operators can review repeated workflow evidence, publish Skills, and deliver those Skills back to fresh built-in chat invocations. The full setup, recording, review, delivery, and troubleshooting runbook lives in [Automatic Learning operator guide](LEARNING.md).
+Live mode also assigns new interactive `default` agent Threads to the configured Learning container. That collection path includes live Threads routed to an external raw AG-UI agent. Operators can review repeated workflow evidence and publish Skills. OpenMuse-owned delivery returns those Skills to fresh built-in model chat invocations; an external AG-UI agent server owns loading and applying published Skills for its own runs. The full setup, recording, review, delivery, and troubleshooting runbook lives in [Automatic Learning operator guide](LEARNING.md).
 
-Background task-worker runs and external raw AG-UI agent skill delivery are outside the Rich Threads setup described here.
+Background task-worker runs remain outside the Rich Threads Learning collection described here.
 
 ## Agent computer
 

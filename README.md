@@ -56,7 +56,7 @@ The computer combines **persistent Chromium and an optional Linux workspace**. T
 | **Gmail & Calendar** | Google OAuth adapters, complete mail threads, drafts/attachments, calendar discovery, and reviewed event creation/update/deletion. Live credentials required. |
 | **Personal context** | Editable name, tone, avatar, and memories. Background-update preferences and durable in-app notifications. |
 | **Rich Threads** | CopilotKit Intelligence persistence for live deployments, with a stable main conversation, side chats, renaming, archiving, restoring, and replay. A server-only project key is required in live mode; sample mode uses local history. |
-| **Automatic Learning** | Production readiness for repeated OpenMuse workflows: completed live Rich Threads can become reviewed, published Skills for the built-in chat agent. A focused server-side Learning container is required in live mode. |
+| **Automatic Learning** | Production readiness for repeated OpenMuse workflows: completed live `default` Rich Threads can become reviewed, published Skills. OpenMuse-owned delivery applies to the built-in model chat agent; external AG-UI agent servers own their own delivery. A focused server-side Learning container is required in live mode. |
 
 The [feature inventory](docs/FEATURES.md) describes implemented capabilities and planned extensions. Health/bank/social connectors, device push, voice, generated executable tools, and automatic reservations/payments are on the [roadmap](ROADMAP.md).
 
@@ -138,7 +138,7 @@ No hidden retry occurs after an uncertain external write. Review its provider ou
 
 Live deployments require `CPK_INTELLIGENCE_API_KEY` on the API server for CopilotKit Intelligence conversation persistence and replay. Create or select a project with `npx copilotkit@latest login` and `npx copilotkit@latest project select`, set the generated server-only key, and restart the API. The native menu uses `useThreads`; rich tool results link back to saved tasks, documents, and browser sessions.
 
-Automatic Learning also requires a focused `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` in live mode. OpenMuse assigns new live Threads for the built-in interactive `default` model assistant to that container, then delivers reviewed, published Skills back to fresh built-in chat invocations. Background tasks and external AG-UI skill delivery are outside this increment; an external agent server owns its own delivery setup.
+Automatic Learning also requires a focused `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` in live mode. OpenMuse assigns new live Threads for the interactive `default` runtime agent to that container, including Threads routed to an external raw AG-UI agent. OpenMuse-owned delivery sends reviewed, published Skills back to fresh built-in model chat invocations. Background task-worker evidence and external AG-UI skill delivery are outside this increment; an external agent server owns its own delivery setup.
 
 Sample mode can leave both Intelligence values unset and keeps one conversation in the local database. Intelligence is a separate service and is not included in this repository's MIT license. No project key is shipped. [Configuration and validation boundaries](docs/RICH-THREADS.md) and the [Automatic Learning runbook](docs/LEARNING.md).
 
@@ -148,11 +148,14 @@ Sample mode can leave both Intelligence values unset and keeps one conversation 
 flowchart TD
   Client[Expo / React Native / Web] -->|AG-UI and authenticated API| API[Hono + CopilotKit runtime]
   API --> BuiltInChat[Built-in default chat agent]
+  API --> ExternalAgent[Optional external AG-UI default agent]
   API --> Tasks[Durable task worker]
   BuiltInChat --> Threads[CopilotKit Intelligence required in live mode]
+  ExternalAgent --> Threads
   Threads --> Learning[Automatic Learning container]
   Learning --> Skills[Reviewed published Skills]
   Skills --> BuiltInChat
+  Skills -. external server owns delivery .-> ExternalAgent
   API --> Store[(PGlite or PostgreSQL)]
   Tasks --> Store
   Tasks --> Review[Stored action review]
