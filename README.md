@@ -1,4 +1,4 @@
-<div align="center">
+  <div align="center">
 
 # OpenMuse
 
@@ -12,11 +12,11 @@ Built with CopilotKit React Native for iOS, Android, and web.
 [![CI](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Mobile demo · 38 seconds**
+**Mobile demo**
 
 https://github.com/user-attachments/assets/aeac31ad-6ffd-4594-9327-01aa1f423516
 
-**Web demo · 42 seconds**
+**Web demo**
 
 https://github.com/user-attachments/assets/9467dc16-c14d-44eb-854c-c5e0ba8c5940
 
