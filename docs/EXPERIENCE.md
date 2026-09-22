@@ -1,6 +1,6 @@
 # OpenMuse interaction design
 
-OpenMuse follows the interaction principles in [Meta's design essay](https://introducing.muse.ai/) with an original visual identity.
+OpenMuse keeps conversation, ongoing work, and user control together in a shared native and web interface.
 
 ## Conversation and work
 
@@ -23,4 +23,4 @@ An airy canvas, distinct gray and sky-blue message bubbles, large touch targets,
 
 ## Boundaries
 
-The computer provides persistent Chromium, documents, and an optional Linux container with a terminal and filesystem. The terminal has no network access, while the browser handles public web access. It is not Meta's Secure VM or a graphical desktop. Live Rich Threads, model reasoning and Google accounts require credentials. This design does not imply parity with Meta's full product. See [computer setup](COMPUTER.md).
+The computer provides persistent Chromium, documents, and an optional Linux container with a terminal and filesystem. The terminal has no network access, while the browser handles public web access. It is not a full operating-system VM or a graphical desktop. Live Rich Threads, model reasoning and Google accounts require credentials. See [computer setup](COMPUTER.md).

@@ -110,4 +110,4 @@ python3 -m http.server 8081 --bind 127.0.0.1 --directory apps/mobile/dist/web
 
 Use port 8081 when the development server is stopped. `--clear` ensures the export uses the requested API URL. Open the page in a clean desktop browser and record the two prompts and takeover flow at 1440 × 810 or larger. Describe the model setup in the accompanying recording notes. Scroll to keep the browser card and resulting text readable.
 
-The original [75-second alpha walkthrough](https://github.com/jerelvelarde/openmuse/releases/download/v0.1.0-alpha/openmuse-demo.mp4) remains available as a historical release archive. OpenMuse's [capybara artwork and provenance](../apps/mobile/assets/README.md) are included; Meta reference screenshots and mascot are not redistributed.
+The original [75-second alpha walkthrough](https://github.com/jerelvelarde/openmuse/releases/download/v0.1.0-alpha/openmuse-demo.mp4) remains available as a historical release archive. OpenMuse's [capybara artwork and provenance](../apps/mobile/assets/README.md) are included under the repository's MIT license.

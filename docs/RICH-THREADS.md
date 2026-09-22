@@ -1,6 +1,6 @@
 # CopilotKit Rich Threads and the agent computer
 
-OpenMuse uses `@copilotkit/react-native/headless` for its custom Muse-inspired interface. Chat messages, tool cards and task-linked documents render through CopilotKit's AG-UI agent and tool hooks.
+OpenMuse uses `@copilotkit/react-native/headless` for its custom native and web interface. Chat messages, tool cards and task-linked documents render through CopilotKit's AG-UI agent and tool hooks.
 
 ## Rich Threads
 

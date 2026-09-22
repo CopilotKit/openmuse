@@ -51,4 +51,4 @@ The workspace is a Docker container running as a nonroot user, with a read-only 
 
 Terminal networking is disabled. The existing browser worker handles public web access through its own destination checks; see its [network boundary](../apps/worker/README.md#network-boundary). Browser profiles and workspace files have separate storage and lifecycle controls.
 
-This is a self-hosted, single-owner computer environment. Docker isolation is not Meta Secure VM, a hostile-tenant security guarantee, or an integration with the AgentVM service. The optional Colima VM provides the Linux host on macOS; the application still manages a Docker container within it.
+This is a self-hosted, single-owner computer environment. Docker isolation does not provide a dedicated operating-system VM or a hostile-tenant security guarantee. The optional Colima VM provides the Linux host on macOS; the application still manages a Docker container within it.

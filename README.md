@@ -36,7 +36,7 @@ The 38-second iPhone and 42-second desktop web demos show the current interface,
 
 ## What it is
 
-OpenMuse is a personal-agent application inspired by Meta Muse and patterned after [OpenBot](https://github.com/CopilotKit/OpenBot)'s emphasis on an agent's computer, visible work, and rich results. It runs its own server, task worker, and browser worker. You can inspect and change the source under the MIT license.
+OpenMuse is a personal-agent application with an agent computer, visible work, and rich results. It runs its own server, task worker, and browser worker. You can inspect and change the source under the MIT license.
 
 The computer combines **persistent Chromium and an optional Linux workspace**. The agent can browse public pages, run commands in its own container, work with files, and move PDFs between the computer and the app. You can open its browser or terminal and continue the work. Graphical desktops and autonomous checkout remain future work.
 
@@ -55,7 +55,7 @@ The computer combines **persistent Chromium and an optional Linux workspace**. T
 | **Personal context** | Editable name, tone, avatar, and memories. Background-update preferences and durable in-app notifications. |
 | **Rich Threads** | Optional CopilotKit Intelligence persistence with a stable main conversation, side chats, renaming, archiving, restoring, and replay. A project key is required; live acceptance is pending. |
 
-The [feature inventory](docs/FEATURES.md) maps the Muse references to the implementation. Health/bank/social connectors, device push, voice, generated executable tools, and automatic reservations/payments are on the [roadmap](ROADMAP.md).
+The [feature inventory](docs/FEATURES.md) describes implemented capabilities and planned extensions. Health/bank/social connectors, device push, voice, generated executable tools, and automatic reservations/payments are on the [roadmap](ROADMAP.md).
 
 ## Quick start
 
@@ -119,7 +119,7 @@ docker build -t openmuse-computer:local apps/computer
 COMPUTER_ENABLED=true pnpm dev
 ```
 
-The API needs access to the Docker CLI and engine. Commands run in a nonroot container with no host-directory mounts or credentials. A named `/workspace` volume retains files when stopped. Terminal networking is disabled; public web access uses the browser worker. Commands have a 30-second limit and saved output/exit receipts. **Files** supports folders, text editing, and PDF transfer to/from Documents. This is a Linux container, not Meta Secure VM. [Setup, Colima option, and boundaries](docs/COMPUTER.md).
+The API needs access to the Docker CLI and engine. Commands run in a nonroot container with no host-directory mounts or credentials. A named `/workspace` volume retains files when stopped. Terminal networking is disabled; public web access uses the browser worker. Commands have a 30-second limit and saved output/exit receipts. **Files** supports folders, text editing, and PDF transfer to/from Documents. This is a Linux container, not a full operating-system VM. [Setup, Colima option, and boundaries](docs/COMPUTER.md).
 
 ### Application storage
 
@@ -191,4 +191,4 @@ Platform build scripts export JavaScript/Hermes bundles; they do not produce sig
 
 Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), [ROADMAP.md](ROADMAP.md), and the [security policy](SECURITY.md).
 
-MIT licensed. OpenMuse is independent of Meta and is not an official CopilotKit product. Its original interface and fictional assets are included; Meta's screenshots and mascot are not redistributed. Website, email, and document content supplies evidence, not permission to act.
+MIT licensed. OpenMuse is not an official CopilotKit product. Its original interface and fictional assets are included. Website, email, and document content supplies evidence, not permission to act.

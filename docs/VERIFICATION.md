@@ -1,6 +1,6 @@
 # Release verification
 
-September 16, 2026 · Capybara and distinct mobile/web demos, following the agent browser release · local fictional workspace. This records exercised behavior and its limits; it is not full Meta Muse parity.
+September 16, 2026 · Capybara and distinct mobile/web demos, following the agent browser release · local fictional workspace. This records exercised behavior and its limits; it does not establish that every planned capability is complete.
 
 ## Automated checks
 
