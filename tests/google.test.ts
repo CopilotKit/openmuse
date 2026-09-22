@@ -2,17 +2,23 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { emailDraftSchema, eventDraftSchema } from "../packages/domain/src/index.ts";
 import {
+  DEFAULT_RETRY_DELAY_MS,
   GoogleApiError,
   GoogleClient,
   MAX_ATTACHMENT_BYTES,
+  MAX_READ_RETRIES,
   MAX_TOTAL_ATTACHMENT_BYTES,
   OutcomeUnknownError,
 } from "../packages/integrations/src/google.ts";
 
-function clientWith(handler: (request: Request) => Response | Promise<Response>) {
+function clientWith(
+  handler: (request: Request) => Response | Promise<Response>,
+  sleep?: (ms: number) => Promise<void>,
+) {
   return new GoogleClient({
     getAccessToken: async () => "synthetic-access-token",
     fetch: async (input, init) => handler(new Request(input, init)),
+    sleep,
   });
 }
 const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -757,4 +763,98 @@ test("single-event validation is repeated at execution and read failures never d
   });
   await assert.rejects(failing.deleteEvent("primary", "event-1"), GoogleApiError);
   assert.equal(writes, 0);
+});
+
+test("GET reads retry on HTTP 429 rate limit with Retry-After header and succeed", async () => {
+  let attempts = 0;
+  const sleeps: number[] = [];
+  const client = clientWith(
+    () => {
+      attempts++;
+      if (attempts === 1) {
+        return new Response(JSON.stringify({ error: { message: "Rate limit exceeded" } }), {
+          status: 429,
+          headers: { "Content-Type": "application/json", "Retry-After": "3" },
+        });
+      }
+      return json({
+        items: [{ id: "c1", summary: "Personal", timeZone: "UTC", accessRole: "owner" }],
+      });
+    },
+    async (ms) => {
+      sleeps.push(ms);
+    },
+  );
+  const calendars = await client.listCalendars();
+  assert.equal(attempts, 2);
+  assert.deepEqual(sleeps, [3000]);
+  assert.equal(calendars.length, 1);
+});
+
+test("GET reads retry transient 503 and back off up to MAX_READ_RETRIES before failing", async () => {
+  let attempts = 0;
+  const sleeps: number[] = [];
+  const client = clientWith(
+    () => {
+      attempts++;
+      return new Response(JSON.stringify({ error: { message: "Backend temporarily unavailable" } }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+    async (ms) => {
+      sleeps.push(ms);
+    },
+  );
+  await assert.rejects(
+    client.listCalendars(),
+    (error: unknown) =>
+      error instanceof GoogleApiError &&
+      error.status === 503 &&
+      /Backend temporarily unavailable/.test(error.message),
+  );
+  assert.equal(attempts, 1 + MAX_READ_RETRIES);
+  assert.deepEqual(sleeps, [DEFAULT_RETRY_DELAY_MS, DEFAULT_RETRY_DELAY_MS * 2]);
+});
+
+test("GET reads retry transient network error and recover", async () => {
+  let attempts = 0;
+  const sleeps: number[] = [];
+  const client = clientWith(
+    () => {
+      attempts++;
+      if (attempts === 1) throw new TypeError("network socket disconnected");
+      return json({ items: [eventResponse] });
+    },
+    async (ms) => {
+      sleeps.push(ms);
+    },
+  );
+  const events = await client.listEvents();
+  assert.equal(attempts, 2);
+  assert.deepEqual(sleeps, [DEFAULT_RETRY_DELAY_MS]);
+  assert.equal(events.length, 1);
+});
+
+test("non-retryable client errors on GET fail immediately without retrying", async () => {
+  let attempts = 0;
+  const sleeps: number[] = [];
+  const client = clientWith(
+    () => {
+      attempts++;
+      return new Response(JSON.stringify({ error: { message: "Calendar not found" } }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+    async (ms) => {
+      sleeps.push(ms);
+    },
+  );
+  await assert.rejects(
+    client.listCalendars(),
+    (error: unknown) => error instanceof GoogleApiError && error.status === 404,
+  );
+  assert.equal(attempts, 1);
+  assert.equal(sleeps.length, 0);
 });
