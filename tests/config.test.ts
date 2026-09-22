@@ -26,6 +26,25 @@ function liveConfig(
   };
 }
 
+function withEnv<T>(overrides: Record<string, string>, run: () => T): T {
+  const previous = new Map<string, string | undefined>();
+  for (const key of Object.keys(overrides)) {
+    previous.set(key, process.env[key]);
+    process.env[key] = overrides[key];
+  }
+  try {
+    return run();
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
 const missingKeyMessage =
   "Live mode requires CPK_INTELLIGENCE_API_KEY for durable Rich Threads. " +
   "Run `npx copilotkit@latest login` and `npx copilotkit@latest project select`, " +
@@ -83,6 +102,7 @@ test("live API configuration rejects an invalid Learning container ID", () => {
     "-openmuse",
     "openmuse-",
     "openmuse--assistant",
+    " openmuse ",
     "a".repeat(65),
   ]) {
     assert.throws(
@@ -96,7 +116,7 @@ test("live API configuration rejects an invalid Learning container ID", () => {
 });
 
 test("live API configuration accepts a non-empty Intelligence key", () => {
-  for (const containerId of ["openmuse", "openmuse-assistant", "assistant-2"]) {
+  for (const containerId of ["openmuse", "openmuse-assistant", "assistant-2", "a".repeat(64)]) {
     assert.doesNotThrow(() =>
       assertApiDeploymentConfig(liveConfig({ intelligenceLearningContainerId: containerId })),
     );
@@ -108,15 +128,15 @@ test("sample API configuration remains key-free", () => {
 });
 
 test("readConfig reads the Learning container ID from the environment", () => {
-  const previous = process.env.CPK_INTELLIGENCE_LEARNING_CONTAINER_ID;
-  process.env.CPK_INTELLIGENCE_LEARNING_CONTAINER_ID = "openmuse-assistant";
-  try {
-    assert.equal(readConfig().intelligenceLearningContainerId, "openmuse-assistant");
-  } finally {
-    if (previous === undefined) {
-      delete process.env.CPK_INTELLIGENCE_LEARNING_CONTAINER_ID;
-    } else {
-      process.env.CPK_INTELLIGENCE_LEARNING_CONTAINER_ID = previous;
-    }
-  }
+  withEnv(
+    {
+      AGENT_BACKEND: "sample",
+      CPK_INTELLIGENCE_LEARNING_CONTAINER_ID: "openmuse-assistant",
+      HOST: "127.0.0.1",
+      WORKSPACE_MODE: "sample",
+    },
+    () => {
+      assert.equal(readConfig().intelligenceLearningContainerId, "openmuse-assistant");
+    },
+  );
 });
