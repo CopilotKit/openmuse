@@ -2,7 +2,7 @@
 
 # OpenMuse
 
-**A personal agent with a browser, terminal, files, and work that keeps going and works with any agent harness.**
+**A personal agent with a browser, terminal, files, and work that keeps going. Compatible with any agent harness.**
 
 Ask for an outcome. Follow the plan, review actions, and come back to the result.
 Built with CopilotKit React Native for iOS, Android, and web.
@@ -11,6 +11,8 @@ Built with CopilotKit React Native for iOS, Android, and web.
 
 [![CI](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+Clone this template and customize it however you want.
 
 **Mobile demo**
 
