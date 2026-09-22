@@ -43,11 +43,9 @@ const agent = () =>
   });
 
 test("a transient provider failure is retried and the run completes", async (t) => {
-  const { requests } = await modelFixture(
-    t,
-    () => undefined,
-    (index) => (index === 0 ? 500 : undefined),
-  );
+  const { requests } = await modelFixture(t, () => undefined, {
+    errorStatus: (index) => (index === 0 ? 500 : undefined),
+  });
   const outcome = await run(agent());
   assert.equal(outcome.error, undefined);
   assert.equal(outcome.finished, true);
@@ -56,11 +54,7 @@ test("a transient provider failure is retried and the run completes", async (t) 
 });
 
 test("a non-retryable provider failure fails fast without a retry", async (t) => {
-  const { requests } = await modelFixture(
-    t,
-    () => undefined,
-    () => 400,
-  );
+  const { requests } = await modelFixture(t, () => undefined, { errorStatus: () => 400 });
   const outcome = await run(agent());
   assert.equal(outcome.finished, false);
   assert.match(outcome.error ?? "", /Fixture provider failure/);
@@ -68,12 +62,26 @@ test("a non-retryable provider failure fails fast without a retry", async (t) =>
 });
 
 test("retries give up after the configured attempts", async (t) => {
-  const { requests } = await modelFixture(
-    t,
-    () => undefined,
-    () => 500,
-  );
+  const { requests } = await modelFixture(t, () => undefined, { errorStatus: () => 500 });
   const outcome = await run(agent());
   assert.equal(outcome.finished, false);
   assert.equal(requests.length, MODEL_MAX_RETRIES + 1, "retries are bounded");
+});
+
+test("a connection drop after the stream starts is retried and the run recovers", async (t) => {
+  const { requests } = await modelFixture(t, () => undefined, {
+    dropAfterStart: (index) => index === 0,
+  });
+  const outcome = await run(agent());
+  assert.equal(outcome.error, undefined);
+  assert.equal(outcome.finished, true);
+  assert.equal(requests.length, 2, "the dropped stream is retried once and recovers");
+});
+
+test("a provider error part is retried within the same bound before the run errors", async (t) => {
+  const { requests } = await modelFixture(t, () => undefined, { errorPart: () => true });
+  const outcome = await run(agent());
+  assert.equal(outcome.finished, false);
+  assert.match(outcome.error ?? "", /response.failed/);
+  assert.equal(requests.length, MODEL_MAX_RETRIES + 1, "error parts obey the same bound");
 });

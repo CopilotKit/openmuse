@@ -9,8 +9,13 @@ type ModelCall = { name: string; arguments: object };
 export async function modelFixture(
   t: TestContext,
   reply: (index: number) => ModelCall | undefined | Promise<ModelCall | undefined>,
-  errorStatus?: (index: number) => number | undefined,
+  options: {
+    errorStatus?: (index: number) => number | undefined;
+    dropAfterStart?: (index: number) => boolean;
+    errorPart?: (index: number) => boolean;
+  } = {},
 ) {
+  const { errorStatus, dropAfterStart, errorPart } = options;
   const requests: { path: string; body: string }[] = [];
   const server = createServer(async (request, response) => {
     let body = "";
@@ -25,6 +30,38 @@ export async function modelFixture(
           error: { message: "Fixture provider failure", type: "server_error" },
         }),
       );
+      return;
+    }
+    if (dropAfterStart?.(index)) {
+      // Deliver a valid stream start, then fail the connection before any
+      // assistant output reaches the client.
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.write(
+        `data: ${JSON.stringify({
+          type: "response.created",
+          response: {
+            id: `drop-${index}`,
+            created_at: 1000,
+            model: "fixture",
+            status: "in_progress",
+          },
+        })}\n\n`,
+      );
+      setTimeout(() => response.socket?.destroy(), 120);
+      return;
+    }
+    if (errorPart?.(index)) {
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.write(
+        `data: ${JSON.stringify({
+          type: "response.failed",
+          sequence_number: 1,
+          response: {
+            error: { code: "server_error", message: "Provider reported response.failed" },
+          },
+        })}\n\n`,
+      );
+      response.end("data: [DONE]\n\n");
       return;
     }
     const call = await reply(index);
