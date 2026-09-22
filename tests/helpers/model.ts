@@ -9,6 +9,7 @@ type ModelCall = { name: string; arguments: object };
 export async function modelFixture(
   t: TestContext,
   reply: (index: number) => ModelCall | undefined | Promise<ModelCall | undefined>,
+  errorStatus?: (index: number) => number | undefined,
 ) {
   const requests: { path: string; body: string }[] = [];
   const server = createServer(async (request, response) => {
@@ -16,6 +17,16 @@ export async function modelFixture(
     for await (const chunk of request) body += chunk;
     const index = requests.length;
     requests.push({ path: request.url ?? "", body });
+    const status = errorStatus?.(index);
+    if (status !== undefined) {
+      response.writeHead(status, { "Content-Type": "application/json" });
+      response.end(
+        JSON.stringify({
+          error: { message: "Fixture provider failure", type: "server_error" },
+        }),
+      );
+      return;
+    }
     const call = await reply(index);
     response.writeHead(200, { "Content-Type": "text/event-stream" });
     const emit = (type: string, value: object) =>
