@@ -19,6 +19,7 @@ export interface Config {
   agentUrl?: string;
   agentToken?: string;
   intelligenceApiKey?: string;
+  intelligenceLearningContainerId?: string;
   googleClientId?: string;
   googleClientSecret?: string;
   googleRedirectUri: string;
@@ -37,9 +38,31 @@ const missingIntelligenceKeyMessage =
   "then set the generated server-only key. " +
   "See https://docs.copilotkit.ai/intelligence/connect-your-runtime";
 
+const missingLearningContainerMessage =
+  "Live mode requires CPK_INTELLIGENCE_LEARNING_CONTAINER_ID for Automatic Learning. " +
+  "Create a focused container in the Intelligence project's Learning area, then set its stable ID. " +
+  "See https://docs.copilotkit.ai/learning";
+
+const invalidLearningContainerMessage =
+  "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID must contain 1-64 lowercase letters, numbers, or single hyphens, " +
+  "with no leading, trailing, or repeated hyphen. " +
+  "See https://docs.copilotkit.ai/learning";
+
+const learningContainerIdPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
 export function assertApiDeploymentConfig(config: Config): void {
   if (config.mode === "live" && !config.intelligenceApiKey?.trim()) {
     throw new Error(missingIntelligenceKeyMessage);
+  }
+  if (config.mode !== "live") return;
+  if (!config.intelligenceLearningContainerId?.trim()) {
+    throw new Error(missingLearningContainerMessage);
+  }
+  if (
+    config.intelligenceLearningContainerId.length > 64 ||
+    !learningContainerIdPattern.test(config.intelligenceLearningContainerId)
+  ) {
+    throw new Error(invalidLearningContainerMessage);
   }
 }
 
@@ -68,6 +91,7 @@ export function readConfig(): Config {
     agentUrl: process.env.AGENT_URL,
     agentToken: process.env.AGENT_TOKEN,
     intelligenceApiKey: process.env.CPK_INTELLIGENCE_API_KEY,
+    intelligenceLearningContainerId: process.env.CPK_INTELLIGENCE_LEARNING_CONTAINER_ID,
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
     googleRedirectUri: `${publicUrl}/api/google/callback`,
