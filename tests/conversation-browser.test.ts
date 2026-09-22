@@ -2,12 +2,19 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test, { type TestContext } from "node:test";
 import { EventSchemas, EventType, type RunAgentInput } from "@ag-ui/core";
+import {
+  type BuiltInAgentLearnedSkillsOptions,
+  CopilotKitIntelligence,
+  type GetLearnedSkillsSnapshotRequest,
+} from "@copilotkit/runtime/v2";
 import { lastValueFrom, toArray } from "rxjs";
 import { createApp } from "../apps/server/src/app.ts";
 import { ConversationAgent } from "../apps/server/src/engine/conversation.ts";
 import { browserFixture } from "./helpers/browser.ts";
 import { modelFixture } from "./helpers/model.ts";
 
+const skillArchiveBase64 =
+  "UEsDBBQAAAAAAAAAIVB5aqleVQEAAFUBAAANAAAAbWFuaWZlc3QuanNvbnsic2NoZW1hVmVyc2lvbiI6MSwicmV2aXNpb24iOiJyMSIsInNraWxscyI6W3sibmFtZSI6InJlZnVuZC1wb2xpY3kiLCJkZXNjcmlwdGlvbiI6IlVzZSB3aGVuIGhhbmRsaW5nIHJlZnVuZHMuIiwiZmlsZXMiOlt7InBhdGgiOiJTS0lMTC5tZCIsInNpemUiOjQ5LCJzaGEyNTYiOiI2ZWQ0MjVhYjc5NzQ5N2MxNTM3YjRmOTg4MTE5OGU4NjU5Y2UyZjUzYjE3OTZhMDFiZmI3NmU0NGZhMDIyZTM5In0seyJwYXRoIjoicmVmZXJlbmNlLnR4dCIsInNpemUiOjM1LCJzaGEyNTYiOiI0ZWYxNGYwOTk4OTQ4YmQ1ZmRiZDliZWMyMzYyMmM5YjJiYmI3M2ZkZDQzNGFmYzg0ZjQxOWRiYjc1YzBiZDJjIn1dfV19UEsDBBQAAAAAAAAAIVAGIkDTMQAAADEAAAAWAAAAcmVmdW5kLXBvbGljeS9TS0lMTC5tZCMgUmVmdW5kIHBvbGljeQpVc2UgdGhlIHB1Ymxpc2hlZCByZWZ1bmQgcG9saWN5LgpQSwMEFAAAAAAAAAAhUNO6XG8jAAAAIwAAABsAAAByZWZ1bmQtcG9saWN5L3JlZmVyZW5jZS50eHRSZWZ1bmRzIGFyZSBhdmFpbGFibGUgZm9yIDMwIGRheXMuClBLAQIUAxQAAAAAAAAAIVB5aqleVQEAAFUBAAANAAAAAAAAAAAAAACAAQAAAABtYW5pZmVzdC5qc29uUEsBAhQDFAAAAAAAAAAhUAYiQNMxAAAAMQAAABYAAAAAAAAAAAAAAIABgAEAAHJlZnVuZC1wb2xpY3kvU0tJTEwubWRQSwECFAMUAAAAAAAAACFQ07pcbyMAAAAjAAAAGwAAAAAAAAAAAAAAgAHlAQAAcmVmdW5kLXBvbGljeS9yZWZlcmVuY2UudHh0UEsFBgAAAAADAAMAyAAAAEECAAAAAA==";
 const requestedUrl = "https://example.org/article";
 const observed = {
   url: "https://example.org/article/final",
@@ -26,7 +33,11 @@ function runInput(): RunAgentInput {
   };
 }
 
-async function chatFixture(t: TestContext, failure?: string) {
+async function chatFixture(
+  t: TestContext,
+  failure?: string,
+  learnedSkills?: BuiltInAgentLearnedSkillsOptions,
+) {
   const browserCalls: string[] = [];
   const fixture = await browserFixture(t, (path, body) => {
     browserCalls.push(path);
@@ -50,7 +61,7 @@ async function chatFixture(t: TestContext, failure?: string) {
     ...fixture,
     ...server,
     browserCalls,
-    conversation: new ConversationAgent(config, server.agent, "local-user"),
+    conversation: new ConversationAgent(config, server.agent, "local-user", learnedSkills),
   };
 }
 
@@ -127,6 +138,52 @@ test("chat browse_web emits an honest completed error result when navigation fai
   assert.ok(requests[1].body.includes("Public page could not be opened"));
   assert.deepEqual(fixture.browserCalls, ["/sessions"]);
   assert.equal((await fixture.db.list("local-user", "tasks")).length, 0);
+});
+
+test("chat loads a published Intelligence skill before model work", async (t) => {
+  const snapshotCalls: GetLearnedSkillsSnapshotRequest[] = [];
+  const intelligence = new CopilotKitIntelligence({ apiKey: "test-project-key-never-sent" });
+  intelligence.getLearnedSkillsSnapshot = async (request) => {
+    snapshotCalls.push(request);
+    return {
+      status: "snapshot",
+      bytes: Uint8Array.from(Buffer.from(skillArchiveBase64, "base64")),
+      revision: "r1",
+      etag: '"139773b71315c562db80ead7ec4318982cab1ddc6671d53c776a2eab55d9a775"',
+      contentType: "application/zip",
+    };
+  };
+  const { requests } = await modelFixture(t, (index) =>
+    index % 2 === 0
+      ? { name: "copilotkit_load_skill", arguments: { skill_name: "refund-policy" } }
+      : undefined,
+  );
+  const learnedSkills = {
+    client: intelligence,
+    containerId: "openmuse-assistant",
+    freshnessWindowMs: 0,
+  };
+  const fixture = await chatFixture(t, undefined, learnedSkills);
+  const input = runInput();
+  input.messages = [
+    { id: randomUUID(), role: "user", content: "Can I get a refund for my ticket?" },
+  ];
+
+  const events = (await lastValueFrom(fixture.conversation.run(input).pipe(toArray()))).map(
+    (event) => EventSchemas.parse(event),
+  );
+
+  assert.equal(snapshotCalls.length, 1);
+  assert.equal(snapshotCalls[0].containerId, "openmuse-assistant");
+  assert.ok(requests[0].body.includes("refund-policy"));
+  assert.ok(requests[0].body.includes("copilotkit_load_skill"));
+  assert.ok(requests[1].body.includes("Use the published refund policy"));
+  const result = events.find((event) => event.type === EventType.TOOL_CALL_RESULT);
+  assert.ok(result && result.type === EventType.TOOL_CALL_RESULT);
+  assert.match(result.content, /Use the published refund policy/);
+
+  await lastValueFrom(fixture.conversation.clone().run(input).pipe(toArray()));
+  assert.equal(snapshotCalls.length, 2);
 });
 
 test("unsubscribing from chat stops queued browser navigation and further model steps", async (t) => {
