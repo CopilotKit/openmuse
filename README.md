@@ -5,24 +5,27 @@
 **A personal agent with a browser, terminal, files, and work that keeps going.**
 
 Ask for an outcome. Follow the plan, review actions, and come back to the result.
-Built with CopilotKit React Native for iOS, Android, and web.
+Built with **CopilotKit** React Native and **AG-UI** for iOS, Android, and web.
+Build with any agent harness by connecting it through AG-UI.
 
 [Quick start](#quick-start) · [Demo](#demo) · [Features](#features) · [Architecture](#architecture) · [Docs](docs/README.md) · [Contributing](CONTRIBUTING.md)
 
 [![CI](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[![OpenMuse 🪁 — Ask it to browse. Watch the 38-second mobile demo.](assets/demos/2026-09-16/mobile.gif)](assets/demos/2026-09-16/mobile.mp4)
+**Mobile demo · 38 seconds**
 
-**[Watch the mobile demo · 38 seconds](assets/demos/2026-09-16/mobile.mp4)**
+https://github.com/user-attachments/assets/aeac31ad-6ffd-4594-9327-01aa1f423516
 
-[![OpenMuse 🪁 on the web — Watch the 42-second desktop demo.](assets/demos/2026-09-16/web.gif)](assets/demos/2026-09-16/web.mp4)
+**Web demo · 42 seconds**
 
-**[Watch the web demo · 42 seconds](assets/demos/2026-09-16/web.mp4)**
+https://github.com/user-attachments/assets/9467dc16-c14d-44eb-854c-c5e0ba8c5940
 
 </div>
 
 > **Alpha, for self-hosting and building on.** Open-ended reasoning, live Google accounts, and CopilotKit Rich Threads require their own configuration. See [what is verified](docs/VERIFICATION.md) and the [roadmap](ROADMAP.md).
+
+**[Build with OpenMuse →](https://go.copilotkit.ai/engineering-openmuse)**
 
 ## Demo
 
@@ -30,7 +33,7 @@ On iPhone, ask OpenMuse to find interesting stories on Hacker News and summarize
 
 The 38-second iPhone and 42-second desktop web demos show the current interface, framed in 16:9. The send arrow becomes a stop square inside the input pill while the agent replies, then switches back. Stopping keeps your draft intact. See the [recording notes](docs/DEMO.md) for the model setup and reproduction steps.
 
-[Mobile MP4](assets/demos/2026-09-16/mobile.mp4) · [Web MP4](assets/demos/2026-09-16/web.mp4) · [Recording details and reproduction](docs/DEMO.md)
+[Mobile MP4](https://github.com/user-attachments/assets/aeac31ad-6ffd-4594-9327-01aa1f423516) · [Web MP4](https://github.com/user-attachments/assets/9467dc16-c14d-44eb-854c-c5e0ba8c5940) · [Recording details and reproduction](docs/DEMO.md)
 
 ## What it is
 
@@ -134,6 +137,8 @@ Set `CPK_INTELLIGENCE_API_KEY` on the server and restart it to use CopilotKit In
 Intelligence is a separate service and is not included in this repository's MIT license. No project key is shipped. [Configuration and validation boundaries](docs/RICH-THREADS.md).
 
 ## Architecture
+
+CopilotKit powers the shared UI, and AG-UI connects it to the agent. You can use any agent harness that exposes an AG-UI endpoint, either natively or through an adapter. Set `AGENT_BACKEND=agui` and `AGENT_URL` in `.env` to connect your harness.
 
 ```mermaid
 flowchart TD
