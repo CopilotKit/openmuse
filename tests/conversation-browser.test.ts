@@ -6,6 +6,7 @@ import {
   type BuiltInAgentLearnedSkillsOptions,
   CopilotKitIntelligence,
   type GetLearnedSkillsSnapshotRequest,
+  IntelligenceAgentRunner,
 } from "@copilotkit/runtime/v2";
 import { lastValueFrom, toArray } from "rxjs";
 import { createApp } from "../apps/server/src/app.ts";
@@ -184,6 +185,118 @@ test("chat loads a published Intelligence skill before model work", async (t) =>
 
   await lastValueFrom(fixture.conversation.clone().run(input).pipe(toArray()));
   assert.equal(snapshotCalls.length, 2);
+});
+
+test("chat runtime route wires published Intelligence skills into the model agent", async (t) => {
+  const snapshotCalls: GetLearnedSkillsSnapshotRequest[] = [];
+  t.mock.method(
+    CopilotKitIntelligence.prototype,
+    "getLearnedSkillsSnapshot",
+    async (request: GetLearnedSkillsSnapshotRequest) => {
+      snapshotCalls.push(request);
+      return {
+        status: "snapshot",
+        bytes: Uint8Array.from(Buffer.from(skillArchiveBase64, "base64")),
+        revision: "r1",
+        etag: '"139773b71315c562db80ead7ec4318982cab1ddc6671d53c776a2eab55d9a775"',
+        contentType: "application/zip",
+      };
+    },
+  );
+  t.mock.method(
+    CopilotKitIntelligence.prototype,
+    "getOrCreateThread",
+    async (input: Parameters<CopilotKitIntelligence["getOrCreateThread"]>[0]) => ({
+      thread: { id: input.threadId, name: null },
+      created: false,
+    }),
+  );
+  t.mock.method(
+    CopilotKitIntelligence.prototype,
+    "ɵacquireThreadLock",
+    async (input: Parameters<CopilotKitIntelligence["ɵacquireThreadLock"]>[0]) => ({
+      threadId: input.threadId,
+      runId: input.runId,
+      joinToken: "test-join-token",
+    }),
+  );
+  t.mock.method(CopilotKitIntelligence.prototype, "getThreadMessages", async () => ({
+    messages: [],
+  }));
+  t.mock.method(CopilotKitIntelligence.prototype, "ɵrenewThreadLock", async () => ({
+    ttlSeconds: 60,
+  }));
+  t.mock.method(CopilotKitIntelligence.prototype, "ɵcleanupThreadLock", async () => {});
+  t.mock.method(
+    IntelligenceAgentRunner.prototype,
+    "runWithStartupBoundary",
+    (request: Parameters<IntelligenceAgentRunner["runWithStartupBoundary"]>[0]) => ({
+      events: request.agent.run(request.input),
+      startup: Promise.resolve(),
+    }),
+  );
+  const { requests } = await modelFixture(t, (index) =>
+    index % 2 === 0
+      ? { name: "copilotkit_load_skill", arguments: { skill_name: "refund-policy" } }
+      : undefined,
+  );
+  const fixture = await browserFixture(t, (_path, body) => ({
+    data: {
+      id: body.id,
+      title: "Opened page",
+      url: body.url,
+      status: "active",
+      updatedAt: new Date().toISOString(),
+    },
+  }));
+  const config = {
+    ...fixture.config,
+    mode: "live",
+    agentBackend: "model",
+    model: "openai/fixture",
+    accessKey: "test-access-key",
+    intelligenceApiKey: "test-project-key-never-sent",
+    intelligenceLearningContainerId: "openmuse-assistant",
+  } as const;
+  const server = await createApp(fixture.db, config);
+  t.after(() => server.agent.stop());
+  const session = await server.app.request("/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessKey: "test-access-key" }),
+  });
+  assert.equal(session.status, 200, await session.clone().text());
+  const { token } = await session.json();
+  const routeRunId = randomUUID();
+
+  const response = await server.app.request("/api/copilotkit/agent/default/run", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      threadId: "runtime-skill-chat",
+      runId: routeRunId,
+      messages: [{ id: randomUUID(), role: "user", content: "Can I get a refund for my ticket?" }],
+      tools: [],
+      context: [],
+      state: {},
+      forwardedProps: {},
+    }),
+  });
+
+  assert.equal(response.status, 200, await response.clone().text());
+  const run = await response.json();
+  assert.equal(run.threadId, "runtime-skill-chat");
+  assert.equal(run.runId, routeRunId);
+  assert.equal(run.joinToken, "test-join-token");
+  for (let i = 0; requests.length < 2 && i < 50; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.equal(requests.length, 2);
+  assert.equal(snapshotCalls.length, 1);
+  assert.equal(snapshotCalls[0].containerId, "openmuse-assistant");
+  assert.ok(requests[0].body.includes("refund-policy"));
+  assert.ok(requests[0].body.includes("copilotkit_load_skill"));
+  assert.ok(requests[1].body.includes("Use the published refund policy"));
 });
 
 test("unsubscribing from chat stops queued browser navigation and further model steps", async (t) => {
