@@ -56,6 +56,7 @@ The computer combines **persistent Chromium and an optional Linux workspace**. T
 | **Gmail & Calendar** | Google OAuth adapters, complete mail threads, drafts/attachments, calendar discovery, and reviewed event creation/update/deletion. Live credentials required. |
 | **Personal context** | Editable name, tone, avatar, and memories. Background-update preferences and durable in-app notifications. |
 | **Rich Threads** | CopilotKit Intelligence persistence for live deployments, with a stable main conversation, side chats, renaming, archiving, restoring, and replay. A server-only project key is required in live mode; sample mode uses local history. |
+| **Automatic Learning** | Production readiness for repeated OpenMuse workflows: completed live Rich Threads can become reviewed, published Skills for the built-in chat agent. A focused server-side Learning container is required in live mode. |
 
 The [feature inventory](docs/FEATURES.md) describes implemented capabilities and planned extensions. Health/bank/social connectors, device push, voice, generated executable tools, and automatic reservations/payments are on the [roadmap](ROADMAP.md).
 
@@ -94,9 +95,10 @@ Copy the commented settings in [.env.example](.env.example) into your private `.
 
 1. Set `AGENT_BACKEND=model`, `MODEL=provider/model-id`, and the matching provider key. CopilotKit supports the configured OpenAI, Anthropic or Google provider. Fictional data can still be used with a real model. Provider keys stay on the server.
 2. Create or select a CopilotKit Intelligence project with `npx copilotkit@latest login` and `npx copilotkit@latest project select`. Keep the generated `CPK_INTELLIGENCE_API_KEY` on the server.
-3. For personal mail/calendar, set `WORKSPACE_MODE=live`, the generated `CPK_INTELLIGENCE_API_KEY`, a random `OPENMUSE_ACCESS_KEY` of at least 24 characters, and `TOKEN_ENCRYPTION_KEY` containing 32 random bytes encoded as base64. Restart the API.
-4. Configure a Google OAuth web client with Gmail and Calendar APIs enabled. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; register `${PUBLIC_API_URL}/api/google/callback` as its redirect URI. Configure consent/test-user access in your Google project.
-5. Open **Apps → Gmail** (or **Google Calendar**), connect read access, and grant write access when needed. Every send or calendar change still requires its own stored review. Changing/disconnecting the account invalidates pending connection-bound work.
+3. Create a focused Learning container in that Intelligence project and set its stable ID as `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` on the API server. Keep both Intelligence values server-only. See [docs/LEARNING.md](docs/LEARNING.md).
+4. For personal mail/calendar, set `WORKSPACE_MODE=live`, the generated `CPK_INTELLIGENCE_API_KEY`, `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID`, a random `OPENMUSE_ACCESS_KEY` of at least 24 characters, and `TOKEN_ENCRYPTION_KEY` containing 32 random bytes encoded as base64. Restart the API.
+5. Configure a Google OAuth web client with Gmail and Calendar APIs enabled. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; register `${PUBLIC_API_URL}/api/google/callback` as its redirect URI. Configure consent/test-user access in your Google project.
+6. Open **Apps → Gmail** (or **Google Calendar**), connect read access, and grant write access when needed. Every send or calendar change still requires its own stored review. Changing/disconnecting the account invalidates pending connection-bound work.
 
 Google credentials are encrypted at rest. File URLs and browser consoles use short-lived signatures. This deployment uses one owner protected by a shared access key; it is not a multi-tenant authentication system. Use HTTPS and restricted network access for a remote host. Keep the default local-data mode on loopback.
 
@@ -132,19 +134,25 @@ For a separate task worker, configure the same `DATABASE_URL`, secrets and share
 
 No hidden retry occurs after an uncertain external write. Review its provider outcome before creating a replacement. Pausing/cancelling prevents subsequent task steps; an already approved in-flight provider request may finish.
 
-## CopilotKit Rich Threads
+## CopilotKit Rich Threads and Learning
 
 Live deployments require `CPK_INTELLIGENCE_API_KEY` on the API server for CopilotKit Intelligence conversation persistence and replay. Create or select a project with `npx copilotkit@latest login` and `npx copilotkit@latest project select`, set the generated server-only key, and restart the API. The native menu uses `useThreads`; rich tool results link back to saved tasks, documents, and browser sessions.
 
-Sample mode can leave the key unset and keeps one conversation in the local database. Intelligence is a separate service and is not included in this repository's MIT license. No project key is shipped. [Configuration and validation boundaries](docs/RICH-THREADS.md).
+Automatic Learning also requires a focused `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` in live mode. OpenMuse assigns new live Threads for the built-in interactive `default` model assistant to that container, then delivers reviewed, published Skills back to fresh built-in chat invocations. Background tasks and external AG-UI skill delivery are outside this increment; an external agent server owns its own delivery setup.
+
+Sample mode can leave both Intelligence values unset and keeps one conversation in the local database. Intelligence is a separate service and is not included in this repository's MIT license. No project key is shipped. [Configuration and validation boundaries](docs/RICH-THREADS.md) and the [Automatic Learning runbook](docs/LEARNING.md).
 
 ## Architecture
 
 ```mermaid
 flowchart TD
   Client[Expo / React Native / Web] -->|AG-UI and authenticated API| API[Hono + CopilotKit runtime]
+  API --> BuiltInChat[Built-in default chat agent]
   API --> Tasks[Durable task worker]
-  API --> Threads[CopilotKit Intelligence required in live mode]
+  BuiltInChat --> Threads[CopilotKit Intelligence required in live mode]
+  Threads --> Learning[Automatic Learning container]
+  Learning --> Skills[Reviewed published Skills]
+  Skills --> BuiltInChat
   API --> Store[(PGlite or PostgreSQL)]
   Tasks --> Store
   Tasks --> Review[Stored action review]

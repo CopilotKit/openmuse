@@ -15,9 +15,10 @@ Keep the generated key in the API server environment and restart the API:
 
 ```dotenv
 CPK_INTELLIGENCE_API_KEY=your-project-key
+CPK_INTELLIGENCE_LEARNING_CONTAINER_ID=openmuse-assistant
 ```
 
-Never put the key in an `EXPO_PUBLIC_`, `NEXT_PUBLIC_`, or `VITE_` variable. The server constructs `CopilotKitIntelligence`, and `identifyUser` resolves the owner from the verified OpenMuse session. The existing deployment is a single-user workspace; its access key must not be shared as a multi-user login. See [CopilotKit's runtime setup](https://docs.copilotkit.ai/intelligence/connect-your-runtime) for project-key configuration.
+Never put the key in an `EXPO_PUBLIC_`, `NEXT_PUBLIC_`, or `VITE_` variable. The Learning container ID is not a secret, but OpenMuse still reads it from server configuration so live Thread assignment stays stable. The server constructs `CopilotKitIntelligence`, and `identifyUser` resolves the owner from the verified OpenMuse session. The existing deployment is a single-user workspace; its access key must not be shared as a multi-user login. See [CopilotKit's runtime setup](https://docs.copilotkit.ai/intelligence/connect-your-runtime) for project-key configuration.
 
 With this configuration, the conversation menu uses CopilotKit's native `useThreads` hook to list, rename, archive, restore and paginate conversations. The server saves an owner-bound main thread ID and provisions it through Intelligence before the first message, so reloading during the first run retains the same conversation. Side chats create a fresh client thread ID and persist on their first run. Selecting a saved conversation mounts a private `useAgent({ agentId, runtimeAgentId, threadId })` instance and calls `copilotkit.connectAgent` to replay the thread. Visited chats remain mounted during navigation, preserving their drafts and queues. Stop explicitly requests `copilotkit.stopAgent`.
 
@@ -28,6 +29,12 @@ Rich tool messages retain task IDs. The renderer fetches current task status, br
 When the key is unset in sample mode, OpenMuse keeps its existing local conversation store and the menu identifies that mode. Sample history remains available after returning from live mode, but it is not automatically uploaded to Intelligence. Live mode does not fall back to this store: the API fails at startup with the project-selection commands when the key is missing.
 
 Automatic thread naming is disabled; conversations can be renamed in the menu. Intelligence is a separately configured service, not bundled with this MIT-licensed application. See [headless threads](https://docs.copilotkit.ai/headless-threads) for the platform lifecycle and hosting options.
+
+## Automatic Learning
+
+Live mode also assigns new interactive `default` agent Threads to the configured Learning container. Operators can review repeated workflow evidence, publish Skills, and deliver those Skills back to fresh built-in chat invocations. The full setup, recording, review, delivery, and troubleshooting runbook lives in [Automatic Learning operator guide](LEARNING.md).
+
+Background task-worker runs and external raw AG-UI agent skill delivery are outside the Rich Threads setup described here.
 
 ## Agent computer
 
