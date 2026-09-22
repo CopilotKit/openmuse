@@ -26,7 +26,7 @@ Clone this template and customize it however you want.
 
 > **Alpha, for self-hosting and building on.** Open-ended reasoning, live Google accounts, and CopilotKit Rich Threads require their own configuration. See [what is verified](docs/VERIFICATION.md) and the [roadmap](ROADMAP.md).
 
-**[Build with OpenMuse →](https://go.copilotkit.ai/engineering-openmuse)**
+**[Need help deploying OpenMuse for your company? Talk to our team →](https://go.copilotkit.ai/engineering-openmuse)**
 
 ## Demo
 
