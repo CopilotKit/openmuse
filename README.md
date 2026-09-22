@@ -14,13 +14,13 @@ Built with CopilotKit React Native for iOS, Android, and web.
 
 Clone this template and customize it however you want.
 
-**Mobile demo**
+[![OpenMuse 🪁 — Ask it to browse. Watch the 38-second mobile demo.](assets/demos/2026-09-16/mobile.png)](assets/demos/2026-09-16/mobile.mp4)
 
-https://github.com/user-attachments/assets/e5567195-2eb5-4bf9-b5ba-1b5e5f1ebc38
+**[Watch the mobile demo · 38 seconds](assets/demos/2026-09-16/mobile.mp4)**
 
-**Web demo**
+[![OpenMuse 🪁 on the web — Watch the 42-second desktop demo.](assets/demos/2026-09-16/web.png)](assets/demos/2026-09-16/web.mp4)
 
-https://github.com/user-attachments/assets/5af0508c-c10f-4aa8-acf8-83e1d2232464
+**[Watch the web demo · 42 seconds](assets/demos/2026-09-16/web.mp4)**
 
 </div>
 
@@ -34,7 +34,7 @@ On iPhone, ask OpenMuse to find interesting stories on Hacker News and summarize
 
 The 38-second iPhone and 42-second desktop web demos show the current interface, framed in 16:9. The send arrow becomes a stop square inside the input pill while the agent replies, then switches back. Stopping keeps your draft intact. See the [recording notes](docs/DEMO.md) for the model setup and reproduction steps.
 
-[Mobile MP4](https://github.com/user-attachments/assets/e5567195-2eb5-4bf9-b5ba-1b5e5f1ebc38) · [Web MP4](https://github.com/user-attachments/assets/5af0508c-c10f-4aa8-acf8-83e1d2232464) · [Recording details and reproduction](docs/DEMO.md)
+[Mobile MP4](assets/demos/2026-09-16/mobile.mp4) · [Web MP4](assets/demos/2026-09-16/web.mp4) · [Recording details and reproduction](docs/DEMO.md)
 
 ## What it is
 
