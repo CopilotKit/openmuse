@@ -26,6 +26,8 @@ https://github.com/user-attachments/assets/5af0508c-c10f-4aa8-acf8-83e1d2232464
 
 > **Alpha, for self-hosting and building on.** Open-ended reasoning, live Google accounts, and CopilotKit Rich Threads require their own configuration. See [what is verified](docs/VERIFICATION.md) and the [roadmap](ROADMAP.md).
 
+**[Build with OpenMuse →](https://go.copilotkit.ai/engineering-openmuse)**
+
 ## Demo
 
 On iPhone, ask OpenMuse to find interesting stories on Hacker News and summarize CopilotKit. On desktop, ask it to check the school-trip email, open the message, and research exhibits at Monterey Bay Aquarium. The agent shows email and browser results inline. **Take control** opens that same browser session when you need it.
