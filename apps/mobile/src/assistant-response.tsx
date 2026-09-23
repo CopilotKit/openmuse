@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Linking, Text } from "react-native";
+import { Linking, Text, type TextStyle } from "react-native";
 import Markdown, { type MarkdownStyles, type RenderRules } from "react-native-markdown-renderer";
 import { assistantMarkdown, isSafeAssistantUrl } from "./assistant-markdown";
 import { colors, ErrorNotice } from "./ui";
@@ -17,6 +17,11 @@ const style: Partial<MarkdownStyles> = {
   codeInline: { backgroundColor: "#E2E4E7", color: colors.text },
   codeBlock: { backgroundColor: "#E2E4E7", color: colors.text },
 };
+const renderCodeBlock: RenderRules["fence"] = (node, _children, _parent, styles) => (
+  <Text key={node.key} selectable style={styles.codeBlock as TextStyle}>
+    {node.content.replace(/\n$/, "")}
+  </Text>
+);
 const rules: RenderRules = {
   textgroup: (node, children) => (
     <Text key={node.key} selectable style={textStyle}>
@@ -24,10 +29,12 @@ const rules: RenderRules = {
     </Text>
   ),
   image: (node) => (
-    <Text key={node.key} style={{ color: colors.muted }}>
+    <Text key={node.key} selectable style={{ color: colors.muted }}>
       {node.attributes.alt ? `[Image: ${node.attributes.alt}]` : "[Image]"}
     </Text>
   ),
+  code_block: renderCodeBlock,
+  fence: renderCodeBlock,
 };
 
 export function AssistantResponse({ content }: { content: string }) {
