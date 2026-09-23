@@ -43,6 +43,7 @@ test("CopilotKit model worker executes server tools and persists the confirmed o
       publicUrl: "http://localhost:8787",
       dataDir: directory,
       agentBackend: "model",
+      intelligenceApiKey: "test-project-key-never-sent",
       model: "openai/fixture",
       googleRedirectUri: "http://localhost:8787/api/google/callback",
       allowedOrigins: [],

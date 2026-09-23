@@ -23,24 +23,26 @@ function liveConfig(intelligenceApiKey?: string): Config {
 }
 
 const missingKeyMessage =
-  "Live mode requires CPK_INTELLIGENCE_API_KEY for durable Rich Threads. " +
+  "OpenMuse requires CPK_INTELLIGENCE_API_KEY. " +
   "Run `npx copilotkit@latest login` and `npx copilotkit@latest project select`, " +
   "then set the generated server-only key. " +
   "See https://docs.copilotkit.ai/intelligence/connect-your-runtime";
 
-test("live API configuration rejects a missing or blank Intelligence key", () => {
-  for (const key of [undefined, "", " \t\n"]) {
-    assert.throws(() => assertApiDeploymentConfig(liveConfig(key)), {
-      name: "Error",
-      message: missingKeyMessage,
-    });
+test("every API mode rejects a missing or blank Intelligence key", () => {
+  for (const mode of [sampleConfig, liveConfig()]) {
+    for (const key of [undefined, "", " \t\n"]) {
+      assert.throws(() => assertApiDeploymentConfig({ ...mode, intelligenceApiKey: key }), {
+        name: "Error",
+        message: missingKeyMessage,
+      });
+    }
   }
 });
 
-test("live API configuration accepts a non-empty Intelligence key", () => {
-  assert.doesNotThrow(() => assertApiDeploymentConfig(liveConfig("test-project-key-never-sent")));
-});
-
-test("sample API configuration remains key-free", () => {
-  assert.doesNotThrow(() => assertApiDeploymentConfig(sampleConfig));
+test("every API mode accepts a non-empty Intelligence key", () => {
+  for (const mode of [sampleConfig, liveConfig()]) {
+    assert.doesNotThrow(() =>
+      assertApiDeploymentConfig({ ...mode, intelligenceApiKey: "test-project-key-never-sent" }),
+    );
+  }
 });
