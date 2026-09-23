@@ -23,6 +23,9 @@ importers:
       '@hono/node-server':
         specifier: ^1.19.0
         version: 1.19.17(hono@4.13.7)
+      '@typesafe-ai/sdk':
+        specifier: 0.6.0
+        version: 0.6.0
       hono:
         specifier: ^4.11.4
         version: 4.13.7
@@ -2305,6 +2308,10 @@ packages:
 
   '@types/yargs@17.0.35':
     resolution: {integrity: sha512-qUHkeCyQFxMXg79wQfTtfndEC+N9ZZg76HJftDJp+qH2tV7Gj4OJi7l+PiWwJ+pWtW8GwSmqsDj/oymhrTWXjg==}
+
+  '@typesafe-ai/sdk@0.6.0':
+    resolution: {integrity: sha512-IddX+Q0XM+VagOUZFeP7wZjaO4SHMdvnh2zEBdrZZnXedWI3BNK1lKhMx3ayrkFWvVLbVcUHJy6AVZlY+e6Jaw==}
+    engines: {node: '>=20'}
 
   '@typespec/ts-http-runtime@0.3.9':
     resolution: {integrity: sha512-edSdeAqkdxBVzA1yL1LrLCml1YjyCVvPMtMqJpbF+6K609tHe8V6sQUzFQSGcYNhcuhOceZtjvN32+mpIth30A==}
@@ -8936,6 +8943,8 @@ snapshots:
   '@types/yargs@17.0.35':
     dependencies:
       '@types/yargs-parser': 21.0.3
+
+  '@typesafe-ai/sdk@0.6.0': {}
 
   '@typespec/ts-http-runtime@0.3.9(supports-color@8.1.1)':
     dependencies:
