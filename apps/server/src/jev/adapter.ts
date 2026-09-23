@@ -123,7 +123,9 @@ export class LiveJevAdapter implements JevAdapter {
       if (
         answer?.type !== "score" ||
         typeof answer.score !== "number" ||
-        !Number.isFinite(answer.score)
+        !Number.isInteger(answer.score) ||
+        answer.score < 0 ||
+        answer.score > 3
       )
         throw new Error("Jev returned an invalid score");
       scores[option.id] = answer.score;

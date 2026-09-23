@@ -115,6 +115,30 @@ test("live adapter rejects controls outside allowed choices", async () => {
     /invalid control/,
   );
 });
+test("live adapter rejects scores outside its four-step rubric", async () => {
+  for (const score of [-1, 4, 1.5]) {
+    const adapter = new LiveJevAdapter({
+      systemOne: async () => ({
+        answers: {
+          control: { type: "choice", choice: "comparison" },
+          fit_0: { type: "score", score },
+        },
+      }),
+    } as never);
+    await assert.rejects(
+      adapter.decide(
+        {
+          message: "compare",
+          context: "source",
+          options: [option("a")],
+          allowedControls: ["comparison"],
+        },
+        new AbortController().signal,
+      ),
+      /invalid score/,
+    );
+  }
+});
 test("live adapter reports network failure without exposing provider detail", async () => {
   const adapter = new LiveJevAdapter({
     systemOne: async () => {
