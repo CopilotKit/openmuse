@@ -417,7 +417,14 @@ test("evidence records are scoped to owner, thread, and run", async (t) => {
   });
   const service = new JevService({ store, adapter, mode: "live" });
   await service.noteEvidence("owner", "thread", "run-1", "mail", "trip-thread");
-  await service.noteEvidence("owner", "thread", "run-1", "web", "https://example.org/kelp");
+  await service.noteEvidence(
+    "owner",
+    "thread",
+    "run-1",
+    "web",
+    "https://example.org/kelp",
+    "Observed kelp page",
+  );
   assert.equal(await service.hasAnyMailEvidence("owner", "thread", "run-1"), true);
   assert.equal(await service.hasAnyMailEvidence("owner", "thread", "run-2"), false);
   assert.equal(
@@ -491,5 +498,136 @@ test("a selection made during inference prevents the new panel from replacing it
   assert.equal(
     (await store.get<{ selectedId: string }>("owner", "jev_threads", "thread"))?.selectedId,
     "a",
+  );
+});
+
+test("refinement uses a selection that races before generation reservation", async (t) => {
+  const dataDir = join(await mkdtemp(join(tmpdir(), "jev-pre-reserve-")), "db");
+  const store = await createStore({ dataDir });
+  t.after(async () => {
+    await store.close();
+    await rm(dataDir, { recursive: true, force: true });
+  });
+  const four = [
+    ...options,
+    {
+      id: "c",
+      label: "Open Sea",
+      details: [],
+      sources: [{ title: "Sea", url: "https://example.org/sea" }],
+    },
+    {
+      id: "d",
+      label: "Birds",
+      details: [],
+      sources: [{ title: "Birds", url: "https://example.org/birds" }],
+    },
+  ];
+  const firstAdapter: JevAdapter = {
+    decide: async ({ options }) => ({
+      control: "comparison",
+      scores: Object.fromEntries(
+        options.map((option, index) => [option.id, option.id === "a" ? 10 : index]),
+      ),
+    }),
+  };
+  const firstService = new JevService({ store, adapter: firstAdapter, mode: "sample" });
+  const first = await firstService.createPanel(
+    "owner",
+    "thread",
+    "first",
+    { ...args, options: four },
+    new AbortController().signal,
+  );
+  assert.ok(first.panel);
+  const originalInsert = store.insertIfAbsent.bind(store);
+  let resume!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  let paused!: () => void;
+  const atReservation = new Promise<void>((resolve) => {
+    paused = resolve;
+  });
+  let hold = true;
+  store.insertIfAbsent = async (owner, kind, value) => {
+    if (kind === "jev_threads" && hold) {
+      hold = false;
+      paused();
+      await gate;
+    }
+    return originalInsert(owner, kind, value);
+  };
+  let adapterSelectedId: string | undefined;
+  const inspecting: JevAdapter = {
+    decide: async (input) => {
+      adapterSelectedId = input.selectedId;
+      return {
+        control: "comparison",
+        scores: Object.fromEntries(input.options.map((option, index) => [option.id, index])),
+      };
+    },
+  };
+  const service = new JevService({ store, adapter: inspecting, mode: "sample" });
+  const refining = service.createPanel(
+    "owner",
+    "thread",
+    "refine",
+    { ...args, options: [], refinementPanelId: first.panel.id },
+    new AbortController().signal,
+  );
+  await atReservation;
+  await firstService.select("owner", "thread", {
+    panelId: first.panel.id,
+    threadId: "thread",
+    candidateSetVersion: first.panel.candidateSetVersion,
+    optionId: "a",
+  });
+  resume();
+  const refined = await refining;
+  assert.ok(refined.panel);
+  assert.equal(adapterSelectedId, "a");
+  assert.equal(refined.panel.preferredId, "a");
+  assert.equal(refined.panel.selectedId, undefined);
+  assert.ok(refined.panel.options.some((option) => option.id === "a"));
+});
+
+test("mail evidence lookup uses direct run marker and web evidence stores bounded text", async (t) => {
+  const dataDir = join(await mkdtemp(join(tmpdir(), "jev-evidence-text-")), "db");
+  const store = await createStore({ dataDir });
+  t.after(async () => {
+    await store.close();
+    await rm(dataDir, { recursive: true, force: true });
+  });
+  const service = new JevService({ store, adapter, mode: "live" });
+  await service.noteEvidence("owner", "thread", "run", "mail", "trip-thread");
+  const originalList = store.list.bind(store);
+  store.list = async () => {
+    throw new Error("owner-wide scan called");
+  };
+  assert.equal(await service.hasAnyMailEvidence("owner", "thread", "run"), true);
+  assert.equal(await service.hasAnyMailEvidence("owner", "thread", "other"), false);
+  store.list = originalList;
+  await service.noteEvidence("owner", "thread", "run", "web", "https://example.org/empty", "   ");
+  assert.equal(
+    await service.evidenceText("owner", "thread", "run", "web", "https://example.org/empty"),
+    null,
+  );
+  await service.noteEvidence(
+    "owner",
+    "thread",
+    "run",
+    "web",
+    "https://example.org/full",
+    "x".repeat(40000),
+  );
+  assert.equal(
+    (await service.evidenceText("owner", "thread", "run", "web", "https://example.org/full"))
+      ?.length,
+    30000,
+  );
+  assert.equal(
+    await service.evidenceText("owner", "thread", "other", "web", "https://example.org/full"),
+    null,
   );
 });

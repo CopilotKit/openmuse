@@ -99,6 +99,14 @@ export class LiveJevAdapter implements JevAdapter {
         throw new Error("Jev could not evaluate these choices. Please retry.", { cause: error });
       });
     signal.throwIfAborted();
+    if (
+      !result ||
+      typeof result !== "object" ||
+      !result.answers ||
+      typeof result.answers !== "object" ||
+      Array.isArray(result.answers)
+    )
+      throw new Error("Jev returned invalid answers");
     const answers = result.answers as Record<
       string,
       { type?: string; choice?: string; score?: number }

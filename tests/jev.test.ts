@@ -135,3 +135,28 @@ test("live adapter reports network failure without exposing provider detail", as
       !error.message.includes("secret") && /Jev could not evaluate/.test(error.message),
   );
 });
+
+test("preferred refinement option must be visible in the panel", () => {
+  assert.equal(jevPanelSchema.parse({ ...panel(), preferredId: "a" }).preferredId, "a");
+  assert.throws(() => jevPanelSchema.parse({ ...panel(), preferredId: "not-visible" }));
+});
+
+test("live adapter returns controlled error for malformed answers", async () => {
+  for (const malformed of [null, undefined, [], "invalid"]) {
+    const adapter = new LiveJevAdapter({
+      systemOne: async () => ({ answers: malformed }),
+    } as never);
+    await assert.rejects(
+      adapter.decide(
+        {
+          message: "compare",
+          context: "source",
+          options: [option("a")],
+          allowedControls: ["comparison"],
+        },
+        new AbortController().signal,
+      ),
+      /invalid answers/,
+    );
+  }
+});

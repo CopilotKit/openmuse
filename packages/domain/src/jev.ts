@@ -30,6 +30,7 @@ export const jevPanelSchema = z
     title: shortText,
     options: z.array(jevOptionSchema).min(1).max(12),
     selectedId: id.optional(),
+    preferredId: id.optional(),
     mode: z.enum(["sample", "live"]),
   })
   .strict()
@@ -58,6 +59,12 @@ export const jevPanelSchema = z
       });
     if (panel.selectedId && !ids.has(panel.selectedId))
       ctx.addIssue({ code: "custom", message: "Selected option is missing", path: ["selectedId"] });
+    if (panel.preferredId && !ids.has(panel.preferredId))
+      ctx.addIssue({
+        code: "custom",
+        message: "Preferred option is missing",
+        path: ["preferredId"],
+      });
   });
 export const jevToolResultSchema = z
   .object({ panel: jevPanelSchema.nullable(), error: z.string().max(600).optional() })

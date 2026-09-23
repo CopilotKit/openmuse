@@ -107,7 +107,6 @@ export class JevService {
         priorHead?.currentPanelId !== input.refinementPanelId)
     )
       throw new Error("The earlier choices are unavailable or superseded");
-    const priorSelectedId = priorHead?.selectedId ?? undefined;
     const candidates = previous
       ? previous.candidates
       : input.options.map((candidate) => {
@@ -134,6 +133,7 @@ export class JevService {
     if (input.control === "comparison" && candidates.some((o) => o.sources.length === 0))
       throw new Error("Comparison choices need sources");
     const generation = await this.reserve(owner, threadId, input.refinementPanelId);
+    const priorSelectedId = generation.selectedId ?? undefined;
     const decision = await this.deps.adapter.decide(
       {
         message: input.message,
@@ -149,6 +149,14 @@ export class JevService {
     if (decision.control !== input.control) throw new Error("Jev returned an unexpected control");
     const ranked = rankJevOptions(candidates, decision);
     const visible = decision.control === "comparison" ? ranked.slice(0, 3) : ranked;
+    const preferredId =
+      previous && priorSelectedId && ranked.some((option) => option.id === priorSelectedId)
+        ? priorSelectedId
+        : undefined;
+    if (preferredId && !visible.some((option) => option.id === preferredId)) {
+      const preferred = ranked.find((option) => option.id === preferredId);
+      if (preferred) visible[visible.length - 1] = preferred;
+    }
     const panel = jevPanelSchema.parse({
       id: randomUUID(),
       threadId,
@@ -157,6 +165,7 @@ export class JevService {
       type: decision.control,
       title: input.title,
       options: visible,
+      preferredId,
       mode: this.deps.mode,
     });
     signal.throwIfAborted();
@@ -231,8 +240,21 @@ export class JevService {
     runId: string,
     kind: "mail" | "web",
     reference: string,
+    text?: string,
   ): Promise<void> {
     const id = `${threadId}:${runId}:${kind}:${createHash("sha256").update(reference).digest("hex")}`;
+    if (kind === "web") {
+      if (!text?.trim()) return;
+      await this.store.put(owner, "jev_evidence", {
+        id,
+        threadId,
+        runId,
+        kind,
+        reference,
+        text: text.slice(0, 30_000),
+      });
+      return;
+    }
     await this.store.insertIfAbsent(owner, "jev_evidence", {
       id,
       threadId,
@@ -240,6 +262,7 @@ export class JevService {
       kind,
       reference,
     });
+    await this.store.insertIfAbsent(owner, "jev_mail_evidence", { id: `${threadId}:${runId}` });
   }
   async hasEvidence(
     owner: string,
@@ -252,13 +275,17 @@ export class JevService {
     return !!(await this.store.get(owner, "jev_evidence", id));
   }
   async hasAnyMailEvidence(owner: string, threadId: string, runId: string): Promise<boolean> {
-    return (
-      await this.store.list<{ threadId: string; runId: string; kind: string }>(
-        owner,
-        "jev_evidence",
-      )
-    ).some(
-      (entry) => entry.threadId === threadId && entry.runId === runId && entry.kind === "mail",
-    );
+    return !!(await this.store.get(owner, "jev_mail_evidence", `${threadId}:${runId}`));
+  }
+  async evidenceText(
+    owner: string,
+    threadId: string,
+    runId: string,
+    kind: "web",
+    reference: string,
+  ): Promise<string | null> {
+    const id = `${threadId}:${runId}:${kind}:${createHash("sha256").update(reference).digest("hex")}`;
+    const record = await this.store.get<{ text?: string }>(owner, "jev_evidence", id);
+    return record?.text?.trim() ? record.text : null;
   }
 }
