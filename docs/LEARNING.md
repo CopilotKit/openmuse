@@ -144,7 +144,7 @@ Do not add real Intelligence or provider keys to committed demo files.
 | Symptom | What to check |
 | --- | --- |
 | The live API exits with a missing Intelligence key error. | Set `CPK_INTELLIGENCE_API_KEY` on the API server with the generated project key. Keep it server-only. |
-| The live API exits with a missing Learning container error. | Create a focused container in the Intelligence project's Learning area and set `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` to its stable ID. |
+| Learning evidence is not collected, but Rich Threads still work. | Create a focused container in the Intelligence project's Learning area and set `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` to its stable ID. An unset or blank ID leaves Learning disabled. |
 | The live API exits with an invalid container ID error. | Use 1-64 lowercase letters, numbers, or single hyphens, with no leading, trailing, or repeated hyphen. |
 | A Thread does not appear in the container. | Confirm it was a new live Rich Thread for the interactive `default` runtime agent and that the live API had the container ID before the Thread's first run. Existing Threads are not backfilled, and background task-worker runs are not collected. |
 | Learning says there are not enough eligible Threads. | Complete more related Threads for an automatic run, or start a manual run with the available evidence when you need to review a focused set before the threshold. The default threshold is 15 eligible Threads unless the UI shows a different value. |
