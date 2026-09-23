@@ -5,3 +5,5 @@ allowBuilds:
   esbuild: true
   '@biomejs/biome': true
   '@scarf/scarf': false
+  '@google/genai': false
+  protobufjs: false
