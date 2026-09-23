@@ -233,6 +233,45 @@ test("Explore exhibits browses every cited aquarium page before showing comparis
   assert.ok(args.options.every((option: { sources: unknown[] }) => option.sources.length));
 });
 
+test("live Jev demo candidates quote each page instead of reusing sample copy", () => {
+  const messages: ChatMessage[] = [{ role: "user", content: "Explore exhibits" }];
+  const texts = [
+    "Kelp Forest at 28 feet features sardines and leopard sharks.",
+    "Open Sea has a 90-foot window with turtles, sardines, and tuna.",
+    "Rocky Shore has a touch pool for bat rays.",
+  ];
+  for (const [index, text] of texts.entries()) {
+    const next = demoResponse(jevRequest(messages));
+    const { url } = JSON.parse(calls(next)?.[0]?.arguments ?? "{}");
+    messages.push({
+      role: "tool",
+      tool_call_id: calls(next)?.[0]?.id,
+      content: JSON.stringify({
+        sessionId: `page-${index}`,
+        url,
+        title: "Aquarium",
+        text,
+        truncated: false,
+      }),
+    });
+  }
+  const previous = process.env.DEMO_JEV_MODE;
+  try {
+    process.env.DEMO_JEV_MODE = "live";
+    const response = demoResponse(jevRequest(messages));
+    const options = JSON.parse(calls(response)?.[0]?.arguments ?? "{}").options;
+    assert.equal(options.length, 3);
+    for (const [index, option] of options.entries()) {
+      assert.equal(option.sources[0].title, option.label);
+      assert.equal(option.details.length, 1);
+      assert.ok(texts[index].includes(option.details[0]));
+    }
+  } finally {
+    if (previous === undefined) delete process.env.DEMO_JEV_MODE;
+    else process.env.DEMO_JEV_MODE = previous;
+  }
+});
+
 test("Explore exhibits does not make a card when a browser read fails", () => {
   const messages: ChatMessage[] = [{ role: "user", content: "Explore exhibits" }];
   const first = demoResponse(jevRequest(messages));

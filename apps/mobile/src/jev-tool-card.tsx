@@ -192,6 +192,7 @@ export function JevToolCard({ result, loading }: { result: unknown; loading: boo
       <View style={{ gap: 5 }}>
         <Text style={s.heading}>{panel.title}</Text>
         {panel.mode === "sample" && <Text style={s.small}>Sample · scripted decisions</Text>}
+        {panel.mode === "live" && <Text style={s.small}>Live Jev · model decisions</Text>}
         {preferredOption && !selectedId && (
           <Text style={s.small}>Previous preference: {preferredOption.label}</Text>
         )}

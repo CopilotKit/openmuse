@@ -224,6 +224,23 @@ function demoTripResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
     const message = parsed.success ? parsed.data.messages.findLast(isSchoolTripMessage) : undefined;
     if (!message)
       return { content: "I couldn’t verify the school-trip email. Check Mail and try again." };
+    const search = turnResult(turn, "search_mail", "call_openmuse_demo_mail_search_");
+    const searched = z
+      .object({
+        matches: z.array(
+          z.object({ threadId: z.string(), sender: z.string(), subject: z.string() }),
+        ),
+      })
+      .safeParse(search ? parseResult(search) : undefined);
+    const mailThreadId = searched.success
+      ? searched.data.matches.find(
+          (candidate) =>
+            /lincoln middle school/i.test(candidate.sender) &&
+            /permission|trip|aquarium/i.test(candidate.subject),
+        )?.threadId
+      : undefined;
+    if (!mailThreadId)
+      return { content: "I couldn’t verify which school-trip thread was read. Please retry." };
     if (!request.tools?.some((tool) => tool.function.name === "present_choices"))
       return {
         content:
@@ -242,6 +259,7 @@ function demoTripResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
             title: "How should we get ready?",
             control: "clarification",
             options: schoolTripFixture.choices,
+            mailThreadId,
           }),
         },
       ],
@@ -352,6 +370,17 @@ function previousComparisonId(messages: ChatMessage[]): string | undefined {
   return undefined;
 }
 
+function pageExcerpt(text: string, anchor: RegExp): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const match = anchor.exec(normalized);
+  if (!match) throw new Error("The exhibit page is missing its verified detail");
+  const start = Math.max(0, match.index - 45);
+  const end = Math.min(normalized.length, match.index + match[0].length + 95);
+  const left = start ? normalized.indexOf(" ", start) + 1 : 0;
+  const right = end < normalized.length ? normalized.lastIndexOf(" ", end) : end;
+  return normalized.slice(left, right > left ? right : end).trim();
+}
+
 function demoExhibitResponse(request: ChatCompletionRequest, turn: ChatMessage[]): FixtureResponse {
   const choice = turnResult(turn, "present_choices", "call_openmuse_demo_jev_");
   if (choice) {
@@ -360,8 +389,7 @@ function demoExhibitResponse(request: ChatCompletionRequest, turn: ChatMessage[]
       .safeParse(parseResult(choice));
     return parsed.success && parsed.data.panel
       ? {
-          content:
-            "Here are three researched exhibits from the sample script. Tell me what matters most, or choose one.",
+          content: "Here are three researched exhibits. Tell me what matters most, or choose one.",
         }
       : { content: "I couldn’t prepare the exhibit choices. Please retry." };
   }
@@ -371,6 +399,7 @@ function demoExhibitResponse(request: ChatCompletionRequest, turn: ChatMessage[]
       message.tool_call_id?.startsWith("call_openmuse_demo_exhibit_browse_"),
   );
   const observed = new Set<string>();
+  const observedPages = new Map<string, string>();
   const requiredEvidence: Record<string, RegExp[]> = {
     "kelp-forest": [
       /kelp forest/i,
@@ -397,6 +426,7 @@ function demoExhibitResponse(request: ChatCompletionRequest, turn: ChatMessage[]
           "I couldn’t verify the exhibit details in the aquarium page, so I can’t prepare sourced choices yet.",
       };
     observed.add(parsed.data.url.replace(/\/$/, ""));
+    observedPages.set(source.id, parsed.data.text);
   }
   const next = aquariumFixture.options.find(
     (option) => !observed.has(option.sources[0].url.replace(/\/$/, "")),
@@ -419,6 +449,24 @@ function demoExhibitResponse(request: ChatCompletionRequest, turn: ChatMessage[]
     return {
       content: "The choices tool is unavailable. Please try again after enabling Jev sample mode.",
     };
+  const options =
+    process.env.DEMO_JEV_MODE === "live"
+      ? aquariumFixture.options.map((option) => {
+          const text = observedPages.get(option.id);
+          if (!text) throw new Error("A verified aquarium page is missing");
+          const anchor =
+            option.id === "kelp-forest"
+              ? /28\s*(?:feet|foot)|28-foot/i
+              : option.id === "open-sea"
+                ? /90-foot|90\s*foot/i
+                : /touch pool/i;
+          return {
+            ...option,
+            details: [pageExcerpt(text, anchor)],
+            sources: [{ ...option.sources[0], title: option.label }],
+          };
+        })
+      : aquariumFixture.options;
   return {
     content: "The three aquarium pages are open. I’ll compare their verified exhibit details.",
     toolCalls: [
@@ -428,10 +476,10 @@ function demoExhibitResponse(request: ChatCompletionRequest, turn: ChatMessage[]
         arguments: JSON.stringify({
           message: "Explore exhibits for the aquarium school trip",
           context:
-            "Controlled sample candidate descriptions, checked against official Monterey Bay Aquarium exhibit pages. Browser reads for all three sources succeeded in this turn.",
+            "Candidate excerpts from the three official Monterey Bay Aquarium pages read in this turn.",
           title: "Three exhibits to explore",
           control: "comparison",
-          options: aquariumFixture.options,
+          options,
         }),
       },
     ],
@@ -445,12 +493,16 @@ function demoRefinementResponse(
   const choice = turnResult(turn, "present_choices", "call_openmuse_demo_jev_");
   if (choice) {
     const parsed = z
-      .object({ panel: z.object({ id: z.string() }).nullable(), error: z.string().optional() })
+      .object({
+        panel: z
+          .object({ id: z.string(), options: z.array(z.object({ label: z.string() })) })
+          .nullable(),
+        error: z.string().optional(),
+      })
       .safeParse(parseResult(choice));
     return parsed.success && parsed.data.panel
       ? {
-          content:
-            "Rocky Shore has the aquarium’s bat-ray touch pool. The cards now put that hands-on option first in this scripted sample.",
+          content: `Rocky Shore has the aquarium’s bat-ray touch pool. The updated cards put ${parsed.data.panel.options[0]?.label ?? "an exhibit"} first.`,
         }
       : { content: "I couldn’t refine the exhibit choices. Please retry." };
   }
