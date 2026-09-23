@@ -12,10 +12,11 @@ export async function modelFixture(
   options: {
     errorStatus?: (index: number) => number | undefined;
     dropAfterStart?: (index: number) => boolean;
+    dropAfterText?: (index: number) => boolean;
     errorPart?: (index: number) => boolean;
   } = {},
 ) {
-  const { errorStatus, dropAfterStart, errorPart } = options;
+  const { errorStatus, dropAfterStart, dropAfterText, errorPart } = options;
   const requests: { path: string; body: string }[] = [];
   const server = createServer(async (request, response) => {
     let body = "";
@@ -45,6 +46,45 @@ export async function modelFixture(
             model: "fixture",
             status: "in_progress",
           },
+        })}\n\n`,
+      );
+      setTimeout(() => response.socket?.destroy(), 120);
+      return;
+    }
+    if (dropAfterText?.(index)) {
+      // Deliver real assistant output, then fail the connection. A retry
+      // must not replay output the client already received.
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.write(
+        `data: ${JSON.stringify({
+          type: "response.created",
+          response: {
+            id: `drop-text-${index}`,
+            created_at: 1000,
+            model: "fixture",
+            status: "in_progress",
+          },
+        })}\n\n`,
+      );
+      response.write(
+        `data: ${JSON.stringify({
+          type: "response.output_item.added",
+          output_index: 0,
+          item: {
+            id: `msg-${index}`,
+            type: "message",
+            role: "assistant",
+            status: "in_progress",
+            content: [],
+          },
+        })}\n\n`,
+      );
+      response.write(
+        `data: ${JSON.stringify({
+          type: "response.output_text.delta",
+          item_id: `msg-${index}`,
+          output_index: 0,
+          delta: "Hello partial ",
         })}\n\n`,
       );
       setTimeout(() => response.socket?.destroy(), 120);
