@@ -21,6 +21,19 @@ export function parseJevResult(value: unknown): JevToolResult | null {
   return parsed.success ? parsed.data : null;
 }
 
+function isPresentChoicesCall(call: unknown): call is { id: string } {
+  if (!call || typeof call !== "object") return false;
+  const tool = call as Record<string, unknown>;
+  const fn = tool.function;
+  return (
+    typeof tool.id === "string" &&
+    (tool.name === "present_choices" ||
+      (fn !== null &&
+        typeof fn === "object" &&
+        (fn as Record<string, unknown>).name === "present_choices"))
+  );
+}
+
 /** The transcript, rather than a rendered card, decides which panel may accept input. */
 export function latestJevPanelId(messages: readonly unknown[], threadId: string): string | null {
   const choices = new Set<string>();
@@ -31,9 +44,7 @@ export function latestJevPanelId(messages: readonly unknown[], threadId: string)
     if (item.role === "user") latest = null;
     if (item.role === "assistant" && Array.isArray(item.toolCalls)) {
       for (const call of item.toolCalls) {
-        if (!call || typeof call !== "object") continue;
-        const tool = call as Record<string, unknown>;
-        if (tool.name === "present_choices" && typeof tool.id === "string") choices.add(tool.id);
+        if (isPresentChoicesCall(call)) choices.add(call.id);
       }
     }
     if (item.role !== "tool" || typeof item.toolCallId !== "string") continue;
@@ -92,9 +103,7 @@ function panelForAction(messages: readonly unknown[], action: JevAction): JevPan
     const item = message as Record<string, unknown>;
     if (item.role === "assistant" && Array.isArray(item.toolCalls)) {
       for (const call of item.toolCalls) {
-        if (!call || typeof call !== "object") continue;
-        const tool = call as Record<string, unknown>;
-        if (tool.name === "present_choices" && typeof tool.id === "string") choices.add(tool.id);
+        if (isPresentChoicesCall(call)) choices.add(call.id);
       }
     }
     if (

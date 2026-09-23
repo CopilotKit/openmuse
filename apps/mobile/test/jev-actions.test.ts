@@ -57,6 +57,26 @@ test("the latest complete panel only belongs to the active thread and current tu
   );
 });
 
+test("finds AG-UI function tool calls as rendered by CopilotKit", () => {
+  const messages = [
+    { role: "user", content: "Help me get ready" },
+    {
+      role: "assistant",
+      content: "I will lay out the next steps.",
+      toolCalls: [
+        { id: "call-1", type: "function", function: { name: "present_choices", arguments: "{}" } },
+      ],
+    },
+    { role: "tool", toolCallId: "call-1", content: JSON.stringify({ panel }) },
+    { role: "assistant", content: "Choose what you would like to do first." },
+  ];
+  assert.equal(latestJevPanelId(messages, "thread-1"), "panel-1");
+  assert.equal(
+    displayJevUserMessage(selectionText(panel, "explore"), messages),
+    "Selected: Explore exhibits",
+  );
+});
+
 test("stale, wrong-thread, selected, busy and pending panels cannot submit", () => {
   assert.equal(choiceAvailability(panel, "thread-2", "panel-1", false, false), "wrong-thread");
   assert.equal(choiceAvailability(panel, "thread-1", "panel-2", false, false), "stale");
