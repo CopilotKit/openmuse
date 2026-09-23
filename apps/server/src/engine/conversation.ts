@@ -190,7 +190,7 @@ export class ConversationAgent extends AbstractAgent {
           try {
             const messages = await this.service.workspace.thread(this.owner, threadId);
             if (jev && messages.length)
-              await jev.noteEvidence(this.owner, input.threadId, "mail", threadId);
+              await jev.noteEvidence(this.owner, input.threadId, input.runId, "mail", threadId);
             return {
               messages: messages.slice(-20).map((message) => ({
                 ...message,
@@ -221,10 +221,8 @@ export class ConversationAgent extends AbstractAgent {
               url,
               browserAbort.signal,
             );
-            if (jev && "url" in page && typeof page.url === "string") {
-              await jev.noteEvidence(this.owner, input.threadId, "web", url);
-              await jev.noteEvidence(this.owner, input.threadId, "web", page.url);
-            }
+            if (jev && "url" in page && typeof page.url === "string")
+              await jev.noteEvidence(this.owner, input.threadId, input.runId, "web", page.url);
             return page;
           } catch (error) {
             browserAbort.signal.throwIfAborted();

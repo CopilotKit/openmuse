@@ -12,10 +12,18 @@ export const presentChoicesParameters = z
     context: z.string().trim().min(1).max(8000),
     title: z.string().trim().min(1).max(200),
     control: z.enum(["clarification", "comparison"]),
-    options: z.array(optionInput).min(1).max(12),
+    options: z.array(optionInput).max(12),
     refinementPanelId: z.string().trim().min(1).max(200).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((input, ctx) => {
+    if (!input.refinementPanelId && input.options.length === 0)
+      ctx.addIssue({
+        code: "custom",
+        path: ["options"],
+        message: "New choices need at least one option",
+      });
+  });
 export function presentChoicesTool(
   jev: JevService,
   owner: string,
@@ -27,7 +35,7 @@ export function presentChoicesTool(
   return defineTool({
     name: "present_choices",
     description:
-      "Present prepared clarification buttons or a sourced comparison after reading evidence. Give 1–12 factual options. Refine an earlier panel with refinementPanelId; the server reuses the full original candidate set. This only asks the user for a preference and performs no external action.",
+      "Present prepared clarification buttons or a sourced comparison after reading evidence. Give 1–12 factual options for a new panel. To refine an earlier panel, supply refinementPanelId and leave options empty; the server reuses the full original candidate set. This only asks the user for a preference and performs no external action.",
     parameters: presentChoicesParameters,
     execute: async (input): Promise<JevToolResult> => {
       try {
@@ -35,14 +43,18 @@ export function presentChoicesTool(
         if (
           mode === "live" &&
           input.control === "clarification" &&
-          !(await jev.hasAnyMailEvidence(owner, threadId))
+          !(await jev.hasAnyMailEvidence(owner, threadId, turnId))
         )
           throw new Error("Read the relevant email before presenting choices.");
         if (mode === "live" && input.control === "comparison") {
-          for (const option of input.options)
-            for (const source of option.sources)
-              if (!(await jev.hasEvidence(owner, threadId, "web", source.url)))
-                throw new Error(`Read the source page before comparing: ${source.url}`);
+          if (input.refinementPanelId) {
+            await jev.candidateSources(owner, threadId, input.refinementPanelId);
+          } else {
+            for (const option of input.options)
+              for (const source of option.sources)
+                if (!(await jev.hasEvidence(owner, threadId, turnId, "web", source.url)))
+                  throw new Error(`Read the source page before comparing: ${source.url}`);
+          }
         }
         return await jev.createPanel(owner, threadId, turnId, input, signal);
       } catch (error) {
