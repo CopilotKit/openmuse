@@ -243,3 +243,42 @@ test("read_web keeps distinct observations of one browser session across a resta
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("read_mail_thread records each read as its own observation of the message", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "openmuse-model-"));
+  const db = await createStore({ dataDir: join(directory, "db") });
+  const calls = [
+    { name: "read_mail_thread", arguments: { threadId: "trip-thread" } },
+    { name: "read_mail_thread", arguments: { threadId: "trip-thread" } },
+    { name: "finish_task", arguments: { summary: "Read the thread twice." } },
+  ];
+  await modelFixture(t, (index) => calls[index]);
+  const server = await createApp(db, {
+    mode: "sample",
+    port: 8787,
+    host: "127.0.0.1",
+    publicUrl: "http://localhost:8787",
+    dataDir: directory,
+    agentBackend: "model",
+    intelligenceApiKey: "test-project-key-never-sent",
+    model: "openai/fixture",
+    googleRedirectUri: "http://localhost:8787/api/google/callback",
+    allowedOrigins: [],
+  });
+  try {
+    await server.workspace.ensureSample("owner", server.actions);
+    const task = await server.agent.createTask("owner", { prompt: "Read the trip", kind: "agent" });
+    await server.agent.worker.tick();
+    const finished = await server.agent.getTask("owner", task.id);
+    assert.equal(finished.status, "succeeded", finished.error ?? finished.question);
+    const reads = finished.evidence.filter((item) => item.kind === "mail");
+    assert.equal(reads.length, 2);
+    assert.equal(new Set(reads.map((item) => item.id)).size, 2);
+    assert.ok(reads.every((item) => item.provenance?.sourceId === "mail-fieldtrip"));
+    assert.ok(reads.every((item) => item.id !== "mail-fieldtrip"));
+  } finally {
+    await server.agent.stop();
+    await db.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

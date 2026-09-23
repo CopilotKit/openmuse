@@ -676,11 +676,11 @@ export class AgentService {
   }
   mailEvidence(mail: Mail): Evidence {
     return {
-      id: mail.id,
+      id: randomUUID(),
       kind: "mail",
       title: mail.subject,
       excerpt: mail.body.slice(0, 400),
-      provenance: { acquisition: "mail", observedAt: date(), sourceId: mail.threadId },
+      provenance: { acquisition: "mail", observedAt: date(), sourceId: mail.id },
     };
   }
   browserEvidence(page: { sessionId: string; url: string; title: string; text: string }): Evidence {

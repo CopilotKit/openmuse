@@ -261,14 +261,16 @@ test("browser reads, search excerpts and legacy evidence survive a store round t
   assert.equal(saved.find((item) => item.id === "legacy-mail")?.provenance, undefined);
 });
 
-test("mail evidence keeps its message identity and records its thread", async () => {
+test("mail evidence identifies each observation separately from its message", async () => {
   const [mail] = (await server.workspace.snapshot(owner)).mail;
   assert.ok(mail);
-  const evidence = server.agent.mailEvidence(mail);
-  assert.equal(evidence.id, mail.id);
-  assert.equal(evidence.kind, "mail");
+  const first = server.agent.mailEvidence(mail);
+  const second = server.agent.mailEvidence(mail);
+  assert.notEqual(first.id, second.id);
+  assert.notEqual(first.id, mail.id);
+  assert.equal(first.kind, "mail");
   assert.deepEqual(
-    { acquisition: evidence.provenance?.acquisition, sourceId: evidence.provenance?.sourceId },
-    { acquisition: "mail", sourceId: mail.threadId },
+    { acquisition: first.provenance?.acquisition, sourceId: first.provenance?.sourceId },
+    { acquisition: "mail", sourceId: mail.id },
   );
 });
