@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { createApp } from "../apps/server/src/app.ts";
 import { createStore } from "../apps/server/src/db.ts";
+import { createDemoModel, demoModel } from "../apps/server/src/demo/model.ts";
 import type { ActionProposal } from "../packages/domain/src/index.ts";
 import { fixture as computerFixture } from "./helpers/computer.ts";
 import { modelFixture } from "./helpers/model.ts";
@@ -108,6 +109,54 @@ test("CopilotKit model worker executes server tools and persists the confirmed o
       (await db.list<ActionProposal>("owner", "actions")).filter((a) => a.taskId === appointment.id)
         .length,
       1,
+    );
+  } finally {
+    await server.agent.stop();
+    await db.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("the model worker keeps the text a model replies with when it calls no tool", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "openmuse-model-text-"));
+  const db = await createStore();
+  const mock = createDemoModel({ latency: 0, firstByteDelay: 0 });
+  await mock.start();
+  const previousBase = process.env.OPENAI_BASE_URL;
+  const previousKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_BASE_URL = `${mock.url}/v1`;
+  process.env.OPENAI_API_KEY = "local-demo-test";
+  t.after(async () => {
+    if (previousBase === undefined) delete process.env.OPENAI_BASE_URL;
+    else process.env.OPENAI_BASE_URL = previousBase;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+    await mock.stop();
+  });
+  const server = await createApp(db, {
+    mode: "sample",
+    port: 8787,
+    host: "127.0.0.1",
+    publicUrl: "http://localhost:8787",
+    dataDir: directory,
+    agentBackend: "model",
+    intelligenceApiKey: "test-project-key-never-sent",
+    model: demoModel,
+    googleRedirectUri: "http://localhost:8787/api/google/callback",
+    allowedOrigins: [],
+  });
+  try {
+    const task = await server.agent.createTask("owner", { prompt: "Plan my week" });
+    await server.agent.worker.tick();
+    const result = await server.agent.detail("owner", task.id);
+    assert.equal(result.task.status, "waiting_input");
+    assert.match(String(result.task.state.lastUpdate), /Find cool stuff on Hacker News/);
+    assert.ok(
+      result.events.some(
+        (event) =>
+          event.title === "Agent update" && /Find cool stuff on Hacker News/.test(event.detail),
+      ),
+      "the reply is recorded in the task timeline",
     );
   } finally {
     await server.agent.stop();

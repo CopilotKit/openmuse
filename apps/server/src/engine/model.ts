@@ -318,7 +318,8 @@ export async function executeModelTask(
     agent.run(input).subscribe({
       next: (event) => {
         if (
-          event.type === EventType.TEXT_MESSAGE_CONTENT &&
+          (event.type === EventType.TEXT_MESSAGE_CHUNK ||
+            event.type === EventType.TEXT_MESSAGE_CONTENT) &&
           "delta" in event &&
           typeof event.delta === "string"
         )
