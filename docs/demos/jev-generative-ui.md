@@ -1,5 +1,9 @@
 # Jev generative UI: aquarium school-trip demo
 
+**[Watch the 81-second web recording](../../assets/demos/2026-09-23/jev-web.mp4)**
+
+[![The sourced aquarium comparison cards in OpenMuse](../../assets/demos/2026-09-23/jev-web.png)](../../assets/demos/2026-09-23/jev-web.mp4)
+
 This recording follows a **scripted sample**, visibly labeled `Sample · scripted decisions` in its choice cards. AI Mock drives the conversation steps; OpenMuse runs its normal mailbox, browser, and `present_choices` tools. The mailbox is the fictional local Lincoln Middle School sample. Candidate copy is a controlled fixture, while the demo browser opens the aquarium's public pages before the comparison appears. The sample does **not** call live Jev.
 
 ## Run

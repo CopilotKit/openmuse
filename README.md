@@ -36,7 +36,7 @@ The 38-second iPhone and 42-second desktop web demos show the current interface,
 
 [Mobile MP4](assets/demos/2026-09-16/mobile.mp4) · [Web MP4](assets/demos/2026-09-16/web.mp4) · [Recording details and reproduction](docs/DEMO.md)
 
-The [Jev aquarium-trip demo](docs/demos/jev-generative-ui.md) walks through a fictional school email, clarification choices, sourced exhibit cards, hands-on preference refinement, and a confirmed selection. Its sample decisions are scripted and labeled in the UI; live Jev requires separate server configuration.
+The [Jev aquarium-trip demo](docs/demos/jev-generative-ui.md) walks through a fictional school email, clarification choices, sourced exhibit cards, hands-on preference refinement, and a confirmed selection. [Watch the 81-second recording](assets/demos/2026-09-23/jev-web.mp4). Its sample decisions are scripted and labeled in the UI; live Jev requires separate server configuration.
 
 ## What it is
 
