@@ -43,8 +43,8 @@ export function assertApiDeploymentConfig(config: Config): void {
   }
 }
 
-// The AI SDK retries only transient provider failures — HTTP 408, 409, 429 and
-// 5xx, plus network errors — with exponential backoff. Non-retryable responses
+// The AI SDK retries only transient provider failures: HTTP 408, 409, 429 and
+// 5xx, plus network errors, with exponential backoff. Non-retryable responses
 // such as 400, 401 and 403 fail on the first attempt. External writes never
 // re-fire here: they are dispatched outside the model loop through reviewed,
 // idempotency-keyed actions.
