@@ -1,0 +1,192 @@
+import { Check, ExternalLink } from "lucide-react-native";
+import { createContext, useContext, useRef, useState } from "react";
+import { ActivityIndicator, Linking, Pressable, Text, View } from "react-native";
+import type { JevOption, JevPanel } from "../../../packages/domain/src/jev";
+import { choiceAvailability, parseJevResult, selectionText } from "./jev-actions";
+import { Button, Card, colors, ErrorNotice, s } from "./ui";
+
+type JevInteraction = {
+  threadId: string | null;
+  busy: boolean;
+  latestPanelId: string | null;
+  send: (text: string) => Promise<void>;
+  confirmedSelection: (panelId: string) => string | null;
+};
+
+export const JevInteractionContext = createContext<JevInteraction>({
+  threadId: null,
+  busy: true,
+  latestPanelId: null,
+  confirmedSelection: () => null,
+  send: async () => {
+    throw new Error("Open an active conversation to choose an option.");
+  },
+});
+
+function SourceLink({ title, url }: { title: string; url: string }) {
+  return (
+    <Pressable
+      accessibilityRole="link"
+      accessibilityLabel={`Source: ${title}`}
+      onPress={() => void Linking.openURL(url)}
+      style={({ pressed }) => [s.row, { gap: 4, opacity: pressed ? 0.65 : 1 }]}
+    >
+      <Text style={[s.small, { color: colors.blueDark, textDecorationLine: "underline" }]}>
+        {title}
+      </Text>
+      <ExternalLink size={12} color={colors.blueDark} />
+    </Pressable>
+  );
+}
+
+function ChoiceButton({
+  panel,
+  option,
+  disabled,
+  pending,
+  onChoose,
+}: {
+  panel: JevPanel;
+  option: JevOption;
+  disabled: boolean;
+  pending: boolean;
+  onChoose: (optionId: string) => void;
+}) {
+  return (
+    <Button
+      small={panel.type === "clarification"}
+      disabled={disabled}
+      busy={pending}
+      icon={panel.selectedId === option.id ? Check : undefined}
+      onPress={() => onChoose(option.id)}
+      style={
+        panel.type === "comparison"
+          ? { alignSelf: "flex-start", backgroundColor: colors.blue }
+          : undefined
+      }
+    >
+      {panel.type === "clarification"
+        ? option.label
+        : /exhibit/i.test(panel.title)
+          ? "Choose this exhibit"
+          : "Choose this option"}
+    </Button>
+  );
+}
+
+export function JevToolCard({ result, loading }: { result: unknown; loading: boolean }) {
+  const interaction = useContext(JevInteractionContext);
+  const [submittingId, setSubmittingId] = useState<string | null>(null);
+  const [confirmedId, setConfirmedId] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState("");
+  const pendingRef = useRef(false);
+  if (loading) {
+    return (
+      <View style={[s.row, { gap: 10, padding: 14 }]}>
+        <ActivityIndicator size="small" color={colors.blueDark} />
+        <Text style={s.muted}>Preparing choices…</Text>
+      </View>
+    );
+  }
+
+  const parsed = parseJevResult(result);
+  if (!parsed) return <ErrorNotice error="The choices could not be displayed. Please retry." />;
+  if (parsed.error) return <ErrorNotice error={parsed.error} />;
+  const panel = parsed.panel;
+  if (!panel) return null;
+
+  const availability = choiceAvailability(
+    panel,
+    interaction.threadId || "",
+    interaction.latestPanelId,
+    interaction.busy,
+    submittingId !== null ||
+      confirmedId !== null ||
+      interaction.confirmedSelection(panel.id) !== null,
+  );
+  const stale = availability === "wrong-thread" || availability === "stale";
+  const selectedId = panel.selectedId || confirmedId || interaction.confirmedSelection(panel.id);
+  const disabled = availability !== "ready";
+
+  async function choose(optionId: string) {
+    if (
+      !panel ||
+      pendingRef.current ||
+      confirmedId ||
+      choiceAvailability(
+        panel,
+        interaction.threadId || "",
+        interaction.latestPanelId,
+        interaction.busy,
+        false,
+      ) !== "ready"
+    )
+      return;
+    pendingRef.current = true;
+    setSubmittingId(optionId);
+    setSubmitError("");
+    try {
+      await interaction.send(selectionText(panel, optionId));
+      setConfirmedId(optionId);
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : String(error));
+    } finally {
+      pendingRef.current = false;
+      setSubmittingId(null);
+    }
+  }
+
+  return (
+    <Card style={{ width: "100%", maxWidth: 440, padding: 17, gap: 13 }}>
+      <View style={{ gap: 5 }}>
+        <Text style={s.heading}>{panel.title}</Text>
+        {panel.mode === "sample" && <Text style={s.small}>Sample · scripted decisions</Text>}
+        {stale && <Text style={s.small}>Earlier choices</Text>}
+        {selectedId && <Text style={s.small}>Choice submitted</Text>}
+      </View>
+      {panel.type === "clarification" ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          {panel.options.map((option) => (
+            <ChoiceButton
+              key={option.id}
+              panel={panel}
+              option={option}
+              disabled={disabled}
+              pending={submittingId === option.id}
+              onChoose={(id) => void choose(id)}
+            />
+          ))}
+        </View>
+      ) : (
+        <View style={{ gap: 10 }}>
+          {panel.options.map((option) => (
+            <View
+              key={option.id}
+              style={{ borderRadius: 16, padding: 14, gap: 9, backgroundColor: "#F6F7F8" }}
+            >
+              <Text style={[s.text, { fontWeight: "600" }]}>{option.label}</Text>
+              {!!option.details.length && (
+                <Text style={s.muted}>
+                  {option.details.map((detail) => `• ${detail}`).join("\n")}
+                </Text>
+              )}
+              <View style={{ gap: 5 }}>
+                {option.sources.map((source) => (
+                  <SourceLink key={`${option.id}-${source.url}`} {...source} />
+                ))}
+              </View>
+              <ChoiceButton
+                panel={panel}
+                option={option}
+                disabled={disabled}
+                pending={submittingId === option.id}
+                onChoose={(id) => void choose(id)}
+              />
+            </View>
+          ))}
+        </View>
+      )}
+      <ErrorNotice error={submitError} />
+    </Card>
+  );
+}
