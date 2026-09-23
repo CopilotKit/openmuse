@@ -200,7 +200,7 @@ test("aborted decision never publishes a panel", async (t) => {
   assert.deepEqual(await store.list("owner", "jev_panels"), []);
 });
 
-test("failed, aborted, and agent decisions keep the prior panel selectable", async (t) => {
+test("failed and aborted decisions keep the prior panel, while an agent decision clears it", async (t) => {
   const dataDir = join(await mkdtemp(join(tmpdir(), "jev-preserve-")), "db");
   const store = await createStore({ dataDir });
   t.after(async () => {
@@ -251,14 +251,15 @@ test("failed, aborted, and agent decisions keep the prior panel selectable", asy
     await ordinary.createPanel("owner", "thread", "ordinary", args, new AbortController().signal),
     { panel: null },
   );
-  assert.equal((await initial.currentPanel("owner", "thread"))?.id, first.panel.id);
-  const selection = await initial.select("owner", "thread", {
-    panelId: first.panel.id,
-    threadId: "thread",
-    candidateSetVersion: first.panel.candidateSetVersion,
-    optionId: "a",
-  });
-  assert.match(selection.continuation, /Kelp Forest/);
+  assert.equal(await initial.currentPanel("owner", "thread"), null);
+  await assert.rejects(
+    initial.select("owner", "thread", {
+      panelId: first.panel.id,
+      threadId: "thread",
+      candidateSetVersion: first.panel.candidateSetVersion,
+      optionId: "a",
+    }),
+  );
 });
 
 test("stale refinement cannot reserve over a newer published panel", async (t) => {
@@ -630,4 +631,84 @@ test("mail evidence lookup uses direct run marker and web evidence stores bounde
     await service.evidenceText("owner", "thread", "other", "web", "https://example.org/full"),
     null,
   );
+});
+
+test("an agent decision invalidates the older panel but a failed decision preserves it", async (t) => {
+  const dataDir = join(await mkdtemp(join(tmpdir(), "jev-agent-expire-")), "db");
+  const store = await createStore({ dataDir });
+  t.after(async () => {
+    await store.close();
+    await rm(dataDir, { recursive: true, force: true });
+  });
+  const firstService = new JevService({ store, adapter, mode: "sample" });
+  const first = await firstService.createPanel(
+    "owner",
+    "thread",
+    "first",
+    args,
+    new AbortController().signal,
+  );
+  assert.ok(first.panel);
+  const failed = new JevService({
+    store,
+    adapter: {
+      decide: async () => {
+        throw new Error("unavailable");
+      },
+    },
+    mode: "sample",
+  });
+  await assert.rejects(
+    failed.createPanel("owner", "thread", "failed", args, new AbortController().signal),
+  );
+  const action = {
+    panelId: first.panel.id,
+    threadId: "thread",
+    candidateSetVersion: first.panel.candidateSetVersion,
+    optionId: "a",
+  };
+  assert.equal((await firstService.currentPanel("owner", "thread"))?.id, first.panel.id);
+  const agentService = new JevService({
+    store,
+    adapter: { decide: async () => ({ control: "agent", scores: { a: 1, b: 2 } }) },
+    mode: "sample",
+  });
+  assert.deepEqual(
+    await agentService.createPanel("owner", "thread", "agent", args, new AbortController().signal),
+    { panel: null },
+  );
+  assert.equal(await firstService.currentPanel("owner", "thread"), null);
+  await assert.rejects(firstService.select("owner", "thread", action));
+});
+
+test("ordinary-turn expiry rejects stale actions while preserving a concurrent selection", async (t) => {
+  const dataDir = join(await mkdtemp(join(tmpdir(), "jev-turn-expire-")), "db");
+  const store = await createStore({ dataDir });
+  t.after(async () => {
+    await store.close();
+    await rm(dataDir, { recursive: true, force: true });
+  });
+  const service = new JevService({ store, adapter, mode: "sample" });
+  const first = await service.createPanel(
+    "owner",
+    "thread",
+    "first",
+    args,
+    new AbortController().signal,
+  );
+  assert.ok(first.panel);
+  const snapshot = await service.headSnapshot("owner", "thread");
+  const action = {
+    panelId: first.panel.id,
+    threadId: "thread",
+    candidateSetVersion: first.panel.candidateSetVersion,
+    optionId: "a",
+  };
+  await service.select("owner", "thread", action);
+  assert.equal(await service.expireIfUnchanged("owner", "thread", snapshot), false);
+  assert.match((await service.select("owner", "thread", action)).continuation, /Kelp Forest/);
+  const selectedSnapshot = await service.headSnapshot("owner", "thread");
+  assert.equal(await service.expireIfUnchanged("owner", "thread", selectedSnapshot), true);
+  assert.equal(await service.currentPanel("owner", "thread"), null);
+  await assert.rejects(service.select("owner", "thread", action));
 });

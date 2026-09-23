@@ -27,6 +27,11 @@ type ThreadRecord = {
   currentPanelId?: string | null;
   selectedId?: string | null;
 };
+export type JevHeadSnapshot = {
+  currentPanelId: string;
+  revision: number;
+  selectedId: string | null;
+};
 export class JevService {
   constructor(
     private readonly deps: { store: Store; adapter: JevAdapter; mode: "sample" | "live" },
@@ -68,6 +73,47 @@ export class JevService {
     if (!head?.currentPanelId) return null;
     const record = await this.store.get<PanelRecord>(owner, "jev_panels", head.currentPanelId);
     return record?.panel ?? null;
+  }
+  async headSnapshot(owner: string, threadId: string): Promise<JevHeadSnapshot | null> {
+    const head = await this.store.get<ThreadRecord>(owner, "jev_threads", threadId);
+    if (!head?.currentPanelId) return null;
+    return {
+      currentPanelId: head.currentPanelId,
+      revision: head.revision,
+      selectedId: head.selectedId ?? null,
+    };
+  }
+  async expireIfUnchanged(
+    owner: string,
+    threadId: string,
+    snapshot: JevHeadSnapshot | null,
+  ): Promise<boolean> {
+    if (!snapshot) return false;
+    const head = await this.store.get<ThreadRecord>(owner, "jev_threads", threadId);
+    if (
+      !head ||
+      head.currentPanelId !== snapshot.currentPanelId ||
+      head.revision !== snapshot.revision ||
+      (head.selectedId ?? null) !== snapshot.selectedId
+    )
+      return false;
+    return !!(await this.store.compareAndSwap<ThreadRecord>(
+      owner,
+      "jev_threads",
+      threadId,
+      {
+        generation: head.generation,
+        revision: snapshot.revision,
+        currentPanelId: snapshot.currentPanelId,
+        selectedId: snapshot.selectedId,
+      },
+      {
+        generation: head.generation + 1,
+        revision: head.generation + 1,
+        currentPanelId: null,
+        selectedId: null,
+      },
+    ));
   }
   async candidateSources(
     owner: string,
@@ -145,7 +191,25 @@ export class JevService {
       signal,
     );
     signal.throwIfAborted();
-    if (decision.control === "agent") return { panel: null };
+    if (decision.control === "agent") {
+      const head = await this.store.compareAndSwap<ThreadRecord>(
+        owner,
+        "jev_threads",
+        threadId,
+        {
+          generation: generation.generation,
+          revision: generation.revision,
+          ...(generation.currentPanelId !== undefined
+            ? { currentPanelId: generation.currentPanelId }
+            : {}),
+          ...(generation.selectedId !== undefined ? { selectedId: generation.selectedId } : {}),
+        },
+        { revision: generation.generation, currentPanelId: null, selectedId: null },
+      );
+      if (!head)
+        return { panel: null, error: "These choices were superseded by a newer response." };
+      return { panel: null };
+    }
     if (decision.control !== input.control) throw new Error("Jev returned an unexpected control");
     const ranked = rankJevOptions(candidates, decision);
     const visible = decision.control === "comparison" ? ranked.slice(0, 3) : ranked;

@@ -31,6 +31,9 @@ export class ConversationAgent extends AbstractAgent {
     return new ConversationAgent(this.config, this.service, this.owner, this.jevAdapter);
   }
   run(input: RunAgentInput): Observable<BaseEvent> {
+    return this.runInternal(input, false);
+  }
+  private runInternal(input: RunAgentInput, choiceContinuation: boolean): Observable<BaseEvent> {
     const latest = input.messages.filter((m) => m.role === "user").at(-1);
     const requestKey = `${input.threadId}:${latest?.id ?? input.runId}`;
     const jevMode = this.config.jevMode ?? "off";
@@ -61,7 +64,7 @@ export class ConversationAgent extends AbstractAgent {
             const messages = input.messages.map((message) =>
               message === latest ? { ...message, content: selection.continuation } : message,
             );
-            subscription = this.run({ ...input, messages }).subscribe(subscriber);
+            subscription = this.runInternal({ ...input, messages }, true).subscribe(subscriber);
           } catch (error) {
             if (cancelled) return;
             subscriber.next({
@@ -77,63 +80,68 @@ export class ConversationAgent extends AbstractAgent {
         };
       });
     if (this.config.agentBackend === "sample")
-      return new Observable((subscriber) => {
-        subscriber.next({
-          type: EventType.RUN_STARTED,
-          threadId: input.threadId,
-          runId: input.runId,
-        });
-        void this.sample(typeof latest?.content === "string" ? latest.content : "", requestKey)
-          .then(({ content, task }) => {
-            const id = randomUUID();
-            subscriber.next({
-              type: EventType.TEXT_MESSAGE_START,
-              messageId: id,
-              role: "assistant",
-            });
-            subscriber.next({
-              type: EventType.TEXT_MESSAGE_CONTENT,
-              messageId: id,
-              delta: content,
-            });
-            subscriber.next({ type: EventType.TEXT_MESSAGE_END, messageId: id });
-            if (task) {
-              const toolCallId = randomUUID();
-              subscriber.next({
-                type: EventType.TOOL_CALL_START,
-                toolCallId,
-                toolCallName: "delegate_task",
-                parentMessageId: id,
-              });
-              subscriber.next({
-                type: EventType.TOOL_CALL_ARGS,
-                toolCallId,
-                delta: JSON.stringify({ prompt: task.prompt, kind: task.kind }),
-              });
-              subscriber.next({ type: EventType.TOOL_CALL_END, toolCallId });
-              subscriber.next({
-                type: EventType.TOOL_CALL_RESULT,
-                toolCallId,
-                messageId: randomUUID(),
-                role: "tool",
-                content: JSON.stringify({ id: task.id }),
-              });
-            }
-            subscriber.next({
-              type: EventType.RUN_FINISHED,
-              threadId: input.threadId,
-              runId: input.runId,
-            });
-            subscriber.complete();
-          })
-          .catch((error) => {
-            subscriber.next({
-              type: EventType.RUN_ERROR,
-              message: error instanceof Error ? error.message : "Could not start the task",
-            });
-            subscriber.complete();
+      return this.expireAfterOrdinaryTurn(
+        new Observable((subscriber) => {
+          subscriber.next({
+            type: EventType.RUN_STARTED,
+            threadId: input.threadId,
+            runId: input.runId,
           });
-      });
+          void this.sample(typeof latest?.content === "string" ? latest.content : "", requestKey)
+            .then(({ content, task }) => {
+              const id = randomUUID();
+              subscriber.next({
+                type: EventType.TEXT_MESSAGE_START,
+                messageId: id,
+                role: "assistant",
+              });
+              subscriber.next({
+                type: EventType.TEXT_MESSAGE_CONTENT,
+                messageId: id,
+                delta: content,
+              });
+              subscriber.next({ type: EventType.TEXT_MESSAGE_END, messageId: id });
+              if (task) {
+                const toolCallId = randomUUID();
+                subscriber.next({
+                  type: EventType.TOOL_CALL_START,
+                  toolCallId,
+                  toolCallName: "delegate_task",
+                  parentMessageId: id,
+                });
+                subscriber.next({
+                  type: EventType.TOOL_CALL_ARGS,
+                  toolCallId,
+                  delta: JSON.stringify({ prompt: task.prompt, kind: task.kind }),
+                });
+                subscriber.next({ type: EventType.TOOL_CALL_END, toolCallId });
+                subscriber.next({
+                  type: EventType.TOOL_CALL_RESULT,
+                  toolCallId,
+                  messageId: randomUUID(),
+                  role: "tool",
+                  content: JSON.stringify({ id: task.id }),
+                });
+              }
+              subscriber.next({
+                type: EventType.RUN_FINISHED,
+                threadId: input.threadId,
+                runId: input.runId,
+              });
+              subscriber.complete();
+            })
+            .catch((error) => {
+              subscriber.next({
+                type: EventType.RUN_ERROR,
+                message: error instanceof Error ? error.message : "Could not start the task",
+              });
+              subscriber.complete();
+            });
+        }),
+        jev,
+        input.threadId,
+        !choiceContinuation,
+      );
     const key = (name: string, value: unknown) =>
       `${requestKey}:${name}:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
     const browserAbort = new AbortController();
@@ -305,14 +313,79 @@ export class ConversationAgent extends AbstractAgent {
           : "") +
         computerInstructions,
     });
+    return this.expireAfterOrdinaryTurn(
+      new Observable((subscriber) => {
+        const subscription = agent
+          .run({ ...input, tools: input.tools.filter((t) => t.name === "open_workspace") })
+          .subscribe(subscriber);
+        return () => {
+          browserAbort.abort();
+          agent.abortRun();
+          subscription.unsubscribe();
+        };
+      }),
+      jev,
+      input.threadId,
+      !choiceContinuation,
+    );
+  }
+  private expireAfterOrdinaryTurn(
+    source: Observable<BaseEvent>,
+    jev: JevService | null,
+    threadId: string,
+    enabled: boolean,
+  ): Observable<BaseEvent> {
+    if (!jev || !enabled) return source;
     return new Observable((subscriber) => {
-      const subscription = agent
-        .run({ ...input, tools: input.tools.filter((t) => t.name === "open_workspace") })
-        .subscribe(subscriber);
+      let cancelled = false;
+      let subscription: { unsubscribe(): void } | undefined;
+      void (async () => {
+        try {
+          const baseline = await jev.headSnapshot(this.owner, threadId);
+          if (cancelled) return;
+          if (!baseline) {
+            subscription = source.subscribe(subscriber);
+            if (cancelled) subscription.unsubscribe();
+            return;
+          }
+          let finalizing: Promise<void> | null = null;
+          subscription = source.subscribe({
+            next: (event) => {
+              if (cancelled) return;
+              if (event.type !== EventType.RUN_FINISHED) {
+                subscriber.next(event);
+                return;
+              }
+              finalizing = jev.expireIfUnchanged(this.owner, threadId, baseline).then(
+                () => {
+                  if (!cancelled) subscriber.next(event);
+                },
+                () => {
+                  if (!cancelled)
+                    subscriber.next({
+                      type: EventType.RUN_ERROR,
+                      message: "Could not finalize choices. Please retry.",
+                    });
+                },
+              );
+            },
+            error: (error) => subscriber.error(error),
+            complete: () => {
+              if (finalizing)
+                void finalizing.then(() => {
+                  if (!cancelled) subscriber.complete();
+                });
+              else subscriber.complete();
+            },
+          });
+          if (cancelled) subscription.unsubscribe();
+        } catch (error) {
+          if (!cancelled) subscriber.error(error);
+        }
+      })();
       return () => {
-        browserAbort.abort();
-        agent.abortRun();
-        subscription.unsubscribe();
+        cancelled = true;
+        subscription?.unsubscribe();
       };
     });
   }

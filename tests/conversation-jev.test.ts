@@ -113,6 +113,8 @@ test("present_choices emits a complete panel and selection uses trusted stored l
   });
   const selected = await lastValueFrom(f.conversation.run(input(action)).pipe(toArray()));
   assert.equal(selected.at(-1)?.type, EventType.RUN_FINISHED);
+  const retried = await lastValueFrom(f.conversation.run(input(action)).pipe(toArray()));
+  assert.equal(retried.at(-1)?.type, EventType.RUN_FINISHED);
   const stored = await f.db.get<{ selectedId: string }>(
     "local-user",
     "jev_threads",
@@ -598,3 +600,86 @@ for (const [name, candidate, error] of [
     assert.match(JSON.parse(String(rejected.content)).error, error);
   });
 }
+
+test("a later ordinary completed turn invalidates a prior choice panel", async (t) => {
+  const f = await fixture(t, [
+    {
+      name: "present_choices",
+      arguments: {
+        message: "What next?",
+        context: "User asked",
+        title: "Next",
+        control: "clarification",
+        options,
+      },
+    },
+    undefined,
+    undefined,
+  ]);
+  const first = await lastValueFrom(f.conversation.run(input("What next?")).pipe(toArray()));
+  const result = first.find(
+    (event) => event.type === EventType.TOOL_CALL_RESULT && JSON.parse(String(event.content)).panel,
+  );
+  assert.ok(result && result.type === EventType.TOOL_CALL_RESULT);
+  const panel = JSON.parse(String(result.content)).panel;
+  const ordinary = await lastValueFrom(
+    f.conversation.run(input("Tell me about the weather")).pipe(toArray()),
+  );
+  assert.equal(ordinary.at(-1)?.type, EventType.RUN_FINISHED);
+  assert.equal(
+    (await f.db.get<{ currentPanelId: string | null }>("local-user", "jev_threads", panel.threadId))
+      ?.currentPanelId,
+    null,
+  );
+  const action = encodeJevAction({
+    panelId: panel.id,
+    threadId: panel.threadId,
+    candidateSetVersion: panel.candidateSetVersion,
+    optionId: "explore",
+  });
+  const replay = await lastValueFrom(f.conversation.run(input(action)).pipe(toArray()));
+  assert.equal(replay.at(-1)?.type, EventType.RUN_ERROR);
+});
+
+test("cancelling an ordinary turn leaves the prior choice available", async (t) => {
+  const f = await fixture(t, [
+    {
+      name: "present_choices",
+      arguments: {
+        message: "What next?",
+        context: "User asked",
+        title: "Next",
+        control: "clarification",
+        options,
+      },
+    },
+    undefined,
+  ]);
+  const first = await lastValueFrom(f.conversation.run(input("What next?")).pipe(toArray()));
+  const result = first.find(
+    (event) => event.type === EventType.TOOL_CALL_RESULT && JSON.parse(String(event.content)).panel,
+  );
+  assert.ok(result && result.type === EventType.TOOL_CALL_RESULT);
+  const panel = JSON.parse(String(result.content)).panel;
+  const sampleAgent = new ConversationAgent(
+    { ...f.config, agentBackend: "sample", jevMode: "sample" },
+    f.agent,
+    "local-user",
+  );
+  await new Promise<void>((resolve, reject) => {
+    const subscription = sampleAgent.run(input("hello")).subscribe({
+      next: (event) => {
+        if (event.type === EventType.RUN_STARTED) {
+          subscription.unsubscribe();
+          resolve();
+        }
+      },
+      error: reject,
+    });
+  });
+  assert.equal(
+    (await f.db.get<{ currentPanelId: string | null }>("local-user", "jev_threads", panel.threadId))
+      ?.currentPanelId,
+    panel.id,
+  );
+});
