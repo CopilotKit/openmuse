@@ -10,12 +10,19 @@ export type TaskStatus =
   | "succeeded"
   | "failed"
   | "cancelled";
+export interface EvidenceProvenance {
+  acquisition: "browser" | "monitor" | "search" | "mail" | "user";
+  observedAt: string;
+  sourceId?: string;
+  provider?: string;
+}
 export interface Evidence {
   id: string;
   kind: "mail" | "file" | "web" | "user";
   title: string;
   excerpt: string;
   url?: string;
+  provenance?: EvidenceProvenance;
 }
 export interface TaskStep {
   id: string;
