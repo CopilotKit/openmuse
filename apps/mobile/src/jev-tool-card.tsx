@@ -44,32 +44,52 @@ function ChoiceButton({
   option,
   disabled,
   pending,
+  selected,
+  position,
   onChoose,
 }: {
   panel: JevPanel;
   option: JevOption;
   disabled: boolean;
   pending: boolean;
+  selected: boolean;
+  position: number;
   onChoose: (optionId: string) => void;
 }) {
+  if (panel.type === "comparison") {
+    const caption = /exhibit/i.test(panel.title) ? "Choose this exhibit" : "Choose this option";
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${caption}: ${option.label} (option ${position})`}
+        accessibilityState={{ disabled: disabled || pending, busy: pending, selected }}
+        disabled={disabled || pending}
+        onPress={() => onChoose(option.id)}
+        style={({ pressed }) => [
+          s.button,
+          { alignSelf: "flex-start", backgroundColor: colors.blue },
+          (disabled || pending) && { opacity: 0.5 },
+          pressed && { transform: [{ scale: 0.98 }] },
+        ]}
+      >
+        {pending ? (
+          <ActivityIndicator size="small" color={colors.text} />
+        ) : selected ? (
+          <Check size={15} color={colors.text} />
+        ) : null}
+        <Text style={s.buttonText}>{caption}</Text>
+      </Pressable>
+    );
+  }
   return (
     <Button
-      small={panel.type === "clarification"}
+      small
       disabled={disabled}
       busy={pending}
-      icon={panel.selectedId === option.id ? Check : undefined}
+      icon={selected ? Check : undefined}
       onPress={() => onChoose(option.id)}
-      style={
-        panel.type === "comparison"
-          ? { alignSelf: "flex-start", backgroundColor: colors.blue }
-          : undefined
-      }
     >
-      {panel.type === "clarification"
-        ? option.label
-        : /exhibit/i.test(panel.title)
-          ? "Choose this exhibit"
-          : "Choose this option"}
+      {option.label}
     </Button>
   );
 }
@@ -146,20 +166,22 @@ export function JevToolCard({ result, loading }: { result: unknown; loading: boo
       </View>
       {panel.type === "clarification" ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-          {panel.options.map((option) => (
+          {panel.options.map((option, index) => (
             <ChoiceButton
               key={option.id}
               panel={panel}
               option={option}
               disabled={disabled}
               pending={submittingId === option.id}
+              selected={selectedId === option.id}
+              position={index + 1}
               onChoose={(id) => void choose(id)}
             />
           ))}
         </View>
       ) : (
         <View style={{ gap: 10 }}>
-          {panel.options.map((option) => (
+          {panel.options.map((option, index) => (
             <View
               key={option.id}
               style={{ borderRadius: 16, padding: 14, gap: 9, backgroundColor: "#F6F7F8" }}
@@ -180,6 +202,8 @@ export function JevToolCard({ result, loading }: { result: unknown; loading: boo
                 option={option}
                 disabled={disabled}
                 pending={submittingId === option.id}
+                selected={selectedId === option.id}
+                position={index + 1}
                 onChoose={(id) => void choose(id)}
               />
             </View>
