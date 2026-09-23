@@ -13,16 +13,12 @@ const sampleConfig: Config = {
   allowedOrigins: ["http://localhost:8081"],
 };
 
-function liveConfig(
-  overrides: Partial<Pick<Config, "intelligenceApiKey" | "intelligenceLearningContainerId">> = {},
-): Config {
+function liveConfig(intelligenceApiKey?: string): Config {
   return {
     ...sampleConfig,
     mode: "live",
     agentBackend: "model",
-    intelligenceApiKey: "test-project-key-never-sent",
-    intelligenceLearningContainerId: "openmuse-assistant",
-    ...overrides,
+    intelligenceApiKey,
   };
 }
 
@@ -46,56 +42,57 @@ function withEnv<T>(overrides: Record<string, string>, run: () => T): T {
 }
 
 const missingKeyMessage =
-  "Live mode requires CPK_INTELLIGENCE_API_KEY for durable Rich Threads. " +
+  "OpenMuse requires CPK_INTELLIGENCE_API_KEY. " +
   "Run `npx copilotkit@latest login` and `npx copilotkit@latest project select`, " +
   "then set the generated server-only key. " +
   "See https://docs.copilotkit.ai/intelligence/connect-your-runtime";
 
-const missingLearningContainerMessage =
-  "Live mode requires CPK_INTELLIGENCE_LEARNING_CONTAINER_ID for Automatic Learning. " +
-  "Create a focused container in the Intelligence project's Learning area, then set its stable ID. " +
-  "See https://docs.copilotkit.ai/learning";
+test("every API mode rejects a missing or blank Intelligence key", () => {
+  for (const mode of [sampleConfig, liveConfig()]) {
+    for (const key of [undefined, "", " \t\n"]) {
+      assert.throws(() => assertApiDeploymentConfig({ ...mode, intelligenceApiKey: key }), {
+        name: "Error",
+        message: missingKeyMessage,
+      });
+    }
+  }
+});
+
+test("every API mode accepts a non-empty Intelligence key", () => {
+  for (const mode of [sampleConfig, liveConfig()]) {
+    assert.doesNotThrow(() =>
+      assertApiDeploymentConfig({ ...mode, intelligenceApiKey: "test-project-key-never-sent" }),
+    );
+  }
+});
 
 const invalidLearningContainerMessage =
   "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID must contain 1-64 lowercase letters, numbers, or single hyphens, " +
   "with no leading, trailing, or repeated hyphen. " +
   "See https://docs.copilotkit.ai/learning";
 
-test("live API configuration rejects a missing or blank Intelligence key", () => {
-  for (const key of [undefined, "", " \t\n"]) {
-    assert.throws(() => assertApiDeploymentConfig(liveConfig({ intelligenceApiKey: key })), {
-      name: "Error",
-      message: missingKeyMessage,
-    });
+const keyed = (config: Config, intelligenceLearningContainerId?: string): Config => ({
+  ...config,
+  intelligenceApiKey: "test-project-key-never-sent",
+  intelligenceLearningContainerId,
+});
+
+test("Automatic Learning is opt-in: a missing or blank container ID is accepted", () => {
+  for (const mode of [sampleConfig, liveConfig()]) {
+    for (const containerId of [undefined, "", " \t\n"]) {
+      assert.doesNotThrow(() => assertApiDeploymentConfig(keyed(mode, containerId)));
+    }
   }
 });
 
-test("live API configuration reports the Intelligence key error before the Learning container ID error", () => {
+test("the Intelligence key error is reported before a Learning container ID error", () => {
   assert.throws(
-    () =>
-      assertApiDeploymentConfig(
-        liveConfig({ intelligenceApiKey: " \t\n", intelligenceLearningContainerId: undefined }),
-      ),
-    {
-      name: "Error",
-      message: missingKeyMessage,
-    },
+    () => assertApiDeploymentConfig({ ...keyed(liveConfig(), "Bad_ID"), intelligenceApiKey: "" }),
+    { name: "Error", message: missingKeyMessage },
   );
 });
 
-test("live API configuration rejects a missing or blank Learning container ID", () => {
-  for (const containerId of [undefined, "", " \t\n"]) {
-    assert.throws(
-      () => assertApiDeploymentConfig(liveConfig({ intelligenceLearningContainerId: containerId })),
-      {
-        name: "Error",
-        message: missingLearningContainerMessage,
-      },
-    );
-  }
-});
-
-test("live API configuration rejects an invalid Learning container ID", () => {
+test("a configured Learning container ID must be valid", () => {
   for (const containerId of [
     "OpenMuse",
     "openmuse_assistant",
@@ -105,32 +102,24 @@ test("live API configuration rejects an invalid Learning container ID", () => {
     " openmuse ",
     "a".repeat(65),
   ]) {
-    assert.throws(
-      () => assertApiDeploymentConfig(liveConfig({ intelligenceLearningContainerId: containerId })),
-      {
-        name: "Error",
-        message: invalidLearningContainerMessage,
-      },
-    );
+    assert.throws(() => assertApiDeploymentConfig(keyed(liveConfig(), containerId)), {
+      name: "Error",
+      message: invalidLearningContainerMessage,
+    });
   }
 });
 
-test("live API configuration accepts a non-empty Intelligence key", () => {
+test("a valid Learning container ID is accepted", () => {
   for (const containerId of ["openmuse", "openmuse-assistant", "assistant-2", "a".repeat(64)]) {
-    assert.doesNotThrow(() =>
-      assertApiDeploymentConfig(liveConfig({ intelligenceLearningContainerId: containerId })),
-    );
+    assert.doesNotThrow(() => assertApiDeploymentConfig(keyed(liveConfig(), containerId)));
   }
-});
-
-test("sample API configuration remains key-free", () => {
-  assert.doesNotThrow(() => assertApiDeploymentConfig(sampleConfig));
 });
 
 test("readConfig reads the Learning container ID from the environment", () => {
   withEnv(
     {
       AGENT_BACKEND: "sample",
+      CPK_INTELLIGENCE_API_KEY: "test-project-key-never-sent",
       CPK_INTELLIGENCE_LEARNING_CONTAINER_ID: "openmuse-assistant",
       HOST: "127.0.0.1",
       WORKSPACE_MODE: "sample",

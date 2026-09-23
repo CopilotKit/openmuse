@@ -3,12 +3,13 @@ import { randomUUID } from "node:crypto";
 import test, { type TestContext } from "node:test";
 import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import { createApp } from "../apps/server/src/app.ts";
+import type { Config } from "../apps/server/src/config.ts";
 import { browserFixture } from "./helpers/browser.ts";
 import { modelFixture } from "./helpers/model.ts";
 
 type ThreadRequest = Parameters<CopilotKitIntelligence["getOrCreateThread"]>[0];
 
-async function liveApp(t: TestContext) {
+async function liveApp(t: TestContext, overrides: Partial<Config> = {}) {
   await modelFixture(t, () => undefined);
   const fixture = await browserFixture(t, () => ({ data: {} }));
   const server = await createApp(fixture.db, {
@@ -19,6 +20,7 @@ async function liveApp(t: TestContext) {
     accessKey: "test-access-key",
     intelligenceApiKey: "test-project-key-never-sent",
     intelligenceLearningContainerId: "openmuse-assistant",
+    ...overrides,
   });
   t.after(() => server.agent.stop());
   const session = await server.app.request("/api/session", {
@@ -71,13 +73,9 @@ test("live default-agent runs assign new Threads to the configured Learning cont
   assert.equal(calls[0].learningContainerId, "openmuse-assistant");
 });
 
-// Review finding on #25: /api/main-thread provisions the main conversation before its
-// first run without a Learning container. getOrCreateThread returns an existing Thread
-// unchanged, so the run handler's later learningContainerId never reaches thread creation.
-// Kept as a TODO so the suite stays green until the main thread is assigned too.
-test("live main-thread provisioning assigns the main conversation to the Learning container", {
-  todo: "main-thread provisioning omits learningContainerId",
-}, async (t) => {
+// getOrCreateThread returns an existing Thread unchanged, so the main conversation must be
+// assigned when /api/main-thread provisions it, before the run handler ever sees it.
+test("live main-thread provisioning assigns the main conversation to the Learning container", async (t) => {
   const calls = recordThreadRequests(t);
   const { app, headers } = await liveApp(t);
 
@@ -87,4 +85,25 @@ test("live main-thread provisioning assigns the main conversation to the Learnin
   assert.equal(calls.length, 1);
   assert.equal(calls[0].agentId, "default");
   assert.equal(calls[0].learningContainerId, "openmuse-assistant");
+});
+
+test("main-thread provisioning skips Learning when it is not configured", async (t) => {
+  const calls = recordThreadRequests(t);
+  const { app, headers } = await liveApp(t, { intelligenceLearningContainerId: undefined });
+
+  assert.equal((await app.request("/api/main-thread", { headers })).status, 502);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].learningContainerId, undefined);
+});
+
+test("external AG-UI Threads are not collected as Learning evidence", async (t) => {
+  const calls = recordThreadRequests(t);
+  const { app, headers } = await liveApp(t, {
+    agentBackend: "agui",
+    agentUrl: "http://127.0.0.1:1/unused",
+  });
+
+  assert.equal((await app.request("/api/main-thread", { headers })).status, 502);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].learningContainerId, undefined);
 });

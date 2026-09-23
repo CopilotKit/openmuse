@@ -2,7 +2,7 @@
 
 Automatic Learning lets a live OpenMuse deployment turn repeated, completed interactive conversations into reviewed CopilotKit Skills. OpenMuse sends eligible Rich Threads to one focused Learning container, a human reviews the evidence and proposed Skill, and later invocations can load the published Skill through the agent server that owns delivery.
 
-Use this guide when you are operating a live OpenMuse API with CopilotKit Intelligence. The local sample remains key-free and does not collect Learning evidence.
+Use this guide when you are operating a live OpenMuse API with CopilotKit Intelligence. Automatic Learning is optional: it is enabled only when `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` is set, `WORKSPACE_MODE=live`, and `AGENT_BACKEND=model`. Sample mode does not collect Learning evidence.
 
 Official CopilotKit references:
 
@@ -11,9 +11,9 @@ Official CopilotKit references:
 
 ## What OpenMuse collects
 
-OpenMuse assigns new live Rich Threads for the interactive `default` runtime agent to the configured Learning container before the first agent run. That covers the main conversation and side chats in live mode, whether `default` is handled by OpenMuse's built-in model assistant or routed to an external raw AG-UI agent with `AGENT_BACKEND=agui`.
+OpenMuse assigns new live Rich Threads for the interactive `default` runtime agent to the configured Learning container before the first agent run. That covers the main conversation and side chats handled by OpenMuse's built-in model assistant.
 
-This increment does not collect the background task worker's internal runs. It also does not configure skill delivery for an external raw AG-UI backend. If you set `AGENT_BACKEND=agui`, those live `default` Threads can still become Learning evidence, but that external agent server owns loading and applying any published Skills.
+This increment does not collect the background task worker's internal runs. It also does not collect Threads routed to an external raw AG-UI backend (`AGENT_BACKEND=agui`): OpenMuse delivers published Skills only to its built-in model assistant, so collection is limited to that same agent. An external agent server that wants Learning should configure its own collection and delivery.
 
 Published Skills do not change the model itself. They are reviewed instructions made available to later agent invocations, and the model decides when to load and follow a relevant Skill.
 
@@ -62,7 +62,7 @@ Existing Threads are not backfilled. A Thread cannot move between Learning conta
 
 ## Configure OpenMuse
 
-Set both Intelligence values on the API server:
+Set both Intelligence values on the API server to enable Learning:
 
 ```dotenv
 CPK_INTELLIGENCE_API_KEY=your-project-key
@@ -73,13 +73,12 @@ CPK_INTELLIGENCE_LEARNING_CONTAINER_ID=openmuse-assistant
 
 Restart the API after changing either value.
 
-Live mode fails loudly when configuration is missing or invalid:
+The API fails loudly when configuration is missing or invalid:
 
-- Missing `CPK_INTELLIGENCE_API_KEY` prevents the API from starting because Rich Threads are required in live mode.
-- Missing `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` prevents the API from starting because Automatic Learning cannot collect evidence without a container.
+- Missing `CPK_INTELLIGENCE_API_KEY` prevents the API from starting because Rich Threads are required in every mode.
 - An invalid container ID prevents startup and reports the exact stable-ID format.
 
-Sample mode can leave both values unset. It keeps local conversation history and does not send Learning evidence.
+An unset or blank `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` leaves Automatic Learning disabled; Rich Threads keep working as before. Sample mode and `AGENT_BACKEND=agui` never send Learning evidence.
 
 ## Collect evidence
 
@@ -106,13 +105,13 @@ Automatic Learning never approves or publishes Skills for you. A scheduled run c
 
 After publishing a Skill, open the container's **Skills** tab and confirm Skill delivery is enabled.
 
-OpenMuse already passes the configured container to the built-in model assistant when `WORKSPACE_MODE=live` and `AGENT_BACKEND=model`. That is the OpenMuse-owned delivery path. If `AGENT_BACKEND=agui`, OpenMuse still routes live `default` Threads into the Learning container, but the external agent server must configure its own published-skill loading and delivery. Leave `CPK_INTELLIGENCE_SKILLS_REVISION` unset unless you intentionally want to pin an exact published revision. With the default built-in model configuration, fresh invocations follow the latest published Skills after the delivery refresh window.
+OpenMuse passes the configured container to the built-in model assistant when `WORKSPACE_MODE=live` and `AGENT_BACKEND=model`. That is the OpenMuse-owned delivery path. Leave `CPK_INTELLIGENCE_SKILLS_REVISION` unset unless you intentionally want to pin an exact published revision. With the default built-in model configuration, fresh invocations follow the latest published Skills after the delivery refresh window.
 
 Delivery applies only to new invocations. A conversation already in progress keeps the Skill snapshot it captured for that invocation.
 
 ## Verify a fresh invocation
 
-For OpenMuse's built-in model assistant, start a new OpenMuse conversation after the Skill is published and delivery is enabled. Ask for a task that should match the approved Skill. For `AGENT_BACKEND=agui`, run the equivalent fresh invocation on the external agent after its server has configured learned-skill delivery.
+For OpenMuse's built-in model assistant, start a new OpenMuse conversation after the Skill is published and delivery is enabled. Ask for a task that should match the approved Skill.
 
 Verify all of these checkpoints:
 
@@ -138,7 +137,7 @@ Use this checklist before recording a managed acceptance run:
 8. If any key or token was captured, rotate or revoke it before sharing anything. Never retain, attach, or circulate the unredacted artifact; blurring alone is not sufficient for exposed secrets.
 9. Attach large MP4 artifacts to the pull request or release notes instead of committing them to Git.
 
-The sample app remains key-free. Do not add real Intelligence or provider keys to committed demo files.
+Do not add real Intelligence or provider keys to committed demo files.
 
 ## Troubleshooting
 
@@ -150,7 +149,7 @@ The sample app remains key-free. Do not add real Intelligence or provider keys t
 | A Thread does not appear in the container. | Confirm it was a new live Rich Thread for the interactive `default` runtime agent and that the live API had the container ID before the Thread's first run. Existing Threads are not backfilled, and background task-worker runs are not collected. |
 | Learning says there are not enough eligible Threads. | Complete more related Threads for an automatic run, or start a manual run with the available evidence when you need to review a focused set before the threshold. The default threshold is 15 eligible Threads unless the UI shows a different value. |
 | The analysis or delivery snapshot is unavailable or failed. | Inspect the failed analysis or delivery status in the Learning container, fix the cause, then start a fresh invocation or run manual analysis again after adding eligible evidence. OpenMuse does not hide this failure. |
-| A published Skill is not used in OpenMuse. | Confirm delivery is enabled, the Skill is published, OpenMuse is in live model mode for built-in delivery, the API has the same project key and container ID, and you started a fresh invocation. For `AGENT_BACKEND=agui`, confirm the external agent server has configured learned-skill delivery. |
+| A published Skill is not used in OpenMuse. | Confirm delivery is enabled, the Skill is published, OpenMuse is in live model mode for built-in delivery, the API has the same project key and container ID, and you started a fresh invocation. |
 | Delivery is disabled or the snapshot is denied. | Re-enable delivery in the container's Skills tab or remove an invalid exact revision pin. A confirmed delivery denial blocks new invocations rather than silently ignoring the failure. |
 
 ## Next links

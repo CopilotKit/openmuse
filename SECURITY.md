@@ -18,7 +18,7 @@ Live Automatic Learning uses completed CopilotKit Rich Threads as evidence for r
 
 Use public or synthetic content only for public demos, pull request recordings, and reusable acceptance artifacts. Review every recording before sharing it, and remove keys, tokens, private dashboard details, private Threads, private account content, and unpublished evidence from the shareable artifact. If any key or token is captured, rotate or revoke it before sharing anything. Never retain, attach, or circulate an unredacted artifact; blurring alone is not sufficient for exposed secrets. Never commit provider keys, CopilotKit Intelligence keys, `.env`, private Learning exports, or raw private evidence to the repository.
 
-`CPK_INTELLIGENCE_API_KEY` is secret and must stay server-side. `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` is a non-secret stable ID, but it should still be configured on the server so Thread assignment is deliberate and consistent.
+`CPK_INTELLIGENCE_API_KEY` is secret and must stay server-side. `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` is a non-secret stable ID, but it should still be configured on the server so Thread assignment is deliberate and consistent. Leaving it unset disables Automatic Learning.
 
 ## Linux computer boundary
 
@@ -36,4 +36,4 @@ Docker shares its host kernel and does not provide a full VM or a hostile-tenant
 
 A proposal is bound to the account, reviewed content, and applicable provider version. The server requires a recorded approval before dispatching a send or calendar change. An uncertain network outcome is retained for reconciliation. Cancellation stops later task steps; a provider request already in flight may still finish.
 
-No provider keys, personal data, or third-party logins are needed for the sample walkthrough or CI. CopilotKit Intelligence and any configured model/provider operate under their own terms and data policies.
+A server-only CopilotKit Intelligence project key is needed for the sample walkthrough. CI uses synthetic keys and mocked Intelligence boundaries. No provider keys, personal data, or third-party logins are needed for CI. CopilotKit Intelligence and any configured model/provider operate under their own terms and data policies.

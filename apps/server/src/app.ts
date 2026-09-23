@@ -11,14 +11,14 @@ import { createAuth } from "./auth.ts";
 import { BrowserService } from "./browser.ts";
 import { ComputerService, type DockerRunner } from "./computer.ts";
 import { computerRoutes } from "./computer-routes.ts";
-import type { Config } from "./config.ts";
+import { assertApiDeploymentConfig, type Config } from "./config.ts";
 import type { Store } from "./db.ts";
 import { agentRoutes } from "./engine/routes.ts";
 import { AgentService } from "./engine/service.ts";
 import { AppError } from "./errors.ts";
 import { Files } from "./files.ts";
 import { GoogleAuth } from "./google-auth.ts";
-import { createIntelligence } from "./learning.ts";
+import { createIntelligence, selectLearningContainer } from "./learning.ts";
 import { WorkspaceService } from "./workspace.ts";
 
 export async function createApp(
@@ -26,6 +26,7 @@ export async function createApp(
   config: Config,
   options: { docker?: DockerRunner } = {},
 ) {
+  assertApiDeploymentConfig(config);
   const auth = await createAuth(db, config),
     files = new Files(db, config, auth),
     google = new GoogleAuth(db, config),
@@ -201,21 +202,22 @@ export async function createApp(
     });
     const main = await db.get<{ threadId: string }>(owner, "conversation-settings", "main");
     if (!main) throw new AppError("Main conversation could not be loaded", 503);
-    if (intelligence) {
-      try {
-        await intelligence.getOrCreateThread({
-          threadId: main.threadId,
-          userId: owner,
-          agentId: "default",
-        });
-      } catch {
-        throw new AppError(
-          "Main conversation is unavailable. Check the Rich Threads connection and try again.",
-          502,
-        );
-      }
+    try {
+      await intelligence.getOrCreateThread({
+        threadId: main.threadId,
+        userId: owner,
+        agentId: "default",
+        // The run handler only applies a container when it creates the Thread, so the
+        // main conversation must be assigned here, before its first run.
+        learningContainerId: selectLearningContainer(config, { agentId: "default" }),
+      });
+    } catch {
+      throw new AppError(
+        "Main conversation is unavailable. Check the Rich Threads connection and try again.",
+        502,
+      );
     }
-    return c.json({ threadId: main.threadId, existing: Boolean(intelligence) });
+    return c.json({ threadId: main.threadId, existing: true });
   });
   app.get("/api/conversation", async (c) =>
     c.json((await db.get(c.get("owner"), "conversations", "default")) ?? { messages: [] }),

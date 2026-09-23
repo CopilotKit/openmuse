@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type {
-  CopilotKitIntelligence,
-  LearningContainerSelectorInput,
-} from "@copilotkit/runtime/v2";
+import type { LearningContainerSelectorInput } from "@copilotkit/runtime/v2";
 import type { Config } from "../apps/server/src/config.ts";
 import {
   createIntelligence,
@@ -11,7 +8,7 @@ import {
   selectLearningContainer,
 } from "../apps/server/src/learning.ts";
 
-const baseConfig: Config = {
+const baseConfig: Config & { intelligenceApiKey: string } = {
   mode: "live",
   port: 8787,
   host: "127.0.0.1",
@@ -50,9 +47,25 @@ test("selectLearningContainer scopes the configured live container to the defaul
   );
 });
 
-test("createIntelligence returns no client without a project key", () => {
-  assert.equal(createIntelligence({ ...baseConfig, intelligenceApiKey: undefined }), undefined);
-  assert.equal(createIntelligence({ ...baseConfig, intelligenceApiKey: "" }), undefined);
+test("selectLearningContainer collects only the built-in model agent", () => {
+  for (const agentBackend of ["agui", "sample"] as const) {
+    assert.equal(
+      selectLearningContainer({ ...baseConfig, agentBackend }, selectorInput("default")),
+      undefined,
+    );
+  }
+});
+
+test("Learning stays disabled without a container ID", () => {
+  for (const intelligenceLearningContainerId of [undefined, "", " \t\n"]) {
+    assert.equal(
+      selectLearningContainer(
+        { ...baseConfig, intelligenceLearningContainerId },
+        selectorInput("default"),
+      ),
+      undefined,
+    );
+  }
 });
 
 test("createIntelligence delegates its learning selector to focused default-agent selection", async () => {
@@ -64,7 +77,7 @@ test("createIntelligence delegates its learning selector to focused default-agen
   );
   assert.equal(await intelligence.ɵgetLearningContainerId()?.(selectorInput("worker")), undefined);
   assert.equal(
-    await createIntelligence({ ...baseConfig, mode: "sample" })?.ɵgetLearningContainerId()?.(
+    await createIntelligence({ ...baseConfig, mode: "sample" }).ɵgetLearningContainerId()?.(
       selectorInput("default"),
     ),
     undefined,
@@ -72,7 +85,7 @@ test("createIntelligence delegates its learning selector to focused default-agen
 });
 
 test("learnedSkillsFor returns built-in agent options only for live model learning", () => {
-  const intelligence = createIntelligence(baseConfig) as CopilotKitIntelligence;
+  const intelligence = createIntelligence(baseConfig);
   assert.deepEqual(learnedSkillsFor(baseConfig, intelligence), {
     client: intelligence,
     containerId: "openmuse-assistant",
@@ -83,5 +96,4 @@ test("learnedSkillsFor returns built-in agent options only for live model learni
     learnedSkillsFor({ ...baseConfig, intelligenceLearningContainerId: undefined }, intelligence),
     undefined,
   );
-  assert.equal(learnedSkillsFor(baseConfig, undefined), undefined);
 });

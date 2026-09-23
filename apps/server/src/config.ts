@@ -32,16 +32,16 @@ export interface Config {
   allowedOrigins: string[];
 }
 
-const missingIntelligenceKeyMessage =
-  "Live mode requires CPK_INTELLIGENCE_API_KEY for durable Rich Threads. " +
+export const intelligenceKeyRequiredMessage =
+  "OpenMuse requires CPK_INTELLIGENCE_API_KEY. " +
   "Run `npx copilotkit@latest login` and `npx copilotkit@latest project select`, " +
   "then set the generated server-only key. " +
   "See https://docs.copilotkit.ai/intelligence/connect-your-runtime";
 
-const missingLearningContainerMessage =
-  "Live mode requires CPK_INTELLIGENCE_LEARNING_CONTAINER_ID for Automatic Learning. " +
-  "Create a focused container in the Intelligence project's Learning area, then set its stable ID. " +
-  "See https://docs.copilotkit.ai/learning";
+export function required(name: string, message: string, value = process.env[name]): string {
+  if (!value?.trim()) throw new Error(message);
+  return value.trim();
+}
 
 const invalidLearningContainerMessage =
   "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID must contain 1-64 lowercase letters, numbers, or single hyphens, " +
@@ -50,17 +50,19 @@ const invalidLearningContainerMessage =
 
 const learningContainerIdPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-export function assertApiDeploymentConfig(config: Config): void {
-  if (config.mode === "live" && !config.intelligenceApiKey?.trim()) {
-    throw new Error(missingIntelligenceKeyMessage);
-  }
-  if (config.mode !== "live") return;
-  if (!config.intelligenceLearningContainerId?.trim()) {
-    throw new Error(missingLearningContainerMessage);
-  }
+export function assertApiDeploymentConfig(
+  config: Config,
+): asserts config is Config & { intelligenceApiKey: string } {
+  required(
+    "CPK_INTELLIGENCE_API_KEY",
+    intelligenceKeyRequiredMessage,
+    config.intelligenceApiKey ?? "",
+  );
+  // Automatic Learning is opt-in: an unset or blank container ID leaves it disabled.
+  const containerId = config.intelligenceLearningContainerId;
   if (
-    config.intelligenceLearningContainerId.length > 64 ||
-    !learningContainerIdPattern.test(config.intelligenceLearningContainerId)
+    containerId?.trim() &&
+    (containerId.length > 64 || !learningContainerIdPattern.test(containerId))
   ) {
     throw new Error(invalidLearningContainerMessage);
   }
@@ -90,7 +92,7 @@ export function readConfig(): Config {
     agentBackend: backend,
     agentUrl: process.env.AGENT_URL,
     agentToken: process.env.AGENT_TOKEN,
-    intelligenceApiKey: process.env.CPK_INTELLIGENCE_API_KEY,
+    intelligenceApiKey: required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage),
     intelligenceLearningContainerId: process.env.CPK_INTELLIGENCE_LEARNING_CONTAINER_ID,
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
