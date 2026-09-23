@@ -238,7 +238,7 @@ test("live Jev demo candidates quote each page instead of reusing sample copy", 
   const texts = [
     "Kelp Forest at 28 feet features sardines and leopard sharks.",
     "Open Sea has a 90-foot window with turtles, sardines, and tuna.",
-    "Rocky Shore has a touch pool for bat rays.",
+    "Rocky Shore has a touch pool for bat rays. Tickets are available separately.",
   ];
   for (const [index, text] of texts.entries()) {
     const next = demoResponse(jevRequest(messages));
@@ -266,6 +266,7 @@ test("live Jev demo candidates quote each page instead of reusing sample copy", 
       assert.equal(option.details.length, 1);
       assert.ok(texts[index].includes(option.details[0]));
     }
+    assert.equal(options[2].details[0], "Rocky Shore has a touch pool for bat rays.");
   } finally {
     if (previous === undefined) delete process.env.DEMO_JEV_MODE;
     else process.env.DEMO_JEV_MODE = previous;

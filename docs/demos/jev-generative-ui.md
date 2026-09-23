@@ -1,10 +1,12 @@
 # Jev generative UI: aquarium school-trip demo
 
-**[Watch the 81-second web recording](../../assets/demos/2026-09-23/jev-web.mp4)**
+**[Watch the 83-second live Jev web recording](../../assets/demos/2026-09-23/jev-live-web.mp4)**
 
-[![The sourced aquarium comparison cards in OpenMuse](../../assets/demos/2026-09-23/jev-web.png)](../../assets/demos/2026-09-23/jev-web.mp4)
+[![Live Jev reranks the aquarium exhibits in OpenMuse](../../assets/demos/2026-09-23/jev-live-web.png)](../../assets/demos/2026-09-23/jev-live-web.mp4)
 
-This recording follows a **scripted sample**, visibly labeled `Sample · scripted decisions` in its choice cards. AI Mock drives the conversation steps; OpenMuse runs its normal mailbox, browser, and `present_choices` tools. The mailbox is the fictional local Lincoln Middle School sample. Candidate copy is a controlled fixture, while the demo browser opens the aquarium's public pages before the comparison appears. The sample does **not** call live Jev.
+The live recording calls TypeSafe Jev for each clarification and comparison decision, visibly labeled `Live Jev · model decisions` in the cards. AI Mock scripts the agent's conversation steps, while OpenMuse runs its normal mailbox, real browser worker, and `present_choices` tool. The mailbox is a fictional local Lincoln Middle School sample. The live comparison details are excerpts of the public aquarium pages read during that turn; Jev chooses the control and ranks those candidates. The revised hands-on preference moves Rocky Shore to first place in this recorded run.
+
+For a repeatable, TypeSafe-key-free walkthrough, [watch the 81-second scripted sample](../../assets/demos/2026-09-23/jev-web.mp4). Its cards are labeled `Sample · scripted decisions`; it does not make a live Jev call.
 
 ## Run
 

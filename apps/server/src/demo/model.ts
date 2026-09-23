@@ -371,14 +371,19 @@ function previousComparisonId(messages: ChatMessage[]): string | undefined {
 }
 
 function pageExcerpt(text: string, anchor: RegExp): string {
-  const normalized = text.replace(/\s+/g, " ").trim();
+  const line = text.split(/\r?\n/).find((candidate) => anchor.test(candidate));
+  const normalized = (line ?? text).replace(/\s+/g, " ").trim();
   const match = anchor.exec(normalized);
   if (!match) throw new Error("The exhibit page is missing its verified detail");
-  const start = Math.max(0, match.index - 45);
-  const end = Math.min(normalized.length, match.index + match[0].length + 95);
-  const left = start ? normalized.indexOf(" ", start) + 1 : 0;
-  const right = end < normalized.length ? normalized.lastIndexOf(" ", end) : end;
-  return normalized.slice(left, right > left ? right : end).trim();
+  const previousSentence = normalized.lastIndexOf(". ", match.index);
+  const start = previousSentence >= 0 ? previousSentence + 2 : 0;
+  const nextStop = normalized.slice(match.index + match[0].length).search(/[.!?](?:\s|$)/);
+  const sentenceEnd =
+    nextStop >= 0 ? match.index + match[0].length + nextStop + 1 : normalized.length;
+  if (sentenceEnd - start <= 260) return normalized.slice(start, sentenceEnd).trim();
+  const end = Math.min(normalized.length, match.index + match[0].length + 120);
+  const wordEnd = end < normalized.length ? normalized.lastIndexOf(" ", end) : end;
+  return normalized.slice(start, wordEnd > start ? wordEnd : end).trim();
 }
 
 function demoExhibitResponse(request: ChatCompletionRequest, turn: ChatMessage[]): FixtureResponse {
@@ -517,7 +522,7 @@ function demoRefinementResponse(
       content: "The choices tool is unavailable. Please try again after enabling Jev sample mode.",
     };
   return {
-    content: "I’ll bring the hands-on option to the front.",
+    content: "I’ll rerank the researched exhibits for a hands-on visit.",
     toolCalls: [
       {
         id: `call_openmuse_demo_jev_${randomUUID()}`,

@@ -65,18 +65,25 @@ export class LiveJevAdapter implements JevAdapter {
     if (!input.allowedControls.length) throw new Error("Jev has no allowed controls");
     const questions = {
       control: choice(
-        "Choose the best prepared interaction for this request and evidence.",
-        Object.fromEntries(input.allowedControls.map((control) => [control, control])),
+        "Which interaction best serves the user now? Present prepared choices when they let the user select a useful, supported next step. Choose an ordinary agent response only when those options are unhelpful or unsupported.",
+        Object.fromEntries(
+          input.allowedControls.map((control) => [
+            control,
+            control === "clarification"
+              ? "Present the prepared options as clickable next steps"
+              : control === "comparison"
+                ? "Present the sourced candidates as clickable comparison cards"
+                : "Answer the user in prose without choice cards",
+          ]),
+        ),
       ),
       ...Object.fromEntries(
-        input.options.map((_option, index) => [
+        input.options.map((option, index) => [
           `fit_${index}`,
-          score(`How well does candidate ${index} fit the user request and verified context?`, [
-            "Does not fit",
-            "Some fit",
-            "Good fit",
-            "Best fit",
-          ]),
+          score(
+            `How well does option ${index} (${option.label}) fit the user's latest request? Use its verified details in the state as evidence.`,
+            ["Does not fit", "Some fit", "Good fit", "Best fit"],
+          ),
         ]),
       ),
     };
@@ -123,7 +130,7 @@ export class LiveJevAdapter implements JevAdapter {
       if (
         answer?.type !== "score" ||
         typeof answer.score !== "number" ||
-        !Number.isInteger(answer.score) ||
+        !Number.isFinite(answer.score) ||
         answer.score < 0 ||
         answer.score > 3
       )

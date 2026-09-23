@@ -66,10 +66,22 @@ test("ranking uses stable ties and rejects missing, unknown or nonfinite scores"
 test("live adapter passes signal and validates answers", async () => {
   const signal = new AbortController().signal;
   let seenSignal: AbortSignal | undefined;
+  let criteria: Record<string, string> | undefined;
+  let fitInstructions: string | undefined;
   const adapter = new LiveJevAdapter(
     {
-      systemOne: async (_request: unknown, opts?: { signal?: AbortSignal }) => {
+      systemOne: async (
+        request: {
+          questions: {
+            control: { criteria: Record<string, string> };
+            fit_0: { instructions: string };
+          };
+        },
+        opts?: { signal?: AbortSignal },
+      ) => {
         seenSignal = opts?.signal;
+        criteria = request.questions.control.criteria;
+        fitInstructions = request.questions.fit_0.instructions;
         return {
           answers: {
             control: { type: "choice", choice: "comparison" },
@@ -90,6 +102,9 @@ test("live adapter passes signal and validates answers", async () => {
     signal,
   );
   assert.equal(seenSignal, signal);
+  assert.match(criteria?.comparison ?? "", /comparison cards/);
+  assert.match(criteria?.agent ?? "", /prose/);
+  assert.match(fitInstructions ?? "", /option 0 \(a\)/i);
   assert.deepEqual(result, { control: "comparison", scores: { a: 2 } });
 });
 
@@ -115,8 +130,29 @@ test("live adapter rejects controls outside allowed choices", async () => {
     /invalid control/,
   );
 });
+test("live adapter accepts continuous scores within its four-step rubric", async () => {
+  const adapter = new LiveJevAdapter({
+    systemOne: async () => ({
+      answers: {
+        control: { type: "choice", choice: "comparison" },
+        fit_0: { type: "score", score: 1.93 },
+      },
+    }),
+  } as never);
+  const decision = await adapter.decide(
+    {
+      message: "compare",
+      context: "source",
+      options: [option("a")],
+      allowedControls: ["comparison"],
+    },
+    new AbortController().signal,
+  );
+  assert.equal(decision.scores.a, 1.93);
+});
+
 test("live adapter rejects scores outside its four-step rubric", async () => {
-  for (const score of [-1, 4, 1.5]) {
+  for (const score of [-1, 4, Number.NaN]) {
     const adapter = new LiveJevAdapter({
       systemOne: async () => ({
         answers: {
