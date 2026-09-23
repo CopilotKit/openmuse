@@ -220,7 +220,7 @@ test("monitor evidence identifies each check separately from the monitor", async
   assert.notEqual(observed[0].id, observed[1].id);
 });
 
-test("browser reads and search excerpts for one URL stay distinguishable after restart", async () => {
+test("browser reads, search excerpts and legacy evidence survive a store round trip", async () => {
   const page = {
     sessionId: "browser-session-1",
     url: "https://example.com/menu",
