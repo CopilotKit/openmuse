@@ -7,6 +7,7 @@ import {
   LLMock,
 } from "@copilotkit/aimock";
 import { z } from "zod";
+import { aquariumFixture, schoolTripFixture } from "./jev-fixture.ts";
 
 export const demoModel = "openai/openmuse-browser-demo";
 
@@ -171,12 +172,231 @@ function demoMailResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
   };
 }
 
+function demoTripResponse(request: ChatCompletionRequest, turn: ChatMessage[]): FixtureResponse {
+  const choice = turnResult(turn, "present_choices", "call_openmuse_demo_jev_");
+  if (choice) {
+    const parsed = z
+      .object({ panel: z.object({ id: z.string() }).nullable(), error: z.string().optional() })
+      .safeParse(parseResult(choice));
+    return parsed.success && parsed.data.panel
+      ? { content: "I found the school reminder. Choose what you’d like to work on first." }
+      : {
+          content:
+            "I couldn’t prepare the trip choices. Please try again when choices are available.",
+        };
+  }
+  const read = turnResult(turn, "read_mail_thread", "call_openmuse_demo_mail_read_");
+  if (read) {
+    const parsed = z
+      .object({
+        messages: z.array(z.object({ sender: z.string(), subject: z.string(), body: z.string() })),
+      })
+      .safeParse(parseResult(read));
+    const message = parsed.success ? parsed.data.messages.at(-1) : undefined;
+    if (!message)
+      return { content: "I couldn’t read the school-trip email. Check Mail and try again." };
+    if (!request.tools?.some((tool) => tool.function.name === "present_choices"))
+      return {
+        content:
+          "The choices tool is unavailable. Please try again after enabling Jev sample mode.",
+      };
+    return {
+      content:
+        "The school reminder mentions the permission slip and trip details. I’ll lay out the next steps.",
+      toolCalls: [
+        {
+          id: `call_openmuse_demo_jev_${randomUUID()}`,
+          name: "present_choices",
+          arguments: JSON.stringify({
+            message: "Help me get ready for the aquarium trip",
+            context: `${schoolTripFixture.school}: ${message.subject}. ${message.body.slice(0, 1200)}`,
+            title: "How should we get ready?",
+            control: "clarification",
+            options: schoolTripFixture.choices,
+          }),
+        },
+      ],
+    };
+  }
+  const search = turnResult(turn, "search_mail", "call_openmuse_demo_mail_search_");
+  if (search) {
+    const parsed = z
+      .object({ matches: z.array(z.object({ threadId: z.string(), subject: z.string() })) })
+      .safeParse(parseResult(search));
+    if (!parsed.success) return { content: "I couldn’t check the mailbox for the school trip." };
+    const match = parsed.data.matches[0];
+    if (!match) return { content: "I didn’t find a school-trip email in the sample mailbox." };
+    if (!request.tools?.some((tool) => tool.function.name === "read_mail_thread"))
+      return { content: "The email reader is unavailable." };
+    return {
+      content: "I found the school reminder. I’ll read it before suggesting next steps.",
+      toolCalls: [
+        {
+          id: `call_openmuse_demo_mail_read_${randomUUID()}`,
+          name: "read_mail_thread",
+          arguments: JSON.stringify({ threadId: match.threadId }),
+        },
+      ],
+    };
+  }
+  if (!request.tools?.some((tool) => tool.function.name === "search_mail"))
+    return { content: "Mail search is unavailable. Connect the sample mailbox and try again." };
+  return {
+    content: "I’ll check the sample school email first.",
+    toolCalls: [
+      {
+        id: `call_openmuse_demo_mail_search_${randomUUID()}`,
+        name: "search_mail",
+        arguments: JSON.stringify({ query: schoolTripFixture.searchQuery }),
+      },
+    ],
+  };
+}
+
+function previousComparisonId(messages: ChatMessage[]): string | undefined {
+  for (const message of [...messages].reverse()) {
+    if (message.role !== "tool") continue;
+    const parsed = z
+      .object({ panel: z.object({ id: z.string(), type: z.literal("comparison") }) })
+      .safeParse(parseResult(message));
+    if (parsed.success) return parsed.data.panel.id;
+  }
+  return undefined;
+}
+
+function demoExhibitResponse(request: ChatCompletionRequest, turn: ChatMessage[]): FixtureResponse {
+  const choice = turnResult(turn, "present_choices", "call_openmuse_demo_jev_");
+  if (choice) {
+    const parsed = z
+      .object({ panel: z.object({ id: z.string() }).nullable(), error: z.string().optional() })
+      .safeParse(parseResult(choice));
+    return parsed.success && parsed.data.panel
+      ? {
+          content:
+            "Here are three researched exhibits from the sample script. Tell me what matters most, or choose one.",
+        }
+      : { content: "I couldn’t prepare the exhibit choices. Please retry." };
+  }
+  const browseResults = turn.filter(
+    (message) =>
+      message.role === "tool" &&
+      message.tool_call_id?.startsWith("call_openmuse_demo_exhibit_browse_"),
+  );
+  const observed = new Set<string>();
+  for (const result of browseResults) {
+    const parsed = pageSchema.safeParse(parseResult(result));
+    if (!parsed.success || !parsed.data.text.trim())
+      return {
+        content:
+          "I couldn’t read an aquarium exhibit page, so I can’t prepare sourced choices yet.",
+      };
+    observed.add(parsed.data.url.replace(/\/$/, ""));
+  }
+  const next = aquariumFixture.options.find(
+    (option) => !observed.has(option.sources[0].url.replace(/\/$/, "")),
+  );
+  if (next) {
+    if (!request.tools?.some((tool) => tool.function.name === "browse_web"))
+      return { content: "The browser is unavailable, so I can’t research the exhibits." };
+    return {
+      content: `I’ll read the aquarium’s ${next.label} page.`,
+      toolCalls: [
+        {
+          id: `call_openmuse_demo_exhibit_browse_${randomUUID()}`,
+          name: "browse_web",
+          arguments: JSON.stringify({ url: next.sources[0].url }),
+        },
+      ],
+    };
+  }
+  if (!request.tools?.some((tool) => tool.function.name === "present_choices"))
+    return {
+      content: "The choices tool is unavailable. Please try again after enabling Jev sample mode.",
+    };
+  return {
+    content: "The three aquarium pages are open. I’ll compare their verified exhibit details.",
+    toolCalls: [
+      {
+        id: `call_openmuse_demo_jev_${randomUUID()}`,
+        name: "present_choices",
+        arguments: JSON.stringify({
+          message: "Explore exhibits for the aquarium school trip",
+          context:
+            "Controlled sample candidate descriptions, checked against official Monterey Bay Aquarium exhibit pages. Browser reads for all three sources succeeded in this turn.",
+          title: "Three exhibits to explore",
+          control: "comparison",
+          options: aquariumFixture.options,
+        }),
+      },
+    ],
+  };
+}
+
+function demoRefinementResponse(
+  request: ChatCompletionRequest,
+  turn: ChatMessage[],
+): FixtureResponse {
+  const choice = turnResult(turn, "present_choices", "call_openmuse_demo_jev_");
+  if (choice) {
+    const parsed = z
+      .object({ panel: z.object({ id: z.string() }).nullable(), error: z.string().optional() })
+      .safeParse(parseResult(choice));
+    return parsed.success && parsed.data.panel
+      ? {
+          content:
+            "Rocky Shore has the aquarium’s bat-ray touch pool. The cards now put that hands-on option first in this scripted sample.",
+        }
+      : { content: "I couldn’t refine the exhibit choices. Please retry." };
+  }
+  const currentUserIndex = request.messages.findLastIndex((message) => message.role === "user");
+  const panelId = previousComparisonId(request.messages.slice(0, currentUserIndex));
+  if (!panelId)
+    return {
+      content: "I don’t have an exhibit comparison to refine yet. Choose Explore exhibits first.",
+    };
+  if (!request.tools?.some((tool) => tool.function.name === "present_choices"))
+    return {
+      content: "The choices tool is unavailable. Please try again after enabling Jev sample mode.",
+    };
+  return {
+    content: "I’ll bring the hands-on option to the front.",
+    toolCalls: [
+      {
+        id: `call_openmuse_demo_jev_${randomUUID()}`,
+        name: "present_choices",
+        arguments: JSON.stringify({
+          message: "Something hands-on",
+          context:
+            "Refine the researched comparison: Rocky Shore offers a bat-ray touch pool; the other two are viewing exhibits.",
+          title: "Hands-on exhibit first",
+          control: "comparison",
+          refinementPanelId: panelId,
+          options: aquariumFixture.options,
+        }),
+      },
+    ],
+  };
+}
+
 /** Script only the model: the app executes real mailbox reads and browser tools. */
 export function demoResponse(request: ChatCompletionRequest): FixtureResponse {
   const userIndex = request.messages.findLastIndex((message) => message.role === "user");
   const user = request.messages[userIndex];
   const prompt = user ? (getTextContent(user.content) ?? "") : "";
   const turn = request.messages.slice(userIndex + 1);
+  if (/help me get ready for the aquarium trip/i.test(prompt))
+    return demoTripResponse(request, turn);
+  if (/explore exhibits/i.test(prompt)) return demoExhibitResponse(request, turn);
+  if (/something hands.on/i.test(prompt)) return demoRefinementResponse(request, turn);
+  if (
+    /I choose [“"]?(?:Rocky Shore|Kelp Forest|Open Sea)/i.test(prompt) ||
+    /^(?:Rocky Shore|Kelp Forest|Open Sea)$/i.test(prompt)
+  ) {
+    const label = /Rocky Shore|Kelp Forest|Open Sea/i.exec(prompt)?.[0] ?? "that exhibit";
+    return {
+      content: `You chose ${label}. I can help plan a route through the aquarium or review the school-trip details next.`,
+    };
+  }
   if (/email|inbox/i.test(prompt)) return demoMailResponse(request, turn);
   const url = targetUrl(prompt);
   if (!url)

@@ -26,6 +26,155 @@ const mailRequest = (messages: ChatMessage[]): ChatCompletionRequest => ({
   })),
 });
 
+function calls(response: ReturnType<typeof demoResponse>) {
+  return "toolCalls" in response ? response.toolCalls : undefined;
+}
+
+function replyText(response: ReturnType<typeof demoResponse>) {
+  return "content" in response ? response.content : undefined;
+}
+
+const jevRequest = (messages: ChatMessage[]): ChatCompletionRequest => ({
+  ...request(messages),
+  tools: ["search_mail", "read_mail_thread", "browse_web", "present_choices"].map((name) => ({
+    type: "function",
+    function: { name, parameters: {} },
+  })),
+});
+
+test("school-trip demo reads mail before presenting clarification choices", () => {
+  const messages: ChatMessage[] = [
+    { role: "user", content: "Help me get ready for the aquarium trip" },
+  ];
+  const search = demoResponse(jevRequest(messages));
+  assert.equal(calls(search)?.[0]?.name, "search_mail");
+  messages.push({
+    role: "tool",
+    tool_call_id: calls(search)?.[0]?.id,
+    content: JSON.stringify({ matches: [{ threadId: "trip-thread", subject: "Trip reminder" }] }),
+  });
+  const read = demoResponse(jevRequest(messages));
+  assert.equal(calls(read)?.[0]?.name, "read_mail_thread");
+  messages.push({
+    role: "tool",
+    tool_call_id: calls(read)?.[0]?.id,
+    content: JSON.stringify({
+      messages: [
+        {
+          sender: "Lincoln Middle School",
+          subject: "Trip reminder",
+          body: "The class is heading to the aquarium. Please complete the permission slip. Bring lunch and a water bottle.",
+        },
+      ],
+    }),
+  });
+  const panel = demoResponse(jevRequest(messages));
+  assert.equal(calls(panel)?.[0]?.name, "present_choices");
+  const args = JSON.parse(calls(panel)?.[0]?.arguments ?? "{}");
+  assert.deepEqual(
+    args.options.map((option: { label: string }) => option.label),
+    ["Complete permission slip", "Review trip details", "Explore exhibits"],
+  );
+});
+
+test("school-trip demo stops after failed mail or choice result", () => {
+  const failedMail = demoResponse(
+    jevRequest([
+      { role: "user", content: "Help me get ready for the aquarium trip" },
+      {
+        role: "tool",
+        tool_call_id: "call_openmuse_demo_mail_read_failure",
+        content: JSON.stringify({ error: "No mail" }),
+      },
+    ]),
+  );
+  assert.ok(!calls(failedMail)?.length);
+  assert.match(replyText(failedMail) ?? "", /couldn.t read/i);
+  const failedChoice = demoResponse(
+    jevRequest([
+      { role: "user", content: "Help me get ready for the aquarium trip" },
+      {
+        role: "tool",
+        tool_call_id: "call_openmuse_demo_jev_failure",
+        content: JSON.stringify({ panel: null, error: "Jev unavailable" }),
+      },
+    ]),
+  );
+  assert.ok(!calls(failedChoice)?.length);
+  assert.match(replyText(failedChoice) ?? "", /couldn.t prepare|unavailable/i);
+});
+
+test("Explore exhibits browses every cited aquarium page before showing comparison", () => {
+  const messages: ChatMessage[] = [{ role: "user", content: "Explore exhibits" }];
+  const urls: string[] = [];
+  for (let index = 0; index < 3; index++) {
+    const next = demoResponse(jevRequest(messages));
+    assert.equal(calls(next)?.[0]?.name, "browse_web");
+    const { url } = JSON.parse(calls(next)?.[0]?.arguments ?? "{}");
+    urls.push(url);
+    messages.push({
+      role: "tool",
+      tool_call_id: calls(next)?.[0]?.id,
+      content: JSON.stringify({
+        sessionId: `page-${index}`,
+        url,
+        title: "Aquarium exhibit",
+        text: "Official exhibit page text describing this exhibit and its animals or interactive touch pool.",
+        truncated: false,
+      }),
+    });
+  }
+  assert.deepEqual(urls, [
+    "https://www.montereybayaquarium.org/visit/exhibits/kelp-forest/",
+    "https://www.montereybayaquarium.org/visit/exhibits/open-sea/",
+    "https://www.montereybayaquarium.org/visit/exhibits/rocky-shore",
+  ]);
+  const comparison = demoResponse(jevRequest(messages));
+  assert.equal(calls(comparison)?.[0]?.name, "present_choices");
+  const args = JSON.parse(calls(comparison)?.[0]?.arguments ?? "{}");
+  assert.equal(args.control, "comparison");
+  assert.equal(args.options.length, 3);
+  assert.ok(args.options.every((option: { sources: unknown[] }) => option.sources.length));
+});
+
+test("Explore exhibits does not make a card when a browser read fails", () => {
+  const messages: ChatMessage[] = [{ role: "user", content: "Explore exhibits" }];
+  const first = demoResponse(jevRequest(messages));
+  messages.push({
+    role: "tool",
+    tool_call_id: calls(first)?.[0]?.id,
+    content: JSON.stringify({ error: "Worker unavailable" }),
+  });
+  const answer = demoResponse(jevRequest(messages));
+  assert.ok(!calls(answer)?.length);
+  assert.match(replyText(answer) ?? "", /couldn.t read/i);
+});
+
+test("hands-on preference refines the same candidate set and selection is acknowledged", () => {
+  const history: ChatMessage[] = [
+    { role: "user", content: "Explore exhibits" },
+    {
+      role: "tool",
+      tool_call_id: "call_openmuse_demo_jev_previous",
+      content: JSON.stringify({ panel: { id: "comparison-1", type: "comparison" } }),
+    },
+    { role: "user", content: "Something hands-on" },
+  ];
+  const refinement = demoResponse(jevRequest(history));
+  assert.equal(calls(refinement)?.[0]?.name, "present_choices");
+  const args = JSON.parse(calls(refinement)?.[0]?.arguments ?? "{}");
+  assert.equal(args.control, "comparison");
+  assert.deepEqual(
+    args.options.map((option: { id: string }) => option.id),
+    ["kelp-forest", "open-sea", "rocky-shore"],
+  );
+  assert.match(args.message, /hands.on/i);
+  assert.equal(args.refinementPanelId, "comparison-1");
+  const selection = demoResponse(jevRequest([{ role: "user", content: "Rocky Shore" }]));
+  assert.match(replyText(selection) ?? "", /Rocky Shore/);
+  assert.ok(!calls(selection)?.length);
+});
+
 test("aquarium research distinguishes exhibit entries from navigation and only quotes observed descriptions", () => {
   const response = demoResponse(
     request([

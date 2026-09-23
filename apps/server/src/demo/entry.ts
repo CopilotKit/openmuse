@@ -70,6 +70,7 @@ const api = spawn(
       PATH: process.env.PATH,
       TZ: process.env.TZ ?? "America/Los_Angeles",
       WORKSPACE_MODE: "sample",
+      JEV_MODE: "sample",
       AGENT_BACKEND: "model",
       MODEL: demoModel,
       OPENAI_API_KEY: "local-aimock-demo-only",
