@@ -295,7 +295,14 @@ test("live refinement reuses the verified stored sources with no new browse or o
               context: "Observed exhibit",
               title: "Exhibits",
               control: "comparison",
-              options: [comparisonOption("https://example.org/exhibit")],
+              options: [
+                {
+                  ...comparisonOption("https://example.org/exhibit"),
+                  label: "Observed exhibit",
+                  details: ["Observed exhibit facts"],
+                  sources: [{ title: "Exhibit", url: "https://example.org/exhibit" }],
+                },
+              ],
             },
           }
         : index === 3
@@ -512,3 +519,82 @@ test("an empty browser read does not authorize a live comparison", async (t) => 
   assert.ok(rejected && rejected.type === EventType.TOOL_CALL_RESULT);
   assert.match(JSON.parse(String(rejected.content)).error, /Read the source page/);
 });
+
+for (const [name, candidate, error] of [
+  [
+    "invented option label",
+    { label: "Imaginary reef", details: ["Touch sea stars"], sourceTitle: "Rocky Shore" },
+    /label.*source text/,
+  ],
+  [
+    "invented source title",
+    { label: "Rocky Shore", details: ["Touch sea stars"], sourceTitle: "Imaginary reef" },
+    /source title.*source text/,
+  ],
+  [
+    "no supporting details",
+    { label: "Rocky Shore", details: [], sourceTitle: "Rocky Shore" },
+    /at least one.*detail/i,
+  ],
+] as const) {
+  test(`live comparison rejects ${name}`, async (t) => {
+    const url = "https://example.org/rocky-shore";
+    await modelFixture(t, (index) =>
+      index === 0
+        ? { name: "browse_web", arguments: { url } }
+        : index === 1
+          ? {
+              name: "present_choices",
+              arguments: {
+                message: "Compare",
+                context: "Read exhibit page",
+                title: "Exhibits",
+                control: "comparison",
+                options: [
+                  {
+                    id: "a",
+                    label: candidate.label,
+                    details: [...candidate.details],
+                    sources: [{ title: candidate.sourceTitle, url }],
+                  },
+                ],
+              },
+            }
+          : undefined,
+    );
+    const browser = await browserFixture(t, (path, body) => ({
+      data: path.endsWith("/read")
+        ? {
+            url,
+            title: "Rocky Shore",
+            text: "Rocky Shore lets visitors Touch sea stars.",
+            truncated: false,
+          }
+        : {
+            id: body.id,
+            url: body.url,
+            title: "Opened",
+            status: "active",
+            updatedAt: new Date().toISOString(),
+          },
+    }));
+    const config = {
+      ...browser.config,
+      agentBackend: "model" as const,
+      model: "openai/fixture",
+      jevMode: "live" as const,
+    };
+    const app = await createApp(browser.db, config);
+    t.after(() => app.agent.stop());
+    const adapter = { decide: async () => ({ control: "comparison" as const, scores: { a: 1 } }) };
+    const agent = new ConversationAgent(config, app.agent, "local-user", adapter);
+    const events = await lastValueFrom(agent.run(input("Compare exhibits")).pipe(toArray()));
+    const rejected = events.find(
+      (event) =>
+        event.type === EventType.TOOL_CALL_RESULT &&
+        JSON.parse(String(event.content)).panel === null,
+    );
+    assert.ok(rejected && rejected.type === EventType.TOOL_CALL_RESULT);
+    assert.match(JSON.parse(String(rejected.content)).error, error);
+  });
+}
