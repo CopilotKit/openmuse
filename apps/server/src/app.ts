@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { MessageSchema } from "@ag-ui/core";
 import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
@@ -335,6 +337,12 @@ export async function createApp(
     );
     return new Response(body, { status: response.status, headers: response.headers });
   });
+  const webRoot = "./apps/mobile/dist/web";
+  if (existsSync(webRoot)) {
+    app.use("/*", serveStatic({ root: webRoot }));
+    const webIndex = readFileSync(`${webRoot}/index.html`, "utf8");
+    app.get("*", (c) => (c.req.path.startsWith("/api/") ? c.notFound() : c.html(webIndex)));
+  }
   app.get("/", (c) =>
     c.json({ name: "OpenMuse", app: "http://localhost:8081", health: "/api/health" }),
   );

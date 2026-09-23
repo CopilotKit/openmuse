@@ -3,6 +3,8 @@ import { StatusBar } from "expo-status-bar";
 import {
   Bell,
   Check,
+  CloudUpload,
+  Github,
   Lightbulb,
   type LucideIcon,
   Menu,
@@ -10,12 +12,14 @@ import {
   PanelsTopLeft,
   Shapes,
   SquareCheck,
+  UserPlus,
   X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
+  Linking,
   Pressable,
   ScrollView,
   Text,
@@ -37,6 +41,11 @@ import { ChatScreen, WorkspaceTools } from "./src/chat";
 import { ComputerEntry } from "./src/computer";
 import { ComputerDraftProvider } from "./src/computer-drafts";
 import { Details } from "./src/details";
+import {
+  DEPLOY_TO_RENDER_URL,
+  GITHUB_REPOSITORY_URL,
+  renderSignupUrlWithUtms,
+} from "./src/render-links";
 import { BrowserScreen, CalendarScreen, FilesScreen, MailScreen } from "./src/screens";
 import { ThreadsProvider, ThreadsSheet, useMuseThread } from "./src/threads";
 import { Button, Card, colors, ErrorNotice, Field, IconButton, Mascot, s } from "./src/ui";
@@ -301,14 +310,19 @@ function WorkspaceShell({
               marginHorizontal: 20,
             }}
           >
-            <View style={{ position: "absolute", left: 0, top: 16 }}>
+            <View style={[s.row, { position: "absolute", left: 0, top: 16 }]}>
               <IconButton
                 icon={Menu}
                 label="Open conversations and menu"
                 onPress={() => setThreadsOpen(true)}
               />
+              <IconButton
+                icon={CloudUpload}
+                label="Deploy to Render"
+                onPress={() => void Linking.openURL(DEPLOY_TO_RENDER_URL)}
+              />
             </View>
-            <View style={{ alignItems: "center", gap: 1 }}>
+            <View style={{ alignItems: "center", gap: 1, maxWidth: desktop ? "70%" : 120 }}>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Open ${agentName} activity and approvals`}
@@ -339,7 +353,12 @@ function WorkspaceShell({
               </Pressable>
               {section === "chat" && <ComputerEntry />}
             </View>
-            <View style={{ position: "absolute", right: 0, top: 16 }}>
+            <View style={[s.row, { position: "absolute", right: 0, top: 16 }]}>
+              <IconButton
+                icon={UserPlus}
+                label="Sign up on Render"
+                onPress={() => void Linking.openURL(renderSignupUrlWithUtms())}
+              />
               <IconButton
                 icon={Bell}
                 label={`Notifications, ${pending} unread or pending`}
@@ -470,6 +489,17 @@ function WorkspaceShell({
                 );
               })}
             </View>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel="Open the GitHub repository"
+              onPress={() => void Linking.openURL(GITHUB_REPOSITORY_URL)}
+              style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, paddingVertical: 5 })}
+            >
+              <View style={[s.row, { gap: 5, justifyContent: "center" }]}>
+                <Github size={13} color={colors.muted} />
+                <Text style={s.small}>GitHub repository</Text>
+              </View>
+            </Pressable>
           </View>
         </View>
         {!!toast && (

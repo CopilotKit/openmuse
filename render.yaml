@@ -1,0 +1,56 @@
+previews:
+  generation: manual
+
+services:
+  - type: web
+    name: openmuse
+    runtime: node
+    plan: starter
+    buildCommand: >-
+      corepack enable &&
+      pnpm install --frozen-lockfile &&
+      pnpm build:server &&
+      pnpm build:web
+    startCommand: pnpm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    disk:
+      name: openmuse-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: WORKSPACE_MODE
+        value: live
+      - key: AGENT_BACKEND
+        value: model
+      - key: MODEL
+        value: openai/gpt-4o-mini
+      - key: HOST
+        value: 0.0.0.0
+      - key: DATA_DIR
+        value: /var/data/openmuse
+      - key: TASK_WORKER_ENABLED
+        value: true
+      - key: PUBLIC_API_URL
+        fromService:
+          name: openmuse
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: ALLOWED_ORIGINS
+        fromService:
+          name: openmuse
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: EXPO_PUBLIC_API_URL
+        fromService:
+          name: openmuse
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: OPENMUSE_ACCESS_KEY
+        generateValue: true
+      - key: TOKEN_ENCRYPTION_KEY
+        generateValue: true
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: CPK_INTELLIGENCE_API_KEY
+        sync: false

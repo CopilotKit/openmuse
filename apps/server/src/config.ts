@@ -62,7 +62,8 @@ export function readConfig(): Config {
   if (mode === "live" && backend === "sample")
     throw new Error("Live workspaces cannot use the sample agent");
   const port = Number(process.env.PORT ?? 8787);
-  const publicUrl = process.env.PUBLIC_API_URL ?? `http://localhost:${port}`;
+  const publicUrl =
+    process.env.PUBLIC_API_URL ?? process.env.RENDER_EXTERNAL_URL ?? `http://localhost:${port}`;
   const config: Config = {
     mode,
     port,
