@@ -2,8 +2,12 @@ services:
   - type: web
     name: openmuse-api
     runtime: node
-    plan: starter
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build:server
+    # starter (512 MB) gets OOM-killed before the server binds a port, because
+    # the default PGlite store loads an embedded Postgres WASM build.
+    plan: standard
+    # No corepack: Render preinstalls pnpm at /usr/bin and /usr is read-only, so
+    # `corepack enable` dies with EROFS. Render's pnpm honors packageManager.
+    buildCommand: pnpm install --frozen-lockfile && pnpm build:server
     startCommand: pnpm start
     healthCheckPath: /api/health
     disk:
@@ -49,7 +53,7 @@ services:
     # --clear avoids a cached Metro transform keeping a stale EXPO_PUBLIC_API_URL,
     # which Expo inlines into the bundle at build time.
     buildCommand: >-
-      corepack enable && pnpm install --frozen-lockfile &&
+      pnpm install --frozen-lockfile &&
       pnpm --dir apps/mobile exec expo export --platform web --output-dir dist/web --clear
     staticPublishPath: apps/mobile/dist/web
     routes:
