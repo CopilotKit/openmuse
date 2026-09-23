@@ -4,8 +4,9 @@ import Markdown, { type MarkdownStyles, type RenderRules } from "react-native-ma
 import { assistantMarkdown, isSafeAssistantUrl } from "./assistant-markdown";
 import { colors, ErrorNotice } from "./ui";
 
+const textStyle = { color: colors.text, fontSize: 16, lineHeight: 24 };
 const style: Partial<MarkdownStyles> = {
-  text: { color: colors.text, fontSize: 16, lineHeight: 24 },
+  text: textStyle,
   paragraph: { marginTop: 0, marginBottom: 6 },
   list: { marginBottom: 6 },
   headingContainer: { marginTop: 8, marginBottom: 4 },
@@ -17,6 +18,11 @@ const style: Partial<MarkdownStyles> = {
   codeBlock: { backgroundColor: "#E2E4E7", color: colors.text },
 };
 const rules: RenderRules = {
+  textgroup: (node, children) => (
+    <Text key={node.key} selectable style={textStyle}>
+      {children}
+    </Text>
+  ),
   image: (node) => (
     <Text key={node.key} style={{ color: colors.muted }}>
       {node.attributes.alt ? `[Image: ${node.attributes.alt}]` : "[Image]"}
