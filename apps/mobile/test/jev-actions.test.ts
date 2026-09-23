@@ -89,6 +89,13 @@ test("stale, wrong-thread, selected, busy and pending panels cannot submit", () 
   assert.equal(choiceAvailability(panel, "thread-1", "panel-1", false, false), "ready");
 });
 
+test("a carried preference leaves a new refinement panel selectable", () => {
+  assert.equal(
+    choiceAvailability({ ...panel, preferredId: "explore" }, "thread-1", "panel-1", false, false),
+    "ready",
+  );
+});
+
 test("selection uses the bounded server action format and rejects unknown options", () => {
   assert.equal(
     selectionText(panel, "explore"),

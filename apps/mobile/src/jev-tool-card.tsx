@@ -126,6 +126,10 @@ export function JevToolCard({ result, loading }: { result: unknown; loading: boo
   );
   const stale = availability === "wrong-thread" || availability === "stale";
   const selectedId = panel.selectedId || confirmedId || interaction.confirmedSelection(panel.id);
+  const preferredOption =
+    panel.type === "comparison" && panel.preferredId
+      ? panel.options.find((option) => option.id === panel.preferredId)
+      : undefined;
   const disabled = availability !== "ready";
 
   async function choose(optionId: string) {
@@ -161,6 +165,9 @@ export function JevToolCard({ result, loading }: { result: unknown; loading: boo
       <View style={{ gap: 5 }}>
         <Text style={s.heading}>{panel.title}</Text>
         {panel.mode === "sample" && <Text style={s.small}>Sample · scripted decisions</Text>}
+        {preferredOption && (
+          <Text style={s.small}>Current preference: {preferredOption.label}</Text>
+        )}
         {stale && <Text style={s.small}>Earlier choices</Text>}
         {selectedId && <Text style={s.small}>Choice submitted</Text>}
       </View>
