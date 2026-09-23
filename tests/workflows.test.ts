@@ -6,7 +6,8 @@ import { after, before, test } from "node:test";
 import { createApp } from "../apps/server/src/app.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
 import type { AgentNotification, AgentTask, Idea, Monitor } from "../packages/domain/src/agent.ts";
-import type { ActionProposal } from "../packages/domain/src/index.ts";
+import type { ActionProposal, Artifact } from "../packages/domain/src/index.ts";
+import { createSamplePdf } from "../packages/integrations/src/pdf.ts";
 
 let db: Store, server: Awaited<ReturnType<typeof createApp>>, directory: string;
 const owner = "workflow-user";
@@ -95,6 +96,100 @@ test("document job runs without a client, waits for review, and resumes from its
   assert.equal(
     refreshedIdeas.filter((idea) => idea.kind === "document" && idea.status === "new").length,
     0,
+  );
+});
+
+test("document retry reuses the filled PDF after its task checkpoint is lost", async (t) => {
+  const replayOwner = "interrupted-document";
+  await server.workspace.ensureSample(replayOwner, server.actions);
+  const workspace = await server.workspace.snapshot(replayOwner);
+  const mail = workspace.mail.find((message) => message.attachments.length);
+  assert.ok(mail);
+  const task = await server.agent.createTask(replayOwner, {
+    prompt: "Fill the sample form",
+    kind: "document",
+    input: { messageId: mail.id, fields: { participant_name: "Sample Student" } },
+  });
+  const compareAndSwap = db.compareAndSwap.bind(db);
+  let interrupted = false;
+  t.mock.method(db, "compareAndSwap", async (...args: Parameters<Store["compareAndSwap"]>) => {
+    const [recordOwner, kind, id, , patch] = args;
+    if (
+      recordOwner === replayOwner &&
+      kind === "tasks" &&
+      id === task.id &&
+      (patch.state as AgentTask["state"] | undefined)?.filledId &&
+      !interrupted
+    ) {
+      interrupted = true;
+      return null;
+    }
+    return compareAndSwap(...args);
+  });
+  await server.agent.worker.tick();
+  assert.ok(interrupted);
+  const retry = await server.agent.getTask(replayOwner, task.id);
+  assert.equal(retry.status, "queued");
+  assert.equal(retry.state.filledId, undefined);
+  const outputs = (await db.list<Artifact>(replayOwner, "files")).filter((file) => file.parentId);
+  assert.equal(outputs.length, 1);
+
+  await server.agent.worker.tick();
+  const resumed = await server.agent.getTask(replayOwner, task.id);
+  assert.equal(resumed.status, "waiting_approval", resumed.error ?? resumed.question);
+  assert.equal(resumed.state.filledId, outputs[0].id);
+  assert.equal(
+    (await db.list<Artifact>(replayOwner, "files")).filter((file) => file.parentId).length,
+    1,
+  );
+});
+
+test("attachment import recovers after losing its mapping and isolates reconnections", async (t) => {
+  const attachmentOwner = "attachment-recovery";
+  await server.workspace.ensureSample(attachmentOwner, server.actions);
+  const workspace = await server.workspace.snapshot(attachmentOwner);
+  const mail = workspace.mail[0];
+  const reference = `${mail.id}:sample-attachment:sample.pdf`;
+  await db.put(attachmentOwner, "mail", {
+    ...mail,
+    attachments: [reference],
+    connectionId: "sample-google",
+  });
+  const google = server.workspace.google(attachmentOwner);
+  const bytes = await createSamplePdf();
+  t.mock.method(google, "getAttachment", async () => bytes);
+  t.mock.method(server.workspace, "google", () => google);
+  const put = db.put.bind(db);
+  let interrupted = false;
+  t.mock.method(db, "put", async (...args: Parameters<Store["put"]>) => {
+    if (args[0] === attachmentOwner && args[1] === "imports" && !interrupted) {
+      interrupted = true;
+      throw new Error("mapping unavailable");
+    }
+    return put(...args);
+  });
+  const before = await server.files.list(attachmentOwner);
+  await assert.rejects(
+    server.workspace.importAttachment(attachmentOwner, reference),
+    /mapping unavailable/,
+  );
+  const published = (await server.files.list(attachmentOwner)).find(
+    (file) => !before.some((old) => old.id === file.id),
+  );
+  assert.ok(published);
+  const recovered = await server.workspace.importAttachment(attachmentOwner, reference);
+  assert.equal(recovered.id, published.id);
+  assert.equal((await server.files.list(attachmentOwner)).length, before.length + 1);
+
+  await db.put(attachmentOwner, "settings", { id: "google", connectionId: "new-connection" });
+  await db.put(attachmentOwner, "mail", {
+    ...mail,
+    attachments: [reference],
+    connectionId: "new-connection",
+  });
+  assert.notEqual(
+    (await server.workspace.importAttachment(attachmentOwner, reference)).id,
+    recovered.id,
   );
 });
 
