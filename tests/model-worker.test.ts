@@ -4,11 +4,94 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createApp } from "../apps/server/src/app.ts";
-import { createStore } from "../apps/server/src/db.ts";
+import { createStore, type Store } from "../apps/server/src/db.ts";
 import { createDemoModel, demoModel } from "../apps/server/src/demo/model.ts";
+import type { AgentTask } from "../packages/domain/src/agent.ts";
 import type { ActionProposal } from "../packages/domain/src/index.ts";
 import { fixture as computerFixture } from "./helpers/computer.ts";
 import { modelFixture } from "./helpers/model.ts";
+
+for (const checkpoint of ["artifact", "cache"] as const) {
+  test(`model fill reuses its PDF after a failed ${checkpoint} checkpoint`, async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "openmuse-model-fill-"));
+    const db = await createStore();
+    const calls: { name: string; arguments: object }[] = [];
+    const { requests } = await modelFixture(t, (index) => calls[index]);
+    const server = await createApp(db, {
+      mode: "sample",
+      port: 8787,
+      host: "127.0.0.1",
+      publicUrl: "http://localhost:8787",
+      dataDir: directory,
+      agentBackend: "model",
+      intelligenceApiKey: "test-project-key-never-sent",
+      model: "openai/fixture",
+      googleRedirectUri: "http://localhost:8787/api/google/callback",
+      allowedOrigins: [],
+    });
+    try {
+      const owner = "model-fill-replay";
+      await server.workspace.ensureSample(owner, server.actions);
+      const source = (await server.files.list(owner))[0];
+      const fill = {
+        name: "fill_pdf",
+        arguments: { fileId: source.id, fields: { participant_name: "Sample Student" } },
+      };
+      calls.push(fill, {
+        name: "ask_user",
+        arguments: { question: "Retry the interrupted operation?" },
+      });
+      const task = await server.agent.createTask(owner, { prompt: "Fill the sample form" });
+      const compareAndSwap = db.compareAndSwap.bind(db);
+      let interrupted = false;
+      t.mock.method(db, "compareAndSwap", async (...args: Parameters<Store["compareAndSwap"]>) => {
+        const patch = args[4] as Partial<AgentTask>;
+        if (
+          args[0] === owner &&
+          args[1] === "tasks" &&
+          args[2] === task.id &&
+          (checkpoint === "artifact" ? patch.artifactIds?.length : patch.state?.operations) &&
+          !interrupted
+        ) {
+          interrupted = true;
+          return null;
+        }
+        return compareAndSwap(...args);
+      });
+      await server.agent.worker.tick();
+      assert.ok(interrupted);
+      const waiting = await server.agent.getTask(owner, task.id);
+      assert.equal(waiting.status, "waiting_input", waiting.error ?? waiting.question);
+      const outputs = (await server.files.list(owner)).filter(
+        (file) => file.parentId === source.id,
+      );
+      assert.equal(outputs.length, 1);
+      assert.deepEqual(waiting.artifactIds, checkpoint === "artifact" ? [] : [outputs[0].id]);
+      assert.equal(waiting.state.operations, undefined);
+      requests.length = 0;
+      calls.splice(0, calls.length, fill, {
+        name: "finish_task",
+        arguments: { summary: "Saved the sample form." },
+      });
+      await server.agent.answer(owner, task.id, "Retry");
+      await server.agent.worker.tick();
+      const completed = await server.agent.getTask(owner, task.id);
+      assert.equal(completed.status, "succeeded", completed.error ?? completed.question);
+      assert.deepEqual(
+        completed.artifactIds.filter((id) => id === outputs[0].id),
+        [outputs[0].id],
+      );
+      assert.equal(
+        (await server.files.list(owner)).filter((file) => file.parentId === source.id).length,
+        1,
+      );
+    } finally {
+      await server.agent.stop();
+      await db.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+}
 
 test("CopilotKit model worker executes server tools and persists the confirmed outcome", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "openmuse-model-"));
