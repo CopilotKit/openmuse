@@ -27,7 +27,7 @@ import { BackgroundUpdates } from "./background-updates";
 import { BrowserRunContext, BrowserToolCard } from "./browser-tool-card";
 import { BrowserThreadCard } from "./computer";
 import { ConversationQueue, type QueuedMessage } from "./conversation-queue";
-import { runConversationTurn } from "./conversation-run";
+import { replayedRunError, runConversationTurn } from "./conversation-run";
 import { DesktopToolCard } from "./desktop-tool-card";
 import { confirmedJevSelection, displayJevUserMessage, latestJevPanelId } from "./jev-actions";
 import { JevInteractionContext, JevToolCard } from "./jev-tool-card";
@@ -235,6 +235,7 @@ export function ChatScreen({
   const [saveError, setSaveError] = useState("");
   const [historyError, setHistoryError] = useState("");
   const [historyAttempt, setHistoryAttempt] = useState(0);
+  const replaying = useRef(false);
   useEffect(() => {
     if (!isReady) return;
     let active = true;
@@ -248,12 +249,20 @@ export function ChatScreen({
     async function hydrate() {
       try {
         if (richThreads) {
-          if (selection.existing)
-            await runConversationTurn(
-              agentId,
-              () => copilotkit.connectAgent({ agent }),
-              (onError) => copilotkit.subscribe({ onError }),
-            );
+          if (selection.existing) {
+            // Replaying history re-emits past RUN_ERROR events; only connection failures block loading.
+            replaying.current = true;
+            try {
+              await runConversationTurn(
+                agentId,
+                () => copilotkit.connectAgent({ agent }),
+                (onError) => copilotkit.subscribe({ onError }),
+                [replayedRunError],
+              );
+            } finally {
+              replaying.current = false;
+            }
+          }
         } else {
           const { messages } = await api.request<{ messages: Message[] }>("/api/conversation");
           if (active) agent.setMessages(messages);
@@ -370,6 +379,8 @@ export function ChatScreen({
     const subscription = copilotkit.subscribe({
       onError: (event) => {
         if (event.context?.agentId && event.context.agentId !== agentId) return;
+        // A failed turn saved in history is already over; it is not a failure of this session.
+        if (replaying.current && event.code === replayedRunError) return;
         const failure = event.error instanceof Error ? event.error : new Error(String(event.error));
         setError(failure.message);
       },
