@@ -2,14 +2,22 @@ import { Check, ExternalLink } from "lucide-react-native";
 import { createContext, useContext, useRef, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, Text, View } from "react-native";
 import type { JevOption, JevPanel } from "../../../packages/domain/src/jev";
-import { choiceAvailability, parseJevResult, selectionText } from "./jev-actions";
+import {
+  choiceAvailability,
+  parseJevResult,
+  retryChoiceAvailable,
+  selectionText,
+} from "./jev-actions";
 import { Button, Card, colors, ErrorNotice, s } from "./ui";
 
 type JevInteraction = {
   threadId: string | null;
   busy: boolean;
   latestPanelId: string | null;
+  latestUserText: string | null;
   send: (text: string) => Promise<void>;
+  retry: (text: string) => Promise<void>;
+  canRetry: boolean;
   confirmedSelection: (panelId: string) => string | null;
 };
 
@@ -17,9 +25,14 @@ export const JevInteractionContext = createContext<JevInteraction>({
   threadId: null,
   busy: true,
   latestPanelId: null,
+  latestUserText: null,
+  canRetry: false,
   confirmedSelection: () => null,
   send: async () => {
     throw new Error("Open an active conversation to choose an option.");
+  },
+  retry: async () => {
+    throw new Error("Open an active conversation to retry a choice.");
   },
 });
 
@@ -98,6 +111,7 @@ export function JevToolCard({ result, loading }: { result: unknown; loading: boo
   const interaction = useContext(JevInteractionContext);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
   const [confirmedId, setConfirmedId] = useState<string | null>(null);
+  const [failedOptionId, setFailedOptionId] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState("");
   const pendingRef = useRef(false);
   if (loading) {
@@ -126,33 +140,46 @@ export function JevToolCard({ result, loading }: { result: unknown; loading: boo
   );
   const stale = availability === "wrong-thread" || availability === "stale";
   const selectedId = panel.selectedId || confirmedId || interaction.confirmedSelection(panel.id);
-  const preferredOption =
-    panel.type === "comparison" && panel.preferredId
-      ? panel.options.find((option) => option.id === panel.preferredId)
-      : undefined;
+  const preferredOption = panel.preferredId
+    ? panel.options.find((option) => option.id === panel.preferredId)
+    : undefined;
   const disabled = availability !== "ready";
 
-  async function choose(optionId: string) {
+  async function choose(optionId: string, retrying = false) {
+    const priorConfirmedId =
+      panel?.selectedId || confirmedId || (panel && interaction.confirmedSelection(panel.id));
     if (
       !panel ||
       pendingRef.current ||
-      confirmedId ||
-      choiceAvailability(
-        panel,
-        interaction.threadId || "",
-        interaction.latestPanelId,
-        interaction.busy,
-        false,
-      ) !== "ready"
+      priorConfirmedId ||
+      (retrying
+        ? !retryChoiceAvailable(
+            panel,
+            interaction.threadId || "",
+            interaction.latestPanelId,
+            failedOptionId,
+            interaction.latestUserText,
+            !!priorConfirmedId,
+            !interaction.canRetry,
+          ) || optionId !== failedOptionId
+        : choiceAvailability(
+            panel,
+            interaction.threadId || "",
+            interaction.latestPanelId,
+            interaction.busy,
+            false,
+          ) !== "ready")
     )
       return;
     pendingRef.current = true;
     setSubmittingId(optionId);
     setSubmitError("");
     try {
-      await interaction.send(selectionText(panel, optionId));
+      await (retrying ? interaction.retry : interaction.send)(selectionText(panel, optionId));
       setConfirmedId(optionId);
+      setFailedOptionId(null);
     } catch (error) {
+      setFailedOptionId(optionId);
       setSubmitError(error instanceof Error ? error.message : String(error));
     } finally {
       pendingRef.current = false;
@@ -165,8 +192,8 @@ export function JevToolCard({ result, loading }: { result: unknown; loading: boo
       <View style={{ gap: 5 }}>
         <Text style={s.heading}>{panel.title}</Text>
         {panel.mode === "sample" && <Text style={s.small}>Sample · scripted decisions</Text>}
-        {preferredOption && (
-          <Text style={s.small}>Current preference: {preferredOption.label}</Text>
+        {preferredOption && !selectedId && (
+          <Text style={s.small}>Previous preference: {preferredOption.label}</Text>
         )}
         {stale && <Text style={s.small}>Earlier choices</Text>}
         {selectedId && <Text style={s.small}>Choice submitted</Text>}
@@ -218,6 +245,25 @@ export function JevToolCard({ result, loading }: { result: unknown; loading: boo
         </View>
       )}
       <ErrorNotice error={submitError} />
+      {failedOptionId && !selectedId && (
+        <Button
+          small
+          disabled={
+            !retryChoiceAvailable(
+              panel,
+              interaction.threadId || "",
+              interaction.latestPanelId,
+              failedOptionId,
+              interaction.latestUserText,
+              false,
+              !interaction.canRetry || submittingId !== null,
+            )
+          }
+          onPress={() => void choose(failedOptionId, true)}
+        >
+          Retry choice
+        </Button>
+      )}
     </Card>
   );
 }

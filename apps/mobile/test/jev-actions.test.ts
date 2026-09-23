@@ -7,6 +7,7 @@ import {
   displayJevUserMessage,
   latestJevPanelId,
   parseJevResult,
+  retryChoiceAvailable,
   selectionText,
 } from "../src/jev-actions.ts";
 
@@ -93,6 +94,50 @@ test("a carried preference leaves a new refinement panel selectable", () => {
   assert.equal(
     choiceAvailability({ ...panel, preferredId: "explore" }, "thread-1", "panel-1", false, false),
     "ready",
+  );
+});
+
+test("only the failed option can retry while its panel has not been replaced", () => {
+  const action = selectionText(panel, "explore");
+  assert.equal(
+    retryChoiceAvailable(panel, "thread-1", null, "explore", action, false, false),
+    true,
+  );
+  assert.equal(
+    retryChoiceAvailable(panel, "thread-1", null, "explore", "hello", false, false),
+    false,
+  );
+  assert.equal(
+    retryChoiceAvailable(panel, "thread-1", "panel-2", "explore", action, false, false),
+    false,
+  );
+  assert.equal(
+    retryChoiceAvailable(panel, "thread-2", null, "explore", action, false, false),
+    false,
+  );
+  assert.equal(
+    retryChoiceAvailable(panel, "thread-1", null, "unknown", action, false, false),
+    false,
+  );
+  assert.equal(
+    retryChoiceAvailable(panel, "thread-1", null, "explore", action, true, false),
+    false,
+  );
+  assert.equal(
+    retryChoiceAvailable(panel, "thread-1", null, "explore", action, false, true),
+    false,
+  );
+  assert.equal(
+    retryChoiceAvailable(
+      { ...panel, selectedId: "explore" },
+      "thread-1",
+      null,
+      "explore",
+      action,
+      false,
+      false,
+    ),
+    false,
   );
 });
 

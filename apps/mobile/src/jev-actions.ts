@@ -78,6 +78,27 @@ export function choiceAvailability(
   return "ready";
 }
 
+export function retryChoiceAvailable(
+  panel: JevPanel,
+  threadId: string,
+  latestPanelId: string | null,
+  failedOptionId: string | null,
+  latestUserText: string | null,
+  confirmed: boolean,
+  busy: boolean,
+): boolean {
+  return (
+    panel.threadId === threadId &&
+    (latestPanelId === null || latestPanelId === panel.id) &&
+    !!failedOptionId &&
+    panel.options.some((option) => option.id === failedOptionId) &&
+    latestUserText === selectionText(panel, failedOptionId) &&
+    !panel.selectedId &&
+    !confirmed &&
+    !busy
+  );
+}
+
 export function selectionText(panel: JevPanel, optionId: string): string {
   if (!panel.options.some((option) => option.id === optionId)) throw new Error("Unknown choice");
   return encodeJevAction({

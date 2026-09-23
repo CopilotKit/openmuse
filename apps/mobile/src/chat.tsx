@@ -313,9 +313,15 @@ export function ChatScreen({
     [queue, flush],
   );
   const sendChoice = useCallback(
-    (text: string): Promise<void> => {
-      if (!loaded || !isReady || queue.getSnapshot().paused || saveError)
+    (text: string, retry = false): Promise<void> => {
+      const snapshot = queue.getSnapshot();
+      if (!loaded || !isReady || saveError || (!retry && snapshot.paused))
         return Promise.reject(new Error("The conversation is not ready for a choice yet."));
+      if (retry) {
+        if (runLock.current || agent.isRunning || snapshot.running || snapshot.pending.length)
+          return Promise.reject(new Error("Wait for the current response before retrying."));
+        if (snapshot.paused) queue.resume();
+      }
       const id = `choice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const completion = new Promise<void>((resolve, reject) => {
         choiceCompletions.current.set(id, { resolve, reject });
@@ -326,7 +332,7 @@ export function ChatScreen({
       flush();
       return completion;
     },
-    [flush, isReady, loaded, queue, saveError],
+    [agent.isRunning, flush, isReady, loaded, queue, saveError],
   );
   useEffect(() => {
     if (!busy && !agent.isRunning && outbox.pending.length) flush();
@@ -378,6 +384,10 @@ export function ChatScreen({
     (last, message, index) => (message.role === "user" ? index : last),
     -1,
   );
+  const latestUserText =
+    latestUserIndex >= 0 && typeof messages[latestUserIndex]?.content === "string"
+      ? messages[latestUserIndex].content
+      : null;
   const visible = messages.filter((m) => m.role === "user" || m.role === "assistant");
   const replying = busy || agent.isRunning;
   return (
@@ -501,7 +511,17 @@ export function ChatScreen({
                       outbox.paused ||
                       !!saveError,
                     latestPanelId,
+                    latestUserText,
                     send: sendChoice,
+                    retry: (text) => sendChoice(text, true),
+                    canRetry:
+                      loaded &&
+                      isReady &&
+                      !busy &&
+                      !agent.isRunning &&
+                      !outbox.running &&
+                      !outbox.pending.length &&
+                      !saveError,
                     confirmedSelection: (panelId) => confirmedJevSelection(messages, panelId),
                   }}
                 >
