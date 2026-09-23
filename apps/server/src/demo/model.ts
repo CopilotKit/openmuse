@@ -110,6 +110,35 @@ function parseResult(message: ChatMessage): unknown {
   }
 }
 
+const schoolMessageSchema = z.object({
+  id: z.string().optional(),
+  sender: z.string(),
+  subject: z.string(),
+  body: z.string(),
+});
+
+function isSchoolTripMessage(message: z.infer<typeof schoolMessageSchema>): boolean {
+  return (
+    /lincoln middle school/i.test(message.sender) &&
+    /permission|trip|aquarium/i.test(message.subject) &&
+    /aquarium/i.test(message.body) &&
+    /permission slip/i.test(message.body)
+  );
+}
+
+function schoolMessageFromHistory(messages: ChatMessage[]) {
+  for (const result of [...messages].reverse()) {
+    if (result.role !== "tool") continue;
+    const parsed = z
+      .object({ messages: z.array(schoolMessageSchema) })
+      .safeParse(parseResult(result));
+    if (!parsed.success) continue;
+    const match = parsed.data.messages.findLast(isSchoolTripMessage);
+    if (match) return match;
+  }
+  return undefined;
+}
+
 function demoMailResponse(request: ChatCompletionRequest, turn: ChatMessage[]): FixtureResponse {
   const read = turnResult(turn, "read_mail_thread", "call_openmuse_demo_mail_read_");
   if (read) {
@@ -189,12 +218,12 @@ function demoTripResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
   if (read) {
     const parsed = z
       .object({
-        messages: z.array(z.object({ sender: z.string(), subject: z.string(), body: z.string() })),
+        messages: z.array(schoolMessageSchema),
       })
       .safeParse(parseResult(read));
-    const message = parsed.success ? parsed.data.messages.at(-1) : undefined;
+    const message = parsed.success ? parsed.data.messages.findLast(isSchoolTripMessage) : undefined;
     if (!message)
-      return { content: "I couldn’t read the school-trip email. Check Mail and try again." };
+      return { content: "I couldn’t verify the school-trip email. Check Mail and try again." };
     if (!request.tools?.some((tool) => tool.function.name === "present_choices"))
       return {
         content:
@@ -221,10 +250,18 @@ function demoTripResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
   const search = turnResult(turn, "search_mail", "call_openmuse_demo_mail_search_");
   if (search) {
     const parsed = z
-      .object({ matches: z.array(z.object({ threadId: z.string(), subject: z.string() })) })
+      .object({
+        matches: z.array(
+          z.object({ threadId: z.string(), sender: z.string(), subject: z.string() }),
+        ),
+      })
       .safeParse(parseResult(search));
     if (!parsed.success) return { content: "I couldn’t check the mailbox for the school trip." };
-    const match = parsed.data.matches[0];
+    const match = parsed.data.matches.find(
+      (candidate) =>
+        /lincoln middle school/i.test(candidate.sender) &&
+        /permission|trip|aquarium/i.test(candidate.subject),
+    );
     if (!match) return { content: "I didn’t find a school-trip email in the sample mailbox." };
     if (!request.tools?.some((tool) => tool.function.name === "read_mail_thread"))
       return { content: "The email reader is unavailable." };
@@ -248,6 +285,57 @@ function demoTripResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
         id: `call_openmuse_demo_mail_search_${randomUUID()}`,
         name: "search_mail",
         arguments: JSON.stringify({ query: schoolTripFixture.searchQuery }),
+      },
+    ],
+  };
+}
+
+function demoSchoolChoiceResponse(
+  request: ChatCompletionRequest,
+  turn: ChatMessage[],
+  choice: "review" | "complete",
+): FixtureResponse {
+  const mail = schoolMessageFromHistory(request.messages);
+  if (!mail)
+    return {
+      content:
+        "I can’t find the verified school-trip email in this conversation. Please start with the trip request again.",
+    };
+  if (choice === "review")
+    return {
+      content: `From ${mail.sender}, “${mail.subject}”:\n\n${mail.body.replace(/\n\nThis message is included with your local workspace\.?/i, "").slice(0, 1200)}`,
+    };
+  const task = turnResult(turn, "delegate_task", "call_openmuse_demo_document_");
+  if (task) {
+    const parsed = z.object({ id: z.string().min(1) }).safeParse(parseResult(task));
+    return parsed.success
+      ? {
+          content:
+            "I started preparing the permission slip. Follow the document task in Activity; it will ask for form details and review before sending.",
+        }
+      : { content: "I couldn’t start the permission-slip task. Please try again from the email." };
+  }
+  if (!mail.id)
+    return {
+      content:
+        "The school-trip email has no message ID, so I can’t start the permission-slip task. Open it in Mail first.",
+    };
+  if (!request.tools?.some((tool) => tool.function.name === "delegate_task"))
+    return {
+      content: "The document task tool is unavailable. Open the permission slip from Mail.",
+    };
+  return {
+    content: "I’ll prepare the school’s permission slip for your review.",
+    toolCalls: [
+      {
+        id: `call_openmuse_demo_document_${randomUUID()}`,
+        name: "delegate_task",
+        arguments: JSON.stringify({
+          kind: "document",
+          title: "Complete the permission slip",
+          prompt: "Complete the permission slip attached to the verified school-trip email",
+          input: { messageId: mail.id },
+        }),
       },
     ],
   };
@@ -283,12 +371,30 @@ function demoExhibitResponse(request: ChatCompletionRequest, turn: ChatMessage[]
       message.tool_call_id?.startsWith("call_openmuse_demo_exhibit_browse_"),
   );
   const observed = new Set<string>();
+  const requiredEvidence: Record<string, RegExp[]> = {
+    "kelp-forest": [
+      /kelp forest/i,
+      /28\s*(?:feet|foot)|28-foot/i,
+      /sardines?/i,
+      /leopard sharks?/i,
+    ],
+    "open-sea": [/open sea/i, /90-foot|90\s*foot/i, /turtles?/i, /sardines?/i, /tuna/i],
+    "rocky-shore": [/rocky shore/i, /bat rays?/i, /touch pool/i],
+  };
   for (const result of browseResults) {
     const parsed = pageSchema.safeParse(parseResult(result));
     if (!parsed.success || !parsed.data.text.trim())
       return {
         content:
           "I couldn’t read an aquarium exhibit page, so I can’t prepare sourced choices yet.",
+      };
+    const source = aquariumFixture.options.find(
+      (option) => option.sources[0].url.replace(/\/$/, "") === parsed.data.url.replace(/\/$/, ""),
+    );
+    if (!source || !requiredEvidence[source.id].every((pattern) => pattern.test(parsed.data.text)))
+      return {
+        content:
+          "I couldn’t verify the exhibit details in the aquarium page, so I can’t prepare sourced choices yet.",
       };
     observed.add(parsed.data.url.replace(/\/$/, ""));
   }
@@ -388,6 +494,10 @@ export function demoResponse(request: ChatCompletionRequest): FixtureResponse {
     return demoTripResponse(request, turn);
   if (/explore exhibits/i.test(prompt)) return demoExhibitResponse(request, turn);
   if (/something hands.on/i.test(prompt)) return demoRefinementResponse(request, turn);
+  if (/I choose [“"]?Review trip details/i.test(prompt))
+    return demoSchoolChoiceResponse(request, turn, "review");
+  if (/I choose [“"]?Complete permission slip/i.test(prompt))
+    return demoSchoolChoiceResponse(request, turn, "complete");
   if (
     /I choose [“"]?(?:Rocky Shore|Kelp Forest|Open Sea)/i.test(prompt) ||
     /^(?:Rocky Shore|Kelp Forest|Open Sea)$/i.test(prompt)

@@ -36,10 +36,12 @@ function replyText(response: ReturnType<typeof demoResponse>) {
 
 const jevRequest = (messages: ChatMessage[]): ChatCompletionRequest => ({
   ...request(messages),
-  tools: ["search_mail", "read_mail_thread", "browse_web", "present_choices"].map((name) => ({
-    type: "function",
-    function: { name, parameters: {} },
-  })),
+  tools: ["search_mail", "read_mail_thread", "browse_web", "present_choices", "delegate_task"].map(
+    (name) => ({
+      type: "function",
+      function: { name, parameters: {} },
+    }),
+  ),
 });
 
 test("school-trip demo reads mail before presenting clarification choices", () => {
@@ -51,7 +53,11 @@ test("school-trip demo reads mail before presenting clarification choices", () =
   messages.push({
     role: "tool",
     tool_call_id: calls(search)?.[0]?.id,
-    content: JSON.stringify({ matches: [{ threadId: "trip-thread", subject: "Trip reminder" }] }),
+    content: JSON.stringify({
+      matches: [
+        { threadId: "trip-thread", sender: "Lincoln Middle School", subject: "Trip reminder" },
+      ],
+    }),
   });
   const read = demoResponse(jevRequest(messages));
   assert.equal(calls(read)?.[0]?.name, "read_mail_thread");
@@ -61,6 +67,7 @@ test("school-trip demo reads mail before presenting clarification choices", () =
     content: JSON.stringify({
       messages: [
         {
+          id: "mail-fieldtrip",
           sender: "Lincoln Middle School",
           subject: "Trip reminder",
           body: "The class is heading to the aquarium. Please complete the permission slip. Bring lunch and a water bottle.",
@@ -77,6 +84,91 @@ test("school-trip demo reads mail before presenting clarification choices", () =
   );
 });
 
+test("school-trip search ignores newer unrelated aquarium mail and rejects wrong read", () => {
+  const messages: ChatMessage[] = [
+    { role: "user", content: "Help me get ready for the aquarium trip" },
+  ];
+  const search = demoResponse(jevRequest(messages));
+  messages.push({
+    role: "tool",
+    tool_call_id: calls(search)?.[0]?.id,
+    content: JSON.stringify({
+      matches: [
+        { threadId: "other", sender: "Local aquarium", subject: "Your aquarium visit" },
+        {
+          threadId: "trip-thread",
+          sender: "Lincoln Middle School",
+          subject: "Permission slips due Friday",
+        },
+      ],
+    }),
+  });
+  const read = demoResponse(jevRequest(messages));
+  assert.deepEqual(JSON.parse(calls(read)?.[0]?.arguments ?? "{}"), { threadId: "trip-thread" });
+  messages.push({
+    role: "tool",
+    tool_call_id: calls(read)?.[0]?.id,
+    content: JSON.stringify({
+      messages: [
+        {
+          sender: "Local aquarium",
+          subject: "Tickets",
+          body: "Your aquarium visit is confirmed. Bring lunch.",
+        },
+      ],
+    }),
+  });
+  const answer = demoResponse(jevRequest(messages));
+  assert.ok(!calls(answer)?.length);
+  assert.match(replyText(answer) ?? "", /school.trip email|school reminder/i);
+});
+
+test("both non-exhibit clarification choices continue from trusted school mail", () => {
+  const prior: ChatMessage[] = [
+    { role: "user", content: "Help me get ready for the aquarium trip" },
+    {
+      role: "tool",
+      tool_call_id: "call_openmuse_demo_mail_read_prior",
+      content: JSON.stringify({
+        messages: [
+          {
+            id: "mail-fieldtrip",
+            sender: "Lincoln Middle School",
+            subject: "Permission slips due Friday",
+            body: "Our class is heading to the aquarium this Friday. Please complete the permission slip. We leave school at 8:15 AM and return at 4:30 PM. Pack lunch and a water bottle.",
+          },
+        ],
+      }),
+    },
+  ];
+  const review = demoResponse(
+    jevRequest([
+      ...prior,
+      {
+        role: "user",
+        content:
+          "I choose “Review trip details” from clarification choices. Continue with that preference.",
+      },
+    ]),
+  );
+  assert.match(replyText(review) ?? "", /8:15 AM.*4:30 PM/s);
+  assert.ok(!calls(review)?.length);
+  const complete = demoResponse(
+    jevRequest([
+      ...prior,
+      {
+        role: "user",
+        content:
+          "I choose “Complete permission slip” from clarification choices. Continue with that preference.",
+      },
+    ]),
+  );
+  assert.equal(calls(complete)?.[0]?.name, "delegate_task");
+  const args = JSON.parse(calls(complete)?.[0]?.arguments ?? "{}");
+  assert.equal(args.kind, "document");
+  assert.equal(args.input.messageId, "mail-fieldtrip");
+});
+
 test("school-trip demo stops after failed mail or choice result", () => {
   const failedMail = demoResponse(
     jevRequest([
@@ -89,7 +181,7 @@ test("school-trip demo stops after failed mail or choice result", () => {
     ]),
   );
   assert.ok(!calls(failedMail)?.length);
-  assert.match(replyText(failedMail) ?? "", /couldn.t read/i);
+  assert.match(replyText(failedMail) ?? "", /couldn.t verify/i);
   const failedChoice = demoResponse(
     jevRequest([
       { role: "user", content: "Help me get ready for the aquarium trip" },
@@ -119,7 +211,11 @@ test("Explore exhibits browses every cited aquarium page before showing comparis
         sessionId: `page-${index}`,
         url,
         title: "Aquarium exhibit",
-        text: "Official exhibit page text describing this exhibit and its animals or interactive touch pool.",
+        text: [
+          "Kelp Forest at 28 feet features sardines and leopard sharks.",
+          "Open Sea has a 90-foot window with turtles, sardines, and tuna.",
+          "Rocky Shore has a touch pool for bat rays.",
+        ][index],
         truncated: false,
       }),
     });
@@ -148,6 +244,26 @@ test("Explore exhibits does not make a card when a browser read fails", () => {
   const answer = demoResponse(jevRequest(messages));
   assert.ok(!calls(answer)?.length);
   assert.match(replyText(answer) ?? "", /couldn.t read/i);
+});
+
+test("Explore exhibits rejects a successful page whose text does not support its fixture claim", () => {
+  const messages: ChatMessage[] = [{ role: "user", content: "Explore exhibits" }];
+  const first = demoResponse(jevRequest(messages));
+  const { url } = JSON.parse(calls(first)?.[0]?.arguments ?? "{}");
+  messages.push({
+    role: "tool",
+    tool_call_id: calls(first)?.[0]?.id,
+    content: JSON.stringify({
+      sessionId: "page",
+      url,
+      title: "Kelp Forest",
+      text: "Tickets and hours only.",
+      truncated: false,
+    }),
+  });
+  const answer = demoResponse(jevRequest(messages));
+  assert.ok(!calls(answer)?.length);
+  assert.match(replyText(answer) ?? "", /couldn.t verify|does not support/i);
 });
 
 test("hands-on preference refines the same candidate set and selection is acknowledged", () => {
