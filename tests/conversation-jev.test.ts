@@ -30,6 +30,21 @@ test("refinement may omit options but new panels still need candidates", () => {
   );
   assert.throws(() => presentChoicesParameters.parse({ ...base, options: [] }));
 });
+
+test("mail-grounded choices name a thread, while generic clarification needs no mail reference", () => {
+  const base = {
+    message: "What next?",
+    context: "User asked for help",
+    title: "Next steps",
+    control: "clarification",
+    options,
+  };
+  assert.doesNotThrow(() => presentChoicesParameters.parse(base));
+  assert.equal(
+    presentChoicesParameters.parse({ ...base, mailThreadId: "trip-thread" }).mailThreadId,
+    "trip-thread",
+  );
+});
 function input(content: string, threadId = "jev-thread"): RunAgentInput {
   return {
     threadId,
@@ -237,6 +252,7 @@ test("mail read in an earlier run does not authorize a new live clarification", 
               context: "Earlier mail",
               title: "Next",
               control: "clarification",
+              mailThreadId: "trip-thread",
               options,
             },
           }
@@ -263,7 +279,7 @@ test("mail read in an earlier run does not authorize a new live clarification", 
   const result = events.find((event) => event.type === EventType.TOOL_CALL_RESULT);
   assert.ok(result && result.type === EventType.TOOL_CALL_RESULT);
   assert.equal(JSON.parse(String(result.content)).panel, null);
-  assert.match(JSON.parse(String(result.content)).error, /Read the relevant email/);
+  assert.match(JSON.parse(String(result.content)).error, /Read the referenced email/);
 });
 
 test("live refinement reuses the verified stored sources with no new browse or options", async (t) => {
@@ -337,4 +353,162 @@ test("live refinement reuses the verified stored sources with no new browse or o
     JSON.parse(String(refined.content)).panel.options.map((option: { id: string }) => option.id),
     ["a"],
   );
+});
+
+test("generic live clarification succeeds without mail, but an unobserved mail thread does not", async (t) => {
+  await modelFixture(t, (index) =>
+    index === 0
+      ? {
+          name: "present_choices",
+          arguments: {
+            message: "Choose next step",
+            context: "User asked",
+            title: "Next",
+            control: "clarification",
+            options,
+          },
+        }
+      : index === 2
+        ? {
+            name: "present_choices",
+            arguments: {
+              message: "Choose from email",
+              context: "Claimed school email",
+              title: "School",
+              control: "clarification",
+              mailThreadId: "trip-thread",
+              options,
+            },
+          }
+        : undefined,
+  );
+  const browser = await browserFixture(t, () => ({ data: {} }));
+  const config = {
+    ...browser.config,
+    agentBackend: "model" as const,
+    model: "openai/fixture",
+    jevMode: "live" as const,
+  };
+  const app = await createApp(browser.db, config);
+  t.after(() => app.agent.stop());
+  const adapter = {
+    decide: async () => ({ control: "clarification" as const, scores: { explore: 1 } }),
+  };
+  const agent = new ConversationAgent(config, app.agent, "local-user", adapter);
+  const first = await lastValueFrom(agent.run(input("What next?")).pipe(toArray()));
+  assert.ok(
+    first.some(
+      (event) =>
+        event.type === EventType.TOOL_CALL_RESULT && JSON.parse(String(event.content)).panel,
+    ),
+  );
+  const second = await lastValueFrom(agent.run(input("School email next?")).pipe(toArray()));
+  const rejected = second.find((event) => event.type === EventType.TOOL_CALL_RESULT);
+  assert.ok(rejected && rejected.type === EventType.TOOL_CALL_RESULT);
+  assert.equal(JSON.parse(String(rejected.content)).panel, null);
+  assert.match(JSON.parse(String(rejected.content)).error, /Read the referenced email/);
+});
+
+test("live comparison rejects a factual detail absent from the read page", async (t) => {
+  await modelFixture(t, (index) =>
+    index === 0
+      ? { name: "browse_web", arguments: { url: "https://example.org/exhibit" } }
+      : index === 1
+        ? {
+            name: "present_choices",
+            arguments: {
+              message: "Compare",
+              context: "Observed exhibit",
+              title: "Exhibits",
+              control: "comparison",
+              options: [
+                {
+                  ...comparisonOption("https://example.org/exhibit"),
+                  details: ["A bat-ray touch pool"],
+                },
+              ],
+            },
+          }
+        : undefined,
+  );
+  const browser = await browserFixture(t, (path, body) => ({
+    data: path.endsWith("/read")
+      ? {
+          url: "https://example.org/exhibit",
+          title: "Exhibit",
+          text: "A kelp forest with sardines.",
+          truncated: false,
+        }
+      : {
+          id: body.id,
+          url: body.url,
+          title: "Opened",
+          status: "active",
+          updatedAt: new Date().toISOString(),
+        },
+  }));
+  const config = {
+    ...browser.config,
+    agentBackend: "model" as const,
+    model: "openai/fixture",
+    jevMode: "live" as const,
+  };
+  const app = await createApp(browser.db, config);
+  t.after(() => app.agent.stop());
+  const adapter = { decide: async () => ({ control: "comparison" as const, scores: { a: 1 } }) };
+  const agent = new ConversationAgent(config, app.agent, "local-user", adapter);
+  const events = await lastValueFrom(agent.run(input("Compare exhibits")).pipe(toArray()));
+  const rejected = events.find(
+    (event) =>
+      event.type === EventType.TOOL_CALL_RESULT && JSON.parse(String(event.content)).panel === null,
+  );
+  assert.ok(rejected && rejected.type === EventType.TOOL_CALL_RESULT);
+  assert.match(JSON.parse(String(rejected.content)).error, /source text/);
+});
+
+test("an empty browser read does not authorize a live comparison", async (t) => {
+  await modelFixture(t, (index) =>
+    index === 0
+      ? { name: "browse_web", arguments: { url: "https://example.org/empty" } }
+      : index === 1
+        ? {
+            name: "present_choices",
+            arguments: {
+              message: "Compare",
+              context: "Claimed page",
+              title: "Exhibits",
+              control: "comparison",
+              options: [comparisonOption("https://example.org/empty")],
+            },
+          }
+        : undefined,
+  );
+  const browser = await browserFixture(t, (path, body) => ({
+    data: path.endsWith("/read")
+      ? { url: "https://example.org/empty", title: "Empty", text: "  ", truncated: false }
+      : {
+          id: body.id,
+          url: body.url,
+          title: "Opened",
+          status: "active",
+          updatedAt: new Date().toISOString(),
+        },
+  }));
+  const config = {
+    ...browser.config,
+    agentBackend: "model" as const,
+    model: "openai/fixture",
+    jevMode: "live" as const,
+  };
+  const app = await createApp(browser.db, config);
+  t.after(() => app.agent.stop());
+  const adapter = { decide: async () => ({ control: "comparison" as const, scores: { a: 1 } }) };
+  const agent = new ConversationAgent(config, app.agent, "local-user", adapter);
+  const events = await lastValueFrom(agent.run(input("Compare exhibits")).pipe(toArray()));
+  const rejected = events.find(
+    (event) =>
+      event.type === EventType.TOOL_CALL_RESULT && JSON.parse(String(event.content)).panel === null,
+  );
+  assert.ok(rejected && rejected.type === EventType.TOOL_CALL_RESULT);
+  assert.match(JSON.parse(String(rejected.content)).error, /Read the source page/);
 });
