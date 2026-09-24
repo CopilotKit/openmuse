@@ -19,6 +19,7 @@ export interface Config {
   agentUrl?: string;
   agentToken?: string;
   intelligenceApiKey?: string;
+  intelligenceLearningContainerId?: string;
   googleClientId?: string;
   googleClientSecret?: string;
   googleRedirectUri: string;
@@ -42,6 +43,13 @@ export function required(name: string, message: string, value = process.env[name
   return value.trim();
 }
 
+const invalidLearningContainerMessage =
+  "CPK_INTELLIGENCE_LEARNING_CONTAINER_ID must contain 1-64 lowercase letters, numbers, or single hyphens, " +
+  "with no leading, trailing, or repeated hyphen. " +
+  "See https://docs.copilotkit.ai/learning";
+
+const learningContainerIdPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
 export function assertApiDeploymentConfig(
   config: Config,
 ): asserts config is Config & { intelligenceApiKey: string } {
@@ -50,6 +58,14 @@ export function assertApiDeploymentConfig(
     intelligenceKeyRequiredMessage,
     config.intelligenceApiKey ?? "",
   );
+  // Automatic Learning is opt-in: an unset or blank container ID leaves it disabled.
+  const containerId = config.intelligenceLearningContainerId;
+  if (
+    containerId?.trim() &&
+    (containerId.length > 64 || !learningContainerIdPattern.test(containerId))
+  ) {
+    throw new Error(invalidLearningContainerMessage);
+  }
 }
 
 export function readConfig(): Config {
@@ -77,6 +93,7 @@ export function readConfig(): Config {
     agentUrl: process.env.AGENT_URL,
     agentToken: process.env.AGENT_TOKEN,
     intelligenceApiKey: required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage),
+    intelligenceLearningContainerId: process.env.CPK_INTELLIGENCE_LEARNING_CONTAINER_ID,
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
     googleRedirectUri: `${publicUrl}/api/google/callback`,

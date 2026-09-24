@@ -2,7 +2,7 @@ import "../config.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { AbstractAgent } from "@ag-ui/client";
 import { type BaseEvent, EventType, type RunAgentInput } from "@ag-ui/core";
-import { defineTool } from "@copilotkit/runtime/v2";
+import { type BuiltInAgent, defineTool } from "@copilotkit/runtime/v2";
 import { Observable } from "rxjs";
 import { z } from "zod";
 import {
@@ -13,18 +13,19 @@ import {
 import { computerInstructions, computerTools } from "../computer-tools.ts";
 import type { Config } from "../config.ts";
 import type { AgentService } from "./service.ts";
-import { tanstackAgent } from "./tanstack-agent.ts";
+import { chatAgent, chatTurn } from "./tanstack-agent.ts";
 
 export class ConversationAgent extends AbstractAgent {
   constructor(
     private readonly config: Config,
     private readonly service: AgentService,
     private readonly owner: string,
+    private readonly chat: BuiltInAgent = chatAgent(),
   ) {
     super({ agentId: "default" });
   }
   clone(): ConversationAgent {
-    return new ConversationAgent(this.config, this.service, this.owner);
+    return new ConversationAgent(this.config, this.service, this.owner, this.chat);
   }
   run(input: RunAgentInput): Observable<BaseEvent> {
     const latest = input.messages.filter((m) => m.role === "user").at(-1);
@@ -214,7 +215,7 @@ export class ConversationAgent extends AbstractAgent {
         },
       }),
     ];
-    const agent = tanstackAgent({
+    const agent = chatTurn(this.chat, {
       model: this.config.model ?? "openai/unconfigured",
       maxSteps: 6,
       tools,
