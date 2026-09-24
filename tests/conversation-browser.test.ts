@@ -11,7 +11,8 @@ import {
 } from "@copilotkit/runtime/v2";
 import { lastValueFrom, toArray } from "rxjs";
 import { createApp } from "../apps/server/src/app.ts";
-import { ConversationAgent, createChatAgent } from "../apps/server/src/engine/conversation.ts";
+import { ConversationAgent } from "../apps/server/src/engine/conversation.ts";
+import { chatAgent } from "../apps/server/src/engine/tanstack-agent.ts";
 import { browserFixture } from "./helpers/browser.ts";
 import { modelFixture } from "./helpers/model.ts";
 
@@ -67,7 +68,7 @@ async function chatFixture(
       config,
       server.agent,
       "local-user",
-      createChatAgent(learnedSkills),
+      chatAgent(learnedSkills),
     ),
   };
 }
@@ -413,7 +414,7 @@ async function sharedChatTurns(
   );
   const fixture = await chatFixture(t);
   // makeRuntime builds one chat agent and a fresh ConversationAgent per request.
-  const chat = createChatAgent({
+  const chat = chatAgent({
     client: intelligence,
     containerId: "openmuse-assistant",
     freshnessWindowMs,
