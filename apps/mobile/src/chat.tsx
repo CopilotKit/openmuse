@@ -21,6 +21,7 @@ import {
 import { z } from "zod";
 import { ArtifactCard } from "./agent-ui";
 import { useAgentWorkspace } from "./agent-workspace";
+import { AssistantResponse } from "./assistant-response";
 import { BackgroundUpdates } from "./background-updates";
 import { BrowserRunContext, BrowserToolCard } from "./browser-tool-card";
 import { BrowserThreadCard } from "./computer";
@@ -494,9 +495,13 @@ export function ChatScreen({
                       backgroundColor: user ? colors.blue : "#EEEEF0",
                     }}
                   >
-                    <Text selectable style={[s.text, { fontSize: 16, lineHeight: 24 }]}>
-                      {text}
-                    </Text>
+                    {user ? (
+                      <Text selectable style={[s.text, { fontSize: 16, lineHeight: 24 }]}>
+                        {text}
+                      </Text>
+                    ) : (
+                      <AssistantResponse content={text} />
+                    )}
                   </View>
                 )}
                 <JevInteractionContext.Provider

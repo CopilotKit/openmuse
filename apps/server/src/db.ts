@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
+import { backgroundFailure } from "./log.ts";
 
 type Row = { data: Record<string, unknown> };
 interface Database {
@@ -111,12 +112,19 @@ export class Store {
   }
 }
 
+/** Idle clients can be disconnected by a database restart; without a listener pg's `error` event crashes the process. */
+export function createPool(connectionString: string) {
+  const pool = new pg.Pool({ connectionString, max: 5 });
+  pool.on("error", (error) => backgroundFailure("postgres pool", error));
+  return pool;
+}
+
 export async function createStore(
   options: { dataDir?: string; databaseUrl?: string } = {},
 ): Promise<Store> {
   let database: Database;
   if (options.databaseUrl) {
-    const pool = new pg.Pool({ connectionString: options.databaseUrl, max: 5 });
+    const pool = createPool(options.databaseUrl);
     database = { query: async (sql, params) => pool.query(sql, params), close: () => pool.end() };
   } else {
     if (options.dataDir) await mkdir(dirname(options.dataDir), { recursive: true, mode: 0o700 });
