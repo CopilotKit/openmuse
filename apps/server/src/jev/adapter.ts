@@ -1,11 +1,23 @@
-import { choice, score, TypeSafeClient } from "@typesafe-ai/sdk";
+import {
+  APIError,
+  choice,
+  score,
+  TypeSafeClient,
+  type TypeSafeClientConfig,
+} from "@typesafe-ai/sdk";
 import type { JevOption } from "../../../../packages/domain/src/jev.ts";
+import { type Config, defaultJevModel } from "../config.ts";
+import { providerFailure } from "../log.ts";
 
 export type JevControl = "clarification" | "comparison" | "agent";
 export type JevDecisionInput = {
+  /** The person's own latest message, so Jev judges independently of the agent's framing. */
+  userMessage: string;
+  /** The agent's summary of the request. */
   message: string;
   context: string;
   options: JevOption[];
+  /** The agent's prepared control comes first; "agent" is the prose fallback. */
   allowedControls: JevControl[];
   selectedId?: string;
 };
@@ -13,6 +25,12 @@ export type JevDecision = { control: JevControl; scores: Record<string, number> 
 export interface JevAdapter {
   decide(input: JevDecisionInput, signal: AbortSignal): Promise<JevDecision>;
 }
+/** Jev overrides the agent's prepared control only when at least this confident. */
+export const jevOverrideConfidence = 0.5;
+/** Bounds a choices panel to about ten seconds of provider time instead of the SDK's ~30s. */
+const jevTimeoutMs = 5_000;
+const jevMaxRetries = 1;
+/** Ranks by rubric level; fractional scores between levels are not calibrated finely enough to order. */
 export function rankJevOptions(options: JevOption[], decision: JevDecision): JevOption[] {
   const ids = new Set(options.map((option) => option.id));
   if (
@@ -24,11 +42,10 @@ export function rankJevOptions(options: JevOption[], decision: JevDecision): Jev
     if (!Number.isFinite(decision.scores[option.id]))
       throw new Error("Jev returned a missing or invalid score");
   });
+  const level = (option: JevOption) => Math.round(decision.scores[option.id]);
   return options
     .map((option, index) => ({ option, index }))
-    .sort(
-      (a, b) => decision.scores[b.option.id] - decision.scores[a.option.id] || a.index - b.index,
-    )
+    .sort((a, b) => level(b.option) - level(a.option) || a.index - b.index)
     .map(({ option }) => option);
 }
 export class SampleJevAdapter implements JevAdapter {
@@ -51,21 +68,53 @@ export class SampleJevAdapter implements JevAdapter {
     };
   }
 }
+/** Builds the adapter once per server so every run shares one TypeSafe client. */
+export function createJevAdapter(
+  config: Pick<Config, "jevMode" | "typesafeApiKey" | "jevModel">,
+): JevAdapter | undefined {
+  if (config.jevMode === "sample") return new SampleJevAdapter();
+  if (config.jevMode !== "live") return undefined;
+  if (!config.typesafeApiKey) throw new Error("JEV_MODE=live requires a nonblank TYPESAFE_API_KEY");
+  return LiveJevAdapter.withKey(config.typesafeApiKey, config.jevModel ?? defaultJevModel);
+}
+/** 4xx responses other than timeouts and rate limits fail the same way on every retry. */
+function retryable(error: unknown): boolean {
+  return !(
+    error instanceof APIError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.status !== 408 &&
+    error.status !== 429
+  );
+}
 type ClientPort = Pick<TypeSafeClient, "systemOne">;
 export class LiveJevAdapter implements JevAdapter {
   constructor(
     private readonly client: ClientPort,
-    private readonly model = "jev-1.13.0",
+    private readonly model: string,
   ) {}
-  static withKey(apiKey: string, model?: string): LiveJevAdapter {
-    return new LiveJevAdapter(new TypeSafeClient({ apiKey }), model);
+  /** `transport` lets contract tests drive the real client with a fake `fetch`. */
+  static withKey(
+    apiKey: string,
+    model: string,
+    transport: Pick<TypeSafeClientConfig, "fetch"> = {},
+  ): LiveJevAdapter {
+    return new LiveJevAdapter(
+      new TypeSafeClient({
+        ...transport,
+        apiKey,
+        timeout: jevTimeoutMs,
+        retry: { maxRetries: jevMaxRetries },
+      }),
+      model,
+    );
   }
   async decide(input: JevDecisionInput, signal: AbortSignal): Promise<JevDecision> {
     signal.throwIfAborted();
     if (!input.allowedControls.length) throw new Error("Jev has no allowed controls");
     const questions = {
       control: choice(
-        "Which interaction best serves the user now? Present prepared choices when they let the user select a useful, supported next step. Choose an ordinary agent response only when those options are unhelpful or unsupported.",
+        "Which interaction best serves the user's latest message in `userMessage`? Present prepared choices when they let the user select a useful, supported next step. Choose an ordinary agent response only when those options are unhelpful or unsupported.",
         Object.fromEntries(
           input.allowedControls.map((control) => [
             control,
@@ -77,11 +126,12 @@ export class LiveJevAdapter implements JevAdapter {
           ]),
         ),
       ),
+      // Options are referenced by position; their labels come from untrusted pages and stay in state.
       ...Object.fromEntries(
-        input.options.map((option, index) => [
+        input.options.map((_, index) => [
           `fit_${index}`,
           score(
-            `How well does option ${index} (${option.label}) fit the user's latest request? Use its verified details in the state as evidence.`,
+            `How well does \`options[${index}]\` fit the user's latest message in \`userMessage\`? Use only the details of \`options[${index}]\` as evidence.`,
             ["Does not fit", "Some fit", "Good fit", "Best fit"],
           ),
         ]),
@@ -92,7 +142,8 @@ export class LiveJevAdapter implements JevAdapter {
         {
           model: this.model,
           state: {
-            message: input.message,
+            userMessage: input.userMessage,
+            agentSummary: input.message,
             context: input.context,
             selectedId: input.selectedId ?? null,
             options: input.options,
@@ -103,7 +154,13 @@ export class LiveJevAdapter implements JevAdapter {
       )
       .catch((error: unknown) => {
         signal.throwIfAborted();
-        throw new Error("Jev could not evaluate these choices. Please retry.", { cause: error });
+        providerFailure("jev.decide", error);
+        throw new Error(
+          retryable(error)
+            ? "Jev could not evaluate these choices. Please retry."
+            : "Jev is unavailable for these choices. Do not retry; answer the user in prose.",
+          { cause: error },
+        );
       });
     signal.throwIfAborted();
     if (
@@ -116,14 +173,20 @@ export class LiveJevAdapter implements JevAdapter {
       throw new Error("Jev returned invalid answers");
     const answers = result.answers as Record<
       string,
-      { type?: string; choice?: string; score?: number }
+      { type?: string; choice?: string; score?: number; confidence?: number }
     >;
-    const control = answers.control?.choice;
+    const chosen = answers.control?.choice;
+    const confidence = answers.control?.confidence;
     if (
       answers.control?.type !== "choice" ||
-      !input.allowedControls.includes(control as JevControl)
+      !input.allowedControls.includes(chosen as JevControl) ||
+      typeof confidence !== "number" ||
+      !(confidence >= 0 && confidence <= 1)
     )
       throw new Error("Jev returned an invalid control");
+    // An uncertain answer does not override the agent's prepared control.
+    const control =
+      confidence < jevOverrideConfidence ? input.allowedControls[0] : (chosen as JevControl);
     const scores: Record<string, number> = {};
     input.options.forEach((option, index) => {
       const answer = answers[`fit_${index}`];
@@ -137,6 +200,6 @@ export class LiveJevAdapter implements JevAdapter {
         throw new Error("Jev returned an invalid score");
       scores[option.id] = answer.score;
     });
-    return { control: control as JevControl, scores };
+    return { control, scores };
   }
 }

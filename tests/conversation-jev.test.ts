@@ -5,6 +5,7 @@ import { EventType, type RunAgentInput } from "@ag-ui/core";
 import { lastValueFrom, toArray } from "rxjs";
 import { createApp } from "../apps/server/src/app.ts";
 import { ConversationAgent } from "../apps/server/src/engine/conversation.ts";
+import type { JevDecisionInput } from "../apps/server/src/jev/adapter.ts";
 import { presentChoicesParameters } from "../apps/server/src/jev/tools.ts";
 import { encodeJevAction } from "../packages/domain/src/jev.ts";
 import { browserFixture } from "./helpers/browser.ts";
@@ -416,6 +417,44 @@ test("generic live clarification succeeds without mail, but an unobserved mail t
   assert.ok(rejected && rejected.type === EventType.TOOL_CALL_RESULT);
   assert.equal(JSON.parse(String(rejected.content)).panel, null);
   assert.match(JSON.parse(String(rejected.content)).error, /Read the referenced email/);
+});
+
+test("Jev judges the person's own message, not the agent's summary of it", async (t) => {
+  await modelFixture(t, (index) =>
+    index === 0
+      ? {
+          name: "present_choices",
+          arguments: {
+            message: "Agent paraphrase",
+            context: "User asked",
+            title: "Next",
+            control: "clarification",
+            options,
+          },
+        }
+      : undefined,
+  );
+  const browser = await browserFixture(t, () => ({ data: {} }));
+  const config = {
+    ...browser.config,
+    agentBackend: "model" as const,
+    model: "openai/fixture",
+    jevMode: "live" as const,
+  };
+  const app = await createApp(browser.db, config);
+  t.after(() => app.agent.stop());
+  const seen: JevDecisionInput[] = [];
+  const adapter = {
+    decide: async (decision: JevDecisionInput) => {
+      seen.push(decision);
+      return { control: "clarification" as const, scores: { explore: 1 } };
+    },
+  };
+  const agent = new ConversationAgent(config, app.agent, "local-user", adapter);
+  await lastValueFrom(agent.run(input("What should I do next?")).pipe(toArray()));
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].userMessage, "What should I do next?");
+  assert.equal(seen[0].message, "Agent paraphrase");
 });
 
 test("live comparison rejects a factual detail absent from the read page", async (t) => {

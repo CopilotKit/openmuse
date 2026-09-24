@@ -33,6 +33,7 @@ export function presentChoicesTool(
   turnId: string,
   signal: AbortSignal,
   mode: "sample" | "live",
+  userMessage?: string,
 ) {
   return defineTool({
     name: "present_choices",
@@ -77,7 +78,7 @@ export function presentChoicesTool(
             }
           }
         }
-        return await jev.createPanel(owner, threadId, turnId, input, signal);
+        return await jev.createPanel(owner, threadId, turnId, { ...input, userMessage }, signal);
       } catch (error) {
         if (signal.aborted) throw error;
         const message =

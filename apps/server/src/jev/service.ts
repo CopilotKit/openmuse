@@ -12,6 +12,8 @@ import type { Store } from "../db.ts";
 import { type JevAdapter, rankJevOptions } from "./adapter.ts";
 
 export type PresentChoicesInput = {
+  /** The person's latest message; the tool always supplies it, direct callers fall back to `message`. */
+  userMessage?: string;
   message: string;
   context: string;
   title: string;
@@ -182,6 +184,7 @@ export class JevService {
     const priorSelectedId = generation.selectedId ?? undefined;
     const decision = await this.deps.adapter.decide(
       {
+        userMessage: input.userMessage ?? input.message,
         message: input.message,
         context: input.context,
         options: candidates,

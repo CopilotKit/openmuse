@@ -34,6 +34,9 @@ export interface Config {
   allowedOrigins: string[];
 }
 
+/** Pinned so live rankings do not shift when TypeSafe moves the `jev-latest` alias. */
+export const defaultJevModel = "jev-1.13.0";
+
 export const intelligenceKeyRequiredMessage =
   "OpenMuse requires CPK_INTELLIGENCE_API_KEY. " +
   "Run `npx copilotkit@latest login` and `npx copilotkit@latest project select`, " +
@@ -84,7 +87,7 @@ export function readConfig(): Config {
     model: process.env.MODEL,
     jevMode,
     typesafeApiKey,
-    jevModel: process.env.JEV_MODEL?.trim() || "jev-1.13.0",
+    jevModel: process.env.JEV_MODEL?.trim() || defaultJevModel,
     agentBackend: backend,
     agentUrl: process.env.AGENT_URL,
     agentToken: process.env.AGENT_TOKEN,

@@ -13,7 +13,7 @@ import {
 import { jevActionPrefix, parseJevAction } from "../../../../packages/domain/src/jev.ts";
 import { computerInstructions, computerTools } from "../computer-tools.ts";
 import type { Config } from "../config.ts";
-import { type JevAdapter, LiveJevAdapter, SampleJevAdapter } from "../jev/adapter.ts";
+import { createJevAdapter, type JevAdapter } from "../jev/adapter.ts";
 import { JevService } from "../jev/service.ts";
 import { presentChoicesTool } from "../jev/tools.ts";
 import type { AgentService } from "./service.ts";
@@ -23,7 +23,7 @@ export class ConversationAgent extends AbstractAgent {
     private readonly config: Config,
     private readonly service: AgentService,
     private readonly owner: string,
-    private readonly jevAdapter?: JevAdapter,
+    private readonly jevAdapter: JevAdapter | undefined = createJevAdapter(config),
   ) {
     super({ agentId: "default" });
   }
@@ -38,17 +38,9 @@ export class ConversationAgent extends AbstractAgent {
     const requestKey = `${input.threadId}:${latest?.id ?? input.runId}`;
     const jevMode = this.config.jevMode ?? "off";
     const jev =
-      jevMode === "off"
+      jevMode === "off" || !this.jevAdapter
         ? null
-        : new JevService({
-            store: this.service.db,
-            adapter:
-              this.jevAdapter ??
-              (jevMode === "sample"
-                ? new SampleJevAdapter()
-                : LiveJevAdapter.withKey(this.config.typesafeApiKey ?? "", this.config.jevModel)),
-            mode: jevMode,
-          });
+        : new JevService({ store: this.service.db, adapter: this.jevAdapter, mode: jevMode });
     const latestText = typeof latest?.content === "string" ? latest.content : "";
     if (latestText.startsWith(jevActionPrefix))
       return new Observable((subscriber) => {
@@ -156,6 +148,7 @@ export class ConversationAgent extends AbstractAgent {
               input.runId,
               browserAbort.signal,
               jevMode as "sample" | "live",
+              latestText.trim() || undefined,
             ),
           ]
         : []),
