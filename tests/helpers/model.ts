@@ -22,14 +22,14 @@ export async function modelFixture(
       response.write(`data: ${JSON.stringify({ type, ...value })}\n\n`);
     const base = { id: `response-${index}`, created_at: 1000, model: "fixture" };
     emit("response.created", { response: { ...base, status: "in_progress" } });
-    if (call) {
-      const item = {
-        id: `item-${index}`,
-        type: "function_call",
-        call_id: `call-${index}`,
-        name: call.name,
-        arguments: JSON.stringify(call.arguments),
-      };
+    const item = call && {
+      id: `item-${index}`,
+      type: "function_call",
+      call_id: `call-${index}`,
+      name: call.name,
+      arguments: JSON.stringify(call.arguments),
+    };
+    if (item) {
       emit("response.output_item.added", { output_index: 0, item: { ...item, arguments: "" } });
       emit("response.function_call_arguments.delta", {
         item_id: item.id,
@@ -45,6 +45,7 @@ export async function modelFixture(
       response: {
         ...base,
         status: "completed",
+        output: item ? [{ ...item, status: "completed" }] : [],
         usage: {
           input_tokens: 10,
           output_tokens: 5,
