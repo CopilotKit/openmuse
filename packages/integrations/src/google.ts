@@ -16,6 +16,11 @@ export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const MAX_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 export const MAX_READ_RETRIES = 2;
 export const DEFAULT_RETRY_DELAY_MS = 500;
+export const RETRYABLE_READ_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+
+export function isRetryableReadStatus(status: number): boolean {
+  return RETRYABLE_READ_STATUS_CODES.has(status);
+}
 const MAX_JSON_BYTES = Math.ceil((MAX_ATTACHMENT_BYTES * 4) / 3) + 1024 * 1024;
 
 export class OutcomeUnknownError extends Error {
@@ -616,11 +621,7 @@ export class GoogleClient {
         throw new OutcomeUnknownError();
       }
       if (!response.ok) {
-        if (
-          !write &&
-          (response.status === 429 || response.status === 503) &&
-          attempt + 1 < maxAttempts
-        ) {
+        if (!write && isRetryableReadStatus(response.status) && attempt + 1 < maxAttempts) {
           try {
             await response.body?.cancel();
           } catch {
