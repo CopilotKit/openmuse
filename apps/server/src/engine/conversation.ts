@@ -72,7 +72,7 @@ export class ConversationAgent extends AbstractAgent {
         };
       });
     if (this.config.agentBackend === "sample")
-      return this.expireAfterOrdinaryTurn(
+      return this.expireOnUserTurn(
         new Observable((subscriber) => {
           subscriber.next({
             type: EventType.RUN_STARTED,
@@ -131,7 +131,7 @@ export class ConversationAgent extends AbstractAgent {
             });
         }),
         jev,
-        input.threadId,
+        input,
         !choiceContinuation,
       );
     const key = (name: string, value: unknown) =>
@@ -306,7 +306,7 @@ export class ConversationAgent extends AbstractAgent {
           : "") +
         computerInstructions,
     });
-    return this.expireAfterOrdinaryTurn(
+    return this.expireOnUserTurn(
       new Observable((subscriber) => {
         const subscription = agent
           .run({ ...input, tools: input.tools.filter((t) => t.name === "open_workspace") })
@@ -318,63 +318,43 @@ export class ConversationAgent extends AbstractAgent {
         };
       }),
       jev,
-      input.threadId,
+      input,
       !choiceContinuation,
     );
   }
-  private expireAfterOrdinaryTurn(
+  /**
+   * A new user turn retires the current panel before the agent runs, so the durable head matches
+   * the transcript (where any later user message makes earlier choices stale) even if the turn
+   * then fails or is cancelled. The retiring turn may still refine that panel. Runs that resume
+   * after a tool result are not new turns.
+   */
+  private expireOnUserTurn(
     source: Observable<BaseEvent>,
     jev: JevService | null,
-    threadId: string,
+    input: RunAgentInput,
     enabled: boolean,
   ): Observable<BaseEvent> {
-    if (!jev || !enabled) return source;
+    if (!jev || !enabled || input.messages.at(-1)?.role !== "user") return source;
     return new Observable((subscriber) => {
       let cancelled = false;
       let subscription: { unsubscribe(): void } | undefined;
       void (async () => {
         try {
-          const baseline = await jev.headSnapshot(this.owner, threadId);
-          if (cancelled) return;
-          if (!baseline) {
-            subscription = source.subscribe(subscriber);
-            if (cancelled) subscription.unsubscribe();
-            return;
+          const head = await jev.headSnapshot(this.owner, input.threadId);
+          // A false result means another run already replaced the head; that newer state wins.
+          if (head) await jev.expireIfUnchanged(this.owner, input.threadId, head, input.runId);
+        } catch {
+          if (!cancelled) {
+            subscriber.next({
+              type: EventType.RUN_ERROR,
+              message: "Could not update earlier choices. Please retry.",
+            });
+            subscriber.complete();
           }
-          let finalizing: Promise<void> | null = null;
-          subscription = source.subscribe({
-            next: (event) => {
-              if (cancelled) return;
-              if (event.type !== EventType.RUN_FINISHED) {
-                subscriber.next(event);
-                return;
-              }
-              finalizing = jev.expireIfUnchanged(this.owner, threadId, baseline).then(
-                () => {
-                  if (!cancelled) subscriber.next(event);
-                },
-                () => {
-                  if (!cancelled)
-                    subscriber.next({
-                      type: EventType.RUN_ERROR,
-                      message: "Could not finalize choices. Please retry.",
-                    });
-                },
-              );
-            },
-            error: (error) => subscriber.error(error),
-            complete: () => {
-              if (finalizing)
-                void finalizing.then(() => {
-                  if (!cancelled) subscriber.complete();
-                });
-              else subscriber.complete();
-            },
-          });
-          if (cancelled) subscription.unsubscribe();
-        } catch (error) {
-          if (!cancelled) subscriber.error(error);
+          return;
         }
+        if (cancelled) return;
+        subscription = source.subscribe(subscriber);
       })();
       return () => {
         cancelled = true;

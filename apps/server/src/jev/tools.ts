@@ -51,7 +51,7 @@ export function presentChoicesTool(
           throw new Error("Read the referenced email before presenting choices.");
         if (mode === "live" && input.control === "comparison") {
           if (input.refinementPanelId) {
-            await jev.candidateSources(owner, threadId, input.refinementPanelId);
+            await jev.candidateSources(owner, threadId, turnId, input.refinementPanelId);
           } else {
             for (const option of input.options) {
               const texts: string[] = [];

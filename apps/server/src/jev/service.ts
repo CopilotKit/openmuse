@@ -28,7 +28,18 @@ type ThreadRecord = {
   generation: number;
   currentPanelId?: string | null;
   selectedId?: string | null;
+  /** The panel a new user turn retired; only that turn may still refine it. */
+  retiredPanelId?: string | null;
+  retiredTurnId?: string | null;
 };
+/** Whether `panelId` may be refined by `turnId`: it is current, or this turn just retired it. */
+function refinable(head: ThreadRecord | null | undefined, panelId: string, turnId: string) {
+  return (
+    !!head &&
+    (head.currentPanelId === panelId ||
+      (head.retiredPanelId === panelId && head.retiredTurnId === turnId))
+  );
+}
 export type JevHeadSnapshot = {
   currentPanelId: string;
   revision: number;
@@ -44,6 +55,7 @@ export class JevService {
   private async reserve(
     owner: string,
     threadId: string,
+    turnId: string,
     refinementPanelId?: string,
   ): Promise<ThreadRecord> {
     await this.store.insertIfAbsent(owner, "jev_threads", {
@@ -54,7 +66,7 @@ export class JevService {
     for (let attempt = 0; attempt < 20; attempt++) {
       const current = await this.store.get<ThreadRecord>(owner, "jev_threads", threadId);
       if (!current) throw new Error("Choices thread is unavailable");
-      if (refinementPanelId && current.currentPanelId !== refinementPanelId)
+      if (refinementPanelId && !refinable(current, refinementPanelId, turnId))
         throw new Error("The earlier choices have been superseded");
       const updated = await this.store.compareAndSwap<ThreadRecord>(
         owner,
@@ -62,7 +74,11 @@ export class JevService {
         threadId,
         {
           generation: current.generation,
-          ...(refinementPanelId ? { currentPanelId: refinementPanelId } : {}),
+          ...(!refinementPanelId
+            ? {}
+            : current.currentPanelId === refinementPanelId
+              ? { currentPanelId: refinementPanelId }
+              : { retiredPanelId: refinementPanelId, retiredTurnId: turnId }),
         },
         { generation: current.generation + 1 },
       );
@@ -85,10 +101,12 @@ export class JevService {
       selectedId: head.selectedId ?? null,
     };
   }
+  /** Retires the snapshot's panel on behalf of `turnId`, unless the head moved meanwhile. */
   async expireIfUnchanged(
     owner: string,
     threadId: string,
     snapshot: JevHeadSnapshot | null,
+    turnId: string,
   ): Promise<boolean> {
     if (!snapshot) return false;
     const head = await this.store.get<ThreadRecord>(owner, "jev_threads", threadId);
@@ -114,18 +132,21 @@ export class JevService {
         revision: head.generation + 1,
         currentPanelId: null,
         selectedId: null,
+        retiredPanelId: snapshot.currentPanelId,
+        retiredTurnId: turnId,
       },
     ));
   }
   async candidateSources(
     owner: string,
     threadId: string,
+    turnId: string,
     refinementPanelId: string,
   ): Promise<string[]> {
     const head = await this.store.get<ThreadRecord>(owner, "jev_threads", threadId);
     const record = await this.store.get<PanelRecord>(owner, "jev_panels", refinementPanelId);
     if (
-      head?.currentPanelId !== refinementPanelId ||
+      !refinable(head, refinementPanelId, turnId) ||
       record?.panel.threadId !== threadId ||
       (this.deps.mode === "live" && record.panel.mode !== "live")
     )
@@ -152,7 +173,7 @@ export class JevService {
       input.refinementPanelId &&
       (!previous ||
         previous.panel.threadId !== threadId ||
-        priorHead?.currentPanelId !== input.refinementPanelId)
+        !refinable(priorHead, input.refinementPanelId, turnId))
     )
       throw new Error("The earlier choices are unavailable or superseded");
     const candidates = previous
@@ -180,7 +201,7 @@ export class JevService {
       throw new Error("Choices need 1–12 distinct options");
     if (input.control === "comparison" && candidates.some((o) => o.sources.length === 0))
       throw new Error("Comparison choices need sources");
-    const generation = await this.reserve(owner, threadId, input.refinementPanelId);
+    const generation = await this.reserve(owner, threadId, turnId, input.refinementPanelId);
     const priorSelectedId = generation.selectedId ?? undefined;
     const decision = await this.deps.adapter.decide(
       {
@@ -207,7 +228,13 @@ export class JevService {
             : {}),
           ...(generation.selectedId !== undefined ? { selectedId: generation.selectedId } : {}),
         },
-        { revision: generation.generation, currentPanelId: null, selectedId: null },
+        {
+          revision: generation.generation,
+          currentPanelId: null,
+          selectedId: null,
+          retiredPanelId: null,
+          retiredTurnId: null,
+        },
       );
       if (!head)
         return { panel: null, error: "These choices were superseded by a newer response." };
@@ -250,7 +277,13 @@ export class JevService {
           : {}),
         ...(generation.selectedId !== undefined ? { selectedId: generation.selectedId } : {}),
       },
-      { revision: generation.generation, currentPanelId: panel.id, selectedId: null },
+      {
+        revision: generation.generation,
+        currentPanelId: panel.id,
+        selectedId: null,
+        retiredPanelId: null,
+        retiredTurnId: null,
+      },
     );
     if (!head) return { panel: null, error: "These choices were superseded by a newer response." };
     return { panel };

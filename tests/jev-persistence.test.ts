@@ -389,15 +389,15 @@ test("candidate source lookup uses the full current set and rejects sample proof
   );
   assert.ok(result.panel);
   assert.equal(result.panel.options.length, 3);
-  assert.deepEqual(await sample.candidateSources("owner", "thread", result.panel.id), [
+  assert.deepEqual(await sample.candidateSources("owner", "thread", "turn", result.panel.id), [
     "https://example.org/kelp",
     "https://example.org/rocky",
     "https://example.org/sea",
     "https://example.org/birds",
   ]);
-  await assert.rejects(sample.candidateSources("other", "thread", result.panel.id));
+  await assert.rejects(sample.candidateSources("other", "thread", "turn", result.panel.id));
   const live = new JevService({ store, adapter, mode: "live" });
-  await assert.rejects(live.candidateSources("owner", "thread", result.panel.id));
+  await assert.rejects(live.candidateSources("owner", "thread", "turn", result.panel.id));
   const next = await sample.createPanel(
     "owner",
     "thread",
@@ -406,7 +406,7 @@ test("candidate source lookup uses the full current set and rejects sample proof
     new AbortController().signal,
   );
   assert.ok(next.panel);
-  await assert.rejects(sample.candidateSources("owner", "thread", result.panel.id));
+  await assert.rejects(sample.candidateSources("owner", "thread", "turn", result.panel.id));
 });
 
 test("evidence records are scoped to owner, thread, and run", async (t) => {
@@ -705,10 +705,10 @@ test("ordinary-turn expiry rejects stale actions while preserving a concurrent s
     optionId: "a",
   };
   await service.select("owner", "thread", action);
-  assert.equal(await service.expireIfUnchanged("owner", "thread", snapshot), false);
+  assert.equal(await service.expireIfUnchanged("owner", "thread", snapshot, "turn"), false);
   assert.match((await service.select("owner", "thread", action)).continuation, /Kelp Forest/);
   const selectedSnapshot = await service.headSnapshot("owner", "thread");
-  assert.equal(await service.expireIfUnchanged("owner", "thread", selectedSnapshot), true);
+  assert.equal(await service.expireIfUnchanged("owner", "thread", selectedSnapshot, "turn"), true);
   assert.equal(await service.currentPanel("owner", "thread"), null);
   await assert.rejects(service.select("owner", "thread", action));
 });

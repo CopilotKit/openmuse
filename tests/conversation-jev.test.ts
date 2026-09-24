@@ -3,9 +3,11 @@ import { randomUUID } from "node:crypto";
 import test, { type TestContext } from "node:test";
 import { EventType, type RunAgentInput } from "@ag-ui/core";
 import { lastValueFrom, toArray } from "rxjs";
+import { latestJevPanelId } from "../apps/mobile/src/jev-actions.ts";
 import { createApp } from "../apps/server/src/app.ts";
 import { ConversationAgent } from "../apps/server/src/engine/conversation.ts";
 import type { JevDecisionInput } from "../apps/server/src/jev/adapter.ts";
+import { JevService } from "../apps/server/src/jev/service.ts";
 import { presentChoicesParameters } from "../apps/server/src/jev/tools.ts";
 import { encodeJevAction } from "../packages/domain/src/jev.ts";
 import { browserFixture } from "./helpers/browser.ts";
@@ -680,26 +682,78 @@ test("a later ordinary completed turn invalidates a prior choice panel", async (
   assert.equal(replay.at(-1)?.type, EventType.RUN_ERROR);
 });
 
-test("cancelling an ordinary turn leaves the prior choice available", async (t) => {
-  const f = await fixture(t, [
-    {
-      name: "present_choices",
-      arguments: {
-        message: "What next?",
-        context: "User asked",
-        title: "Next",
-        control: "clarification",
-        options,
-      },
-    },
-    undefined,
-  ]);
+async function presentPanel(f: Awaited<ReturnType<typeof fixture>>) {
   const first = await lastValueFrom(f.conversation.run(input("What next?")).pipe(toArray()));
   const result = first.find(
     (event) => event.type === EventType.TOOL_CALL_RESULT && JSON.parse(String(event.content)).panel,
   );
   assert.ok(result && result.type === EventType.TOOL_CALL_RESULT);
-  const panel = JSON.parse(String(result.content)).panel;
+  return JSON.parse(String(result.content)).panel as {
+    id: string;
+    threadId: string;
+    candidateSetVersion: number;
+  };
+}
+const clarify = {
+  name: "present_choices",
+  arguments: {
+    message: "What next?",
+    context: "User asked",
+    title: "Next",
+    control: "clarification",
+    options,
+  },
+};
+async function assertRetired(
+  f: Awaited<ReturnType<typeof fixture>>,
+  panel: Awaited<ReturnType<typeof presentPanel>>,
+) {
+  const head = await f.db.get<{ currentPanelId: string | null }>(
+    "local-user",
+    "jev_threads",
+    panel.threadId,
+  );
+  assert.equal(head?.currentPanelId, null);
+  const action = encodeJevAction({
+    panelId: panel.id,
+    threadId: panel.threadId,
+    candidateSetVersion: panel.candidateSetVersion,
+    optionId: "explore",
+  });
+  const replay = await lastValueFrom(f.conversation.run(input(action)).pipe(toArray()));
+  assert.equal(replay.at(-1)?.type, EventType.RUN_ERROR);
+}
+
+test("an ordinary turn that fails still retires the earlier choice, as the transcript does", async (t) => {
+  const f = await fixture(t, [clarify]);
+  const panel = await presentPanel(f);
+  // The mobile transcript treats any later user message as making the panel stale.
+  const transcript = [
+    { role: "assistant", toolCalls: [{ id: "call-0", name: "present_choices" }] },
+    { role: "tool", toolCallId: "call-0", content: JSON.stringify({ panel }) },
+    { role: "user", content: "Tell me about the weather" },
+  ];
+  assert.equal(latestJevPanelId(transcript, panel.threadId), null);
+  const base = process.env.OPENAI_BASE_URL;
+  process.env.OPENAI_BASE_URL = "http://127.0.0.1:1/v1";
+  let failed: Awaited<ReturnType<typeof lastValueFrom>> | undefined;
+  try {
+    failed = await lastValueFrom(
+      f.conversation.run(input("Tell me about the weather")).pipe(toArray()),
+    ).catch((error: unknown) => error);
+  } finally {
+    process.env.OPENAI_BASE_URL = base;
+  }
+  assert.ok(
+    failed instanceof Error ||
+      (Array.isArray(failed) && failed.at(-1)?.type === EventType.RUN_ERROR),
+  );
+  await assertRetired(f, panel);
+});
+
+test("cancelling an ordinary turn still retires the earlier choice", async (t) => {
+  const f = await fixture(t, [clarify]);
+  const panel = await presentPanel(f);
   const sampleAgent = new ConversationAgent(
     { ...f.config, agentBackend: "sample", jevMode: "sample" },
     f.agent,
@@ -716,9 +770,47 @@ test("cancelling an ordinary turn leaves the prior choice available", async (t) 
       error: reject,
     });
   });
-  assert.equal(
-    (await f.db.get<{ currentPanelId: string | null }>("local-user", "jev_threads", panel.threadId))
-      ?.currentPanelId,
-    panel.id,
+  await assertRetired(f, panel);
+});
+
+test("a run resuming after a tool result is not a new turn and keeps the choice", async (t) => {
+  const f = await fixture(t, [clarify]);
+  const panel = await presentPanel(f);
+  const resumed = input("What next?");
+  resumed.messages.push({ id: randomUUID(), role: "tool", toolCallId: "open-1", content: "{}" });
+  await lastValueFrom(f.conversation.run(resumed).pipe(toArray()));
+  const head = await f.db.get<{ currentPanelId: string | null }>(
+    "local-user",
+    "jev_threads",
+    panel.threadId,
+  );
+  assert.equal(head?.currentPanelId, panel.id);
+});
+
+test("only the turn that retired a panel may refine it", async (t) => {
+  const f = await fixture(t, [clarify]);
+  const panel = await presentPanel(f);
+  await lastValueFrom(f.conversation.run(input("Tell me about the weather")).pipe(toArray()));
+  const jev = new JevService({
+    store: f.agent.db,
+    adapter: { decide: async () => ({ control: "clarification", scores: { explore: 1 } }) },
+    mode: "sample",
+  });
+  await assert.rejects(
+    jev.createPanel(
+      "local-user",
+      panel.threadId,
+      "a-later-turn",
+      {
+        message: "Refine",
+        context: "x",
+        title: "Next",
+        control: "clarification",
+        options: [],
+        refinementPanelId: panel.id,
+      },
+      new AbortController().signal,
+    ),
+    /superseded/,
   );
 });
