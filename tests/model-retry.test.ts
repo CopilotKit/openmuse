@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { EventType, type RunAgentInput } from "@ag-ui/core";
-import { BuiltInAgent, defineTool } from "@copilotkit/runtime/v2";
+import { type BuiltInAgent, defineTool } from "@copilotkit/runtime/v2";
 import { z } from "zod";
 import { MODEL_MAX_RETRIES } from "../apps/server/src/config.ts";
+import { tanstackAgent } from "../apps/server/src/engine/tanstack-agent.ts";
 import { modelFixture } from "./helpers/model.ts";
 
 const run = (agent: BuiltInAgent) => {
@@ -43,10 +44,9 @@ const run = (agent: BuiltInAgent) => {
 };
 
 const agent = () =>
-  new BuiltInAgent({
+  tanstackAgent({
     model: "openai/fixture",
     maxSteps: 2,
-    maxRetries: MODEL_MAX_RETRIES,
     tools: [],
     prompt: "Reply briefly.",
   });
@@ -77,22 +77,26 @@ test("retries give up after the configured attempts", async (t) => {
   assert.equal(requests.length, MODEL_MAX_RETRIES + 1, "retries are bounded");
 });
 
-test("a connection drop after the stream starts is retried and the run recovers", async (t) => {
+// Provider SDKs retry only until the response starts. A failure after the stream
+// has started ends the run, even when a second attempt would succeed.
+test("a connection drop after the stream starts is not retried", async (t) => {
   const { requests } = await modelFixture(t, () => undefined, {
     dropAfterStart: (index) => index === 0,
   });
   const outcome = await run(agent());
-  assert.equal(outcome.error, undefined);
-  assert.equal(outcome.finished, true);
-  assert.equal(requests.length, 2, "the dropped stream is retried once and recovers");
+  assert.equal(outcome.finished, false);
+  assert.ok(outcome.error, "the run reports the dropped stream");
+  assert.equal(requests.length, 1, "a started stream is not retried");
 });
 
-test("a provider error part is retried within the same bound before the run errors", async (t) => {
-  const { requests } = await modelFixture(t, () => undefined, { errorPart: () => true });
+test("a provider error part after the stream starts is not retried", async (t) => {
+  const { requests } = await modelFixture(t, () => undefined, {
+    errorPart: (index) => index === 0,
+  });
   const outcome = await run(agent());
   assert.equal(outcome.finished, false);
-  assert.match(outcome.error ?? "", /response.failed/);
-  assert.equal(requests.length, MODEL_MAX_RETRIES + 1, "error parts obey the same bound");
+  assert.match(outcome.error ?? "", /Provider reported response.failed/);
+  assert.equal(requests.length, 1, "an error part in a started stream is not retried");
 });
 
 test("a committed tool result is not re-executed when the next model call fails", async (t) => {
@@ -103,10 +107,9 @@ test("a committed tool result is not re-executed when the next model call fails"
       index === 0 ? { name: "note_step", arguments: { note: "step one done" } } : undefined,
     { errorStatus: (index) => (index === 1 ? 500 : undefined) },
   );
-  const stepAgent = new BuiltInAgent({
+  const stepAgent = tanstackAgent({
     model: "openai/fixture",
     maxSteps: 4,
-    maxRetries: MODEL_MAX_RETRIES,
     tools: [
       defineTool({
         name: "note_step",
@@ -138,7 +141,7 @@ test("assistant output already delivered is never replayed by a retry", async (t
   });
   const outcome = await run(agent());
   assert.equal(outcome.finished, false);
-  assert.match(outcome.error ?? "", /Failed to process successful response/);
+  assert.ok(outcome.error, "the run reports the dropped stream");
   assert.equal(requests.length, 1, "a stream with visible output is not retried");
   assert.equal(outcome.text, "Hello partial ", "the client saw the delivered delta exactly once");
 });

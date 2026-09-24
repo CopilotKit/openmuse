@@ -52,11 +52,13 @@ export function assertApiDeploymentConfig(
   );
 }
 
-// The AI SDK retries only transient provider failures: HTTP 408, 409, 429 and
-// 5xx, plus network errors, with exponential backoff. Non-retryable responses
-// such as 400, 401 and 403 fail on the first attempt. External writes never
-// re-fire here: they are dispatched outside the model loop through reviewed,
-// idempotency-keyed actions.
+// Provider SDKs retry transient failures before the response starts, with
+// exponential backoff: OpenAI and Anthropic retry HTTP 408, 409, 429, 5xx and
+// connection errors and honor retry-after; Gemini retries 408, 429, 500, 502,
+// 503 and 504. Other 4xx responses such as 400, 401 and 403 fail on the first
+// attempt, and a stream that fails after it starts is not retried. External
+// writes never re-fire here: they are dispatched outside the model loop through
+// reviewed, idempotency-keyed actions.
 export const MODEL_MAX_RETRIES = 2;
 export function readConfig(): Config {
   const mode = process.env.WORKSPACE_MODE ?? "sample";

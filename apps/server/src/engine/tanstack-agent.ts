@@ -12,9 +12,10 @@ import { type GeminiTextModel, geminiText } from "@tanstack/ai-gemini";
 import { type OpenAIChatModel, openaiText } from "@tanstack/ai-openai";
 import { map, type Observable } from "rxjs";
 import { z } from "zod";
+import { MODEL_MAX_RETRIES } from "../config.ts";
 
 // Same "provider/model" strings, env vars and base URL formats as the AI SDK resolver in
-// @copilotkit/runtime. Retries are off, like the old `maxRetries: 0`.
+// @copilotkit/runtime. Each provider SDK retries transient failures up to MODEL_MAX_RETRIES times.
 function adapter(spec: string) {
   const [, provider = "", model = ""] = spec.trim().match(/^([^/:]*)[/:](.*)$/) ?? [];
   if (!provider || !model.trim())
@@ -26,13 +27,13 @@ function adapter(spec: string) {
     case "openai":
       return openaiText(id as OpenAIChatModel, {
         baseURL: process.env.OPENAI_BASE_URL,
-        maxRetries: 0,
+        maxRetries: MODEL_MAX_RETRIES,
       });
     case "anthropic":
       // The AI SDK base URL ends in /v1; the Anthropic SDK adds /v1 itself.
       return anthropicText(id as AnthropicChatModel, {
         baseURL: process.env.ANTHROPIC_BASE_URL?.replace(/\/v1\/?$/, ""),
-        maxRetries: 0,
+        maxRetries: MODEL_MAX_RETRIES,
       });
     case "google":
     case "gemini":
@@ -41,7 +42,8 @@ function adapter(spec: string) {
       return geminiText(id as GeminiTextModel, {
         httpOptions: {
           baseUrl: process.env.GOOGLE_GENERATIVE_AI_BASE_URL?.replace(/\/v1beta\/?$/, ""),
-          retryOptions: { attempts: 1 },
+          // @google/genai counts the first call in `attempts`.
+          retryOptions: { attempts: MODEL_MAX_RETRIES + 1 },
         },
       });
     default:
