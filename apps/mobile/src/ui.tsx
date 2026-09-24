@@ -295,7 +295,7 @@ export function Sheet({
           >
             <View style={{ flex: 1, gap: 4 }}>
               <Text style={s.title}>{title}</Text>
-              {subtitle && <Text style={s.muted}>{subtitle}</Text>}
+              {!!subtitle && <Text style={s.muted}>{subtitle}</Text>}
             </View>
             <IconButton icon={X} label="Close details" onPress={onClose} />
           </View>
@@ -393,7 +393,7 @@ export function LinkRow({
       </View>
       <View style={{ flex: 1, gap: 3 }}>
         <Text style={[s.text, { fontWeight: "500" }]}>{title}</Text>
-        {detail && <Text style={s.small}>{detail}</Text>}
+        {!!detail && <Text style={s.small}>{detail}</Text>}
       </View>
       <ChevronRight size={15} color={colors.muted} />
     </Pressable>

@@ -184,7 +184,7 @@ function MailDetail({ mail: m }: { mail: Mail }) {
         </Card>
       ))}
       <ErrorNotice error={error} />
-      {error && <Button onPress={() => setRetry(retry + 1)}>Reload conversation</Button>}
+      {!!error && <Button onPress={() => setRetry(retry + 1)}>Reload conversation</Button>}
       <Button
         primary
         icon={Reply}
@@ -674,7 +674,7 @@ function ReviewDetail({ initial }: { initial: ActionProposal }) {
         )}
       </Card>
       <ErrorNotice error={error || action.error} />
-      {action.result && (
+      {!!action.result && (
         <Card style={{ marginTop: 16, backgroundColor: colors.green, padding: 18 }}>
           <Text selectable style={s.text}>
             {resultSummary(action.result)}

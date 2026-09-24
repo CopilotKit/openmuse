@@ -140,7 +140,7 @@ export function LinuxWorkspace({ tab }: { tab: "Terminal" | "Files" }) {
           </View>
           {!snapshot && !error && <ActivityIndicator color={colors.blueDark} />}
         </View>
-        {snapshot?.message && <Text style={s.small}>{snapshot.message}</Text>}
+        {!!snapshot?.message && <Text style={s.small}>{snapshot.message}</Text>}
         {snapshot?.enabled && (
           <View style={[s.row, { gap: 8, flexWrap: "wrap" }]}>
             {running ? (

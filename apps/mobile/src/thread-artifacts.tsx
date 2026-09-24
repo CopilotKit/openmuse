@@ -104,7 +104,7 @@ export function TaskThreadCard({ task }: { task: AgentTask }) {
         <ArtifactCard key={artifact.id} artifact={artifact} />
       ))}
       <ErrorNotice error={error} />
-      {error && (
+      {!!error && (
         <Button small onPress={() => setAttempt((value) => value + 1)}>
           Reload task results
         </Button>

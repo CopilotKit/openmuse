@@ -540,7 +540,7 @@ export function ChatScreen({
           </View>
         )}
         <ErrorNotice error={error} />
-        {error && (
+        {!!error && (
           <Button
             style={{ alignSelf: "flex-start" }}
             icon={RotateCcw}
