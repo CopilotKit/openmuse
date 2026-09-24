@@ -162,12 +162,7 @@ export class TaskWorker {
         detail,
       });
     };
-    await this.db.put(owner, "runs", {
-      id: leaseId,
-      taskId,
-      startedAt: new Date(this.now()).toISOString(),
-      status: "running",
-    });
+    const startedAt = new Date(this.now()).toISOString();
     const heartbeat = setInterval(
       () => {
         void this.db
@@ -186,6 +181,7 @@ export class TaskWorker {
       Math.max(10, Math.floor(leaseMs / 3)),
     );
     try {
+      await this.db.put(owner, "runs", { id: leaseId, taskId, startedAt, status: "running" });
       const result = await this.execute(owner, task, {
         signal: controller.signal,
         guard,
@@ -196,7 +192,7 @@ export class TaskWorker {
       await this.db.put(owner, "runs", {
         id: leaseId,
         taskId,
-        startedAt: task.updatedAt,
+        startedAt,
         finishedAt: new Date(this.now()).toISOString(),
         status: result.status ?? task.status,
       });
