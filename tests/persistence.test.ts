@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { createStore } from "../apps/server/src/db.ts";
+import { createPool, createStore } from "../apps/server/src/db.ts";
 
 test("fresh nested data directory starts and survives a database restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "openmuse-db-"));
@@ -18,5 +18,16 @@ test("fresh nested data directory starts and survives a database restart", async
     await second.close();
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("idle Postgres client errors are logged instead of crashing the process", async (t) => {
+  const logged = t.mock.method(console, "error", () => {});
+  const pool = createPool("postgres://127.0.0.1:1/openmuse");
+  try {
+    assert.doesNotThrow(() => pool.emit("error", new Error("terminating connection")));
+    assert.equal(logged.mock.callCount(), 1);
+  } finally {
+    await pool.end();
   }
 });
