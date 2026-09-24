@@ -8,7 +8,7 @@ import {
 } from "@copilotkit/runtime/v2";
 import type { Auth } from "./auth.ts";
 import type { Config } from "./config.ts";
-import { ConversationAgent } from "./engine/conversation.ts";
+import { ConversationAgent, createChatAgent } from "./engine/conversation.ts";
 import type { AgentService } from "./engine/service.ts";
 import { learnedSkillsFor } from "./learning.ts";
 
@@ -31,7 +31,8 @@ export function makeRuntime(
   auth: Auth,
   intelligence: CopilotKitIntelligence,
 ) {
-  const learnedSkills = learnedSkillsFor(config, intelligence);
+  // Long-lived so learned-skill snapshots are cached across turns and requests.
+  const chat = createChatAgent(learnedSkillsFor(config, intelligence));
   const agents: AgentsFactory = async ({ request }) => ({
     default:
       config.agentBackend === "sample"
@@ -49,7 +50,7 @@ export function makeRuntime(
               config,
               service,
               await auth.owner(request.headers.get("authorization") ?? undefined),
-              learnedSkills,
+              chat,
             ),
   });
   const runtime = new CopilotRuntime({

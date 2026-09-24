@@ -1,16 +1,17 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test, { type TestContext } from "node:test";
-import { EventSchemas, EventType, type RunAgentInput } from "@ag-ui/core";
+import { type BaseEvent, EventSchemas, EventType, type RunAgentInput } from "@ag-ui/core";
 import {
   type BuiltInAgentLearnedSkillsOptions,
   CopilotKitIntelligence,
   type GetLearnedSkillsSnapshotRequest,
   IntelligenceAgentRunner,
+  LearnedSkillsError,
 } from "@copilotkit/runtime/v2";
 import { lastValueFrom, toArray } from "rxjs";
 import { createApp } from "../apps/server/src/app.ts";
-import { ConversationAgent } from "../apps/server/src/engine/conversation.ts";
+import { ConversationAgent, createChatAgent } from "../apps/server/src/engine/conversation.ts";
 import { browserFixture } from "./helpers/browser.ts";
 import { modelFixture } from "./helpers/model.ts";
 
@@ -62,7 +63,12 @@ async function chatFixture(
     ...fixture,
     ...server,
     browserCalls,
-    conversation: new ConversationAgent(config, server.agent, "local-user", learnedSkills),
+    conversation: new ConversationAgent(
+      config,
+      server.agent,
+      "local-user",
+      createChatAgent(learnedSkills),
+    ),
   };
 }
 
@@ -380,4 +386,89 @@ test("chat mail tools report disconnected mail and refuse another owner's thread
   await fixture.db.put("local-user", "settings", { id: "google", enabled: true });
   call = { name: "read_mail_thread", arguments: { threadId: "trip-thread" } };
   assert.match(await toolError(), /not found/);
+});
+
+function skillSnapshot() {
+  return {
+    status: "snapshot" as const,
+    bytes: Uint8Array.from(Buffer.from(skillArchiveBase64, "base64")),
+    revision: "r1",
+    etag: '"139773b71315c562db80ead7ec4318982cab1ddc6671d53c776a2eab55d9a775"',
+    contentType: "application/zip",
+  };
+}
+
+async function sharedChatTurns(
+  t: TestContext,
+  freshnessWindowMs: number,
+  snapshot: (call: number) => Promise<ReturnType<typeof skillSnapshot>>,
+) {
+  let snapshotCalls = 0;
+  const intelligence = new CopilotKitIntelligence({ apiKey: "test-project-key-never-sent" });
+  intelligence.getLearnedSkillsSnapshot = async () => snapshot(snapshotCalls++);
+  const model = await modelFixture(t, (index) =>
+    index % 2 === 0
+      ? { name: "copilotkit_load_skill", arguments: { skill_name: "refund-policy" } }
+      : undefined,
+  );
+  const fixture = await chatFixture(t);
+  // makeRuntime builds one chat agent and a fresh ConversationAgent per request.
+  const chat = createChatAgent({
+    client: intelligence,
+    containerId: "openmuse-assistant",
+    freshnessWindowMs,
+  });
+  const turn = async () => {
+    const input = runInput();
+    input.messages = [{ id: randomUUID(), role: "user", content: "Can I get a refund?" }];
+    const conversation = new ConversationAgent(
+      { ...fixture.config, agentBackend: "model", model: "openai/fixture" },
+      fixture.agent,
+      "local-user",
+      chat,
+    );
+    return lastValueFrom(conversation.run(input).pipe(toArray()));
+  };
+  return { turn, requests: model.requests, snapshotCalls: () => snapshotCalls };
+}
+
+const loadedSkill = (events: BaseEvent[]) =>
+  events
+    .map((event) => EventSchemas.parse(event))
+    .some(
+      (event) =>
+        event.type === EventType.TOOL_CALL_RESULT &&
+        /Use the published refund policy/.test(event.content),
+    );
+
+test("chat reuses the learned-skill snapshot across turns within the refresh window", async (t) => {
+  const chat = await sharedChatTurns(t, 60_000, async () => skillSnapshot());
+
+  assert.ok(loadedSkill(await chat.turn()));
+  assert.ok(loadedSkill(await chat.turn()));
+  assert.equal(chat.snapshotCalls(), 1);
+  assert.equal(chat.requests.length, 4);
+});
+
+test("chat keeps using the cached skill when a refresh fails transiently", async (t) => {
+  const chat = await sharedChatTurns(t, 0, async (call) => {
+    if (call > 0) throw new LearnedSkillsError("NETWORK_ERROR", true);
+    return skillSnapshot();
+  });
+
+  assert.ok(loadedSkill(await chat.turn()));
+  assert.ok(loadedSkill(await chat.turn()));
+  assert.equal(chat.snapshotCalls(), 2);
+});
+
+test("an explicit learned-skill delivery denial still blocks the chat turn", async (t) => {
+  const chat = await sharedChatTurns(t, 0, async (call) => {
+    if (call > 0) throw new LearnedSkillsError("DELIVERY_DISABLED", false);
+    return skillSnapshot();
+  });
+
+  assert.ok(loadedSkill(await chat.turn()));
+  const requestsBefore = chat.requests.length;
+  await assert.rejects(chat.turn(), { code: "DELIVERY_DISABLED" });
+  assert.equal(chat.requests.length, requestsBefore);
 });
