@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { type BaseEvent, EventType, type RunAgentInput } from "@ag-ui/core";
 import {
   BuiltInAgent,
   convertInputToTanStackAI,
@@ -8,6 +10,7 @@ import { chat, maxIterations, type SchemaInput, toolDefinition } from "@tanstack
 import { type AnthropicChatModel, anthropicText } from "@tanstack/ai-anthropic";
 import { type GeminiTextModel, geminiText } from "@tanstack/ai-gemini";
 import { type OpenAIChatModel, openaiText } from "@tanstack/ai-openai";
+import { map, type Observable } from "rxjs";
 import { z } from "zod";
 
 // Same "provider/model" strings, env vars and base URL formats as the AI SDK resolver in
@@ -87,7 +90,7 @@ export function tanstackAgent(options: {
   tools: ToolDefinition[];
   prompt: string;
 }) {
-  return new BuiltInAgent({
+  const agent = new BuiltInAgent({
     type: "tanstack",
     factory: ({ input, abortController }) => {
       const converted = convertInputToTanStackAI(input);
@@ -122,4 +125,30 @@ export function tanstackAgent(options: {
       });
     },
   });
+  const run = agent.run.bind(agent);
+  agent.run = (input: RunAgentInput) => splitTextAtToolCalls(run(input));
+  return agent;
+}
+
+// ponytail: the TanStack converter in @copilotkit/runtime 1.70.1 uses one message ID for the
+// whole run. Remove this when it starts a new ID for each step, like the classic mode does.
+// Text after a tool call gets a new message ID, so each step's text is a separate message.
+function splitTextAtToolCalls(events: Observable<BaseEvent>) {
+  let messageId: string | undefined;
+  let afterToolCall = false;
+  return events.pipe(
+    map((event) => {
+      if (event.type === EventType.TEXT_MESSAGE_CHUNK) {
+        if (!messageId || afterToolCall) messageId = randomUUID();
+        afterToolCall = false;
+        return { ...event, messageId };
+      }
+      if (event.type === EventType.TOOL_CALL_START) {
+        afterToolCall = true;
+        return messageId ? { ...event, parentMessageId: messageId } : event;
+      }
+      if (event.type === EventType.TOOL_CALL_RESULT) afterToolCall = true;
+      return event;
+    }),
+  );
 }

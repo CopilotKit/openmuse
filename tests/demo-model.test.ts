@@ -213,6 +213,13 @@ test("AI Mock drives the real TanStack BuiltInAgent through two browser tool rou
     assert.ok(
       firstSummary && "content" in firstSummary && typeof firstSummary.content === "string",
     );
+    // Text before and after the tool call stays in separate messages, as in the classic AI SDK mode.
+    assert.deepEqual(
+      first.newMessages
+        .filter((message) => message.role === "assistant" && message.content)
+        .map((message) => message.id === firstSummary.id || message.content),
+      ["I’ll open Hacker News and read the front page.", true],
+    );
     assert.equal(firstSummary.content.match(/• /g)?.length, 3);
     assert.ok(!firstSummary.content.includes("Source: ["));
     agent.addMessage({
