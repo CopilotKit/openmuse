@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assertApiDeploymentConfig, type Config } from "../apps/server/src/config.ts";
+import {
+  assertApiDeploymentConfig,
+  type Config,
+  shadowedEnvKeys,
+} from "../apps/server/src/config.ts";
 
 const sampleConfig: Config = {
   mode: "sample",
@@ -45,4 +49,11 @@ test("every API mode accepts a non-empty Intelligence key", () => {
       assertApiDeploymentConfig({ ...mode, intelligenceApiKey: "test-project-key-never-sent" }),
     );
   }
+});
+
+test("environment variables that override a different .env value are reported by name", () => {
+  const file = { OPENAI_API_KEY: "sk-or-file", MODEL: "openai/gpt-5", PORT: "8787", EMPTY: "" };
+  const env = { OPENAI_API_KEY: "sk-proj-system", MODEL: "openai/gpt-5", EMPTY: "set" };
+  assert.deepEqual(shadowedEnvKeys(file, env), ["OPENAI_API_KEY", "EMPTY"]);
+  assert.deepEqual(shadowedEnvKeys(file, {}), []);
 });
