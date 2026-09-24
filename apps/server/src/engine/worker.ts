@@ -181,7 +181,12 @@ export class TaskWorker {
       Math.max(10, Math.floor(leaseMs / 3)),
     );
     try {
-      await this.db.put(owner, "runs", { id: leaseId, taskId, startedAt, status: "running" });
+      await this.db.put(owner, "runs", {
+        id: leaseId,
+        taskId,
+        startedAt,
+        status: "running",
+      });
       const result = await this.execute(owner, task, {
         signal: controller.signal,
         guard,
