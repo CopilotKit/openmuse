@@ -15,7 +15,7 @@ OpenMuse keeps conversation, ongoing work, and user control together in a shared
 - Tap the avatar to see activity, reviews and receipts. Its status names the current work or the input it needs.
 - Background updates show meaningful completions or requests for input. They link to the saved task and can be dismissed.
 - Structured review screens retain the exact recipient, action and accept/reject controls. Reading a public page requires no extra review.
-- The agent's name, tone and memory are editable in Apps. Goals, tracking and artifacts remain usable outside chat.
+- The agent's name, tone and memory are editable in Apps and apply to chat and delegated tasks from the next message. Memories reach the model as data, not instructions. Goals, tracking and artifacts remain usable outside chat.
 
 ## Visual language
 
