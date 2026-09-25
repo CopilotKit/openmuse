@@ -26,7 +26,12 @@ import { BackgroundUpdates } from "./background-updates";
 import { BrowserRunContext, BrowserToolCard } from "./browser-tool-card";
 import { BrowserThreadCard } from "./computer";
 import { ConversationQueue, type QueuedMessage } from "./conversation-queue";
-import { runConversationTurn } from "./conversation-run";
+import {
+  ConversationTurnError,
+  isThreadLocked,
+  runConversationTurn,
+  threadLocked,
+} from "./conversation-run";
 import { MailToolCard } from "./mail-tool-card";
 import { FileThreadCard, TaskThreadCard } from "./thread-artifacts";
 import { type Selection, useMuseThread } from "./threads";
@@ -189,6 +194,8 @@ export function ChatScreen({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
+  // Replayed messages show before connectAgent returns; new turns wait until it does.
+  const [syncing, setSyncing] = useState(false);
   const [picking, setPicking] = useState(false);
   const [attachments, setAttachments] = useState<string[]>([]);
   const list = useRef<ScrollView>(null);
@@ -205,6 +212,7 @@ export function ChatScreen({
     let active = true;
     setHistoryError("");
     setLoaded(false);
+    setSyncing(false);
     const replay = agent.subscribe({
       onMessagesChanged: ({ messages }) => {
         if (active && richThreads && messages.length) setLoaded(true);
@@ -213,12 +221,20 @@ export function ChatScreen({
     async function hydrate() {
       try {
         if (richThreads) {
-          if (selection.existing)
-            await runConversationTurn(
-              agentId,
-              () => copilotkit.connectAgent({ agent }),
-              (onError) => copilotkit.subscribe({ onError }),
-            );
+          if (selection.existing) {
+            // connectAgent returns once the thread is idle, so it also waits for a reply
+            // still running from before a reload. Sending earlier fails with a thread lock.
+            setSyncing(true);
+            try {
+              await runConversationTurn(
+                agentId,
+                () => copilotkit.connectAgent({ agent }),
+                (onError) => copilotkit.subscribe({ onError }),
+              );
+            } finally {
+              if (active) setSyncing(false);
+            }
+          }
         } else {
           const { messages } = await api.request<{ messages: Message[] }>("/api/conversation");
           if (active) agent.setMessages(messages);
@@ -246,7 +262,7 @@ export function ChatScreen({
   }, [agent, api, richThreads]);
   const run = useCallback(
     async (message?: QueuedMessage) => {
-      if (runLock.current || agent.isRunning || !isReady || !loaded)
+      if (runLock.current || agent.isRunning || !isReady || !loaded || syncing)
         throw new Error("The conversation is not ready yet.");
       runLock.current = true;
       setBusy(true);
@@ -259,6 +275,16 @@ export function ChatScreen({
           (onError) => copilotkit.subscribe({ onError }),
         );
         await Promise.all([refresh(), refreshAgent()]);
+      } catch (e) {
+        if (message && e instanceof ConversationTurnError && e.code === threadLocked) {
+          // The server refused the turn before running it (another reply holds the thread),
+          // so keep the message unsent and on hold instead of reporting a failed turn.
+          agent.setMessages(agent.messages.filter((m) => m.id !== message.id));
+          queue.restore(message);
+          queue.pause();
+          return;
+        }
+        throw e;
       } finally {
         try {
           await saveHistory();
@@ -273,12 +299,23 @@ export function ChatScreen({
         }
       }
     },
-    [agent, agentId, copilotkit, isReady, loaded, refresh, refreshAgent, saveHistory, queue],
+    [
+      agent,
+      agentId,
+      copilotkit,
+      isReady,
+      loaded,
+      syncing,
+      refresh,
+      refreshAgent,
+      saveHistory,
+      queue,
+    ],
   );
   const flush = useCallback(() => {
-    if (!loaded || !isReady || runLock.current || agent.isRunning) return;
+    if (!loaded || syncing || !isReady || runLock.current || agent.isRunning) return;
     void queue.flush(run).catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, [agent, isReady, loaded, queue, run]);
+  }, [agent, isReady, loaded, syncing, queue, run]);
   const enqueue = useCallback(
     (text: string) => {
       queue.enqueue({ id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, text });
@@ -299,6 +336,8 @@ export function ChatScreen({
     const subscription = copilotkit.subscribe({
       onError: (event) => {
         if (event.context?.agentId && event.context.agentId !== agentId) return;
+        // run() keeps a lock-refused message on hold; it is not a failed turn.
+        if (isThreadLocked(event)) return;
         const failure = event.error instanceof Error ? event.error : new Error(String(event.error));
         setError(failure.message);
       },
