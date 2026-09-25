@@ -136,8 +136,17 @@ export async function createApp(
     await next();
   });
   app.get("/api/workspace", async (c) => {
-    const snapshot = await workspace.snapshot(c.get("owner"), c.req.query("q"));
+    const [snapshot, reachable] = await Promise.all([
+      workspace.snapshot(c.get("owner"), c.req.query("q")),
+      browser.reachable(),
+    ]);
     snapshot.browsers = snapshot.browsers.map((s) => browser.decorate(c.get("owner"), s));
+    // A configured worker that does not answer is offline, not ready.
+    snapshot.connections = snapshot.connections.map((connection) =>
+      connection.id === "browser" && connection.status === "connected" && !reachable
+        ? { ...connection, status: "unavailable" }
+        : connection,
+    );
     return c.json(snapshot);
   });
   app.route("/api/agent", agentRoutes(agent));

@@ -530,3 +530,25 @@ test("egress proxy blocks HTTP and CONNECT traffic to local network destinations
     await proxy.close();
   }
 });
+
+test("the browser counts as connected only while its worker answers", async (t) => {
+  let up = true;
+  let clock = 0;
+  const { db, config } = await browserFixture(t, (path) =>
+    up && path === "/health" ? { data: { status: "ok" } } : { status: 503, data: {} },
+  );
+  const auth = new Auth(db, config, "test-signing-key");
+  const service = new BrowserService(db, config, auth, new Files(db, config, auth), () => clock);
+  assert.equal(await service.reachable(), true);
+  up = false;
+  assert.equal(await service.reachable(), true, "a recent answer is reused briefly");
+  clock += 15_000;
+  assert.equal(await service.reachable(), false);
+  const unconfigured = new BrowserService(
+    db,
+    { ...config, workerUrl: undefined },
+    auth,
+    new Files(db, config, auth),
+  );
+  assert.equal(await unconfigured.reachable(), false);
+});
