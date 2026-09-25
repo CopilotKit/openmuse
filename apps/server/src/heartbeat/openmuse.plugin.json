@@ -1,0 +1,53 @@
+{
+  "activation": "eager",
+  "catalog": {
+    "blurb": "Autonomous proactive background heartbeat and Home Assistant style conditional automations.",
+    "tags": ["heartbeat", "automations", "proactive", "rules"],
+    "title": "Heartbeat & Automations"
+  },
+  "categories": ["productivity"],
+  "cliCommands": [],
+  "configGroups": [],
+  "configSchema": { "additionalProperties": false, "properties": {}, "type": "object" },
+  "contracts": {
+    "channels": [],
+    "routes": {
+      "mountPath": "/api/heartbeat",
+      "paths": ["/status", "/pulse", "/rules"]
+    },
+    "tools": ["automation_create_rule", "automation_list_rules", "automation_delete_rule"],
+    "webSearchProviders": []
+  },
+  "dashboard": {
+    "actionVerbs": [],
+    "dataBindings": []
+  },
+  "description": "Background proactive heartbeat scanner with Home Assistant style IF/THEN automation rules.",
+  "doctorContract": { "configRepair": { "dropUnknownKeys": true }, "stateMigrations": [] },
+  "enabledByDefault": true,
+  "id": "heartbeat",
+  "name": "Heartbeat & Automations",
+  "skills": [],
+  "toolMetadata": {
+    "automation_create_rule": {
+      "description": "Create a Home Assistant style automation rule: IF condition met, THEN trigger an action.",
+      "kind": "both",
+      "providedBy": "direct",
+      "requiresApproval": false
+    },
+    "automation_list_rules": {
+      "description": "List all active conditional automation rules.",
+      "kind": "both",
+      "providedBy": "direct",
+      "requiresApproval": false
+    },
+    "automation_delete_rule": {
+      "description": "Delete a conditional automation rule.",
+      "kind": "both",
+      "providedBy": "direct",
+      "requiresApproval": false
+    }
+  },
+  "version": "1.0.0",
+  "writeOnly": []
+}

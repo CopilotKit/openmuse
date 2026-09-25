@@ -3,37 +3,27 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { EventType } from "@ag-ui/core";
-import { lastValueFrom, toArray } from "rxjs";
 import { createApp } from "../apps/server/src/app.ts";
 import type { Config } from "../apps/server/src/config.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
-import { ConversationAgent } from "../apps/server/src/engine/conversation.ts";
-import type { AgentService } from "../apps/server/src/engine/service.ts";
 import type { ActionProposal, Artifact, Workspace } from "../packages/domain/src/index.ts";
 
-let db: Store,
-  app: Awaited<ReturnType<typeof createApp>>["app"],
-  agent: AgentService,
-  config: Config,
-  token: string,
-  directory: string;
+let db: Store, app: Awaited<ReturnType<typeof createApp>>["app"], token: string, directory: string;
 const headers = () => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" });
 before(async () => {
   directory = await mkdtemp(join(tmpdir(), "openmuse-api-"));
   db = await createStore();
-  config = {
+  const config: Config = {
     mode: "sample",
     port: 8787,
     host: "127.0.0.1",
     publicUrl: "http://localhost:8787",
     dataDir: directory,
     agentBackend: "sample",
-    intelligenceApiKey: "test-project-key-never-sent",
     googleRedirectUri: "http://localhost:8787/api/google/callback",
     allowedOrigins: ["http://localhost:8081"],
   };
-  ({ app, agent } = await createApp(db, config));
+  ({ app } = await createApp(db, config));
   const response = await app.request("/api/session", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -166,25 +156,24 @@ test("calendar ranges and complete sample mail threads survive navigation", asyn
   );
   assert.equal(invalid.status, 422);
 });
-function sampleRun(threadId: string, runId: string, messageId: string, content: string) {
-  return new ConversationAgent(config, agent, "local-user").run({
-    threadId,
-    runId,
-    messages: [{ id: messageId, role: "user", content }],
-    tools: [],
-    context: [],
-    state: {},
-  });
-}
-
-test("sample agent streams actual AG-UI events without a model key", async () => {
+test("CopilotKit runtime streams actual AG-UI events without a provider key", async () => {
   const info = await app.request("/api/copilotkit/info", { headers: headers() });
   assert.equal(info.status, 200);
-  const stream = JSON.stringify(
-    await lastValueFrom(
-      sampleRun("sample-test", "sample-run", "message1", "Show my calendar").pipe(toArray()),
-    ),
-  );
+  const response = await app.request("/api/copilotkit/agent/default/run", {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({
+      threadId: "sample-test",
+      runId: "sample-run",
+      messages: [{ id: "message1", role: "user", content: "Show my calendar" }],
+      tools: [],
+      context: [],
+      state: {},
+      forwardedProps: {},
+    }),
+  });
+  assert.equal(response.status, 200);
+  const stream = await response.text();
   assert.match(stream, /RUN_STARTED/);
   assert.match(stream, /TEXT_MESSAGE_CONTENT/);
   assert.match(stream, /RUN_FINISHED/);
@@ -192,19 +181,28 @@ test("sample agent streams actual AG-UI events without a model key", async () =>
 });
 
 test("guided document delegation streams a rich tool result bound to its saved task", async () => {
-  const events = await lastValueFrom(
-    sampleRun(
-      "document-thread",
-      "document-run",
-      "document-request",
-      "Complete the permission slip",
-    ).pipe(toArray()),
-  );
-  const start = events.find((event) => event.type === EventType.TOOL_CALL_START);
-  const result = events.find((event) => event.type === EventType.TOOL_CALL_RESULT);
+  const response = await app.request("/api/copilotkit/agent/default/run", {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({
+      threadId: "document-thread",
+      runId: "document-run",
+      messages: [{ id: "document-request", role: "user", content: "Complete the permission slip" }],
+      tools: [],
+      context: [],
+      state: {},
+      forwardedProps: {},
+    }),
+  });
+  assert.equal(response.status, 200);
+  const events = (await response.text())
+    .split("\n")
+    .filter((line) => line.startsWith("data: {"))
+    .map((line) => JSON.parse(line.slice(6)));
+  const start = events.find((event) => event.type === "TOOL_CALL_START");
+  const result = events.find((event) => event.type === "TOOL_CALL_RESULT");
   assert.equal(start?.toolCallName, "delegate_task");
   assert.equal(result?.toolCallId, start?.toolCallId);
-  assert.ok(result && typeof result.content === "string");
   const { id } = JSON.parse(result.content);
   const task = await db.get<{ input: { messageId: string }; kind: string }>(
     "local-user",

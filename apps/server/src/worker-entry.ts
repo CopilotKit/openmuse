@@ -1,6 +1,7 @@
 import { createApp } from "./app.ts";
 import { readConfig } from "./config.ts";
 import { createStore } from "./db.ts";
+import { applyProviderSelection } from "./engine/providers.ts";
 
 const config = readConfig();
 if (!config.databaseUrl)
@@ -8,6 +9,17 @@ if (!config.databaseUrl)
     "A separate task worker requires DATABASE_URL. Embedded PGlite runs inside the API process.",
   );
 const db = await createStore({ databaseUrl: config.databaseUrl });
+// Provider selection (TRACK D): the standalone task worker must honour the
+// dashboard-picked provider too. Fail-open like index.ts: a broken
+// selection must not prevent the worker from starting.
+try {
+  await applyProviderSelection(db, config);
+} catch (error) {
+  console.warn(
+    "[openmuse] provider selection failed in task worker; using env config:",
+    error instanceof Error ? error.message : error,
+  );
+}
 const { agent } = await createApp(db, config);
 agent.start();
 console.log("OpenMuse task worker running");

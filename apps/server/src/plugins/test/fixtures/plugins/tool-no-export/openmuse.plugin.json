@@ -1,0 +1,71 @@
+{
+  "activation": "eager",
+  "catalog": { "blurb": "Test fixture plugin.", "tags": ["test"], "title": "Fixture Good" },
+  "categories": ["test"],
+  "cliCommands": [],
+  "configGroups": ["general"],
+  "configSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "apiKey": { "group": "general", "title": "API key", "type": "string", "widget": "password" },
+      "mode": {
+        "default": "fast",
+        "enum": ["fast", "slow"],
+        "group": "general",
+        "title": "Mode",
+        "type": "string"
+      },
+      "nickname": { "group": "general", "maxLength": 40, "title": "Nickname", "type": "string" },
+      "verbose": {
+        "default": false,
+        "group": "general",
+        "title": "Verbose",
+        "type": "boolean",
+        "widget": "switch"
+      }
+    },
+    "required": [],
+    "type": "object"
+  },
+  "contracts": {
+    "channels": [],
+    "routes": { "mountPath": "/api/fixture-good", "paths": ["/"] },
+    "tools": ["fixture_echo", "fixture_worker_echo"],
+    "webSearchProviders": []
+  },
+  "dashboard": {
+    "actionVerbs": [],
+    "dataBindings": [
+      {
+        "description": "Returns pong.",
+        "name": "ping",
+        "paramShape": { "additionalProperties": false, "properties": {}, "type": "object" }
+      }
+    ]
+  },
+  "description": "A valid fixture plugin for the plugin-manifest tests.",
+  "doctorContract": {
+    "configRepair": { "dropUnknownKeys": true },
+    "stateMigrations": [{ "description": "No-op test migration.", "id": "seed-defaults" }]
+  },
+  "enabledByDefault": true,
+  "id": "fixture-no-export",
+  "name": "Fixture Good",
+  "skills": [],
+  "toolMetadata": {
+    "fixture_echo": {
+      "description": "Echo tool (chat).",
+      "kind": "chat",
+      "providedBy": "direct",
+      "requiresApproval": false
+    },
+    "fixture_worker_echo": {
+      "description": "Echo tool (worker).",
+      "kind": "worker",
+      "providedBy": "direct",
+      "requiresApproval": false
+    }
+  },
+  "version": "1.0.0",
+  "writeOnly": ["apiKey"]
+}

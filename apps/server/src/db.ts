@@ -2,7 +2,6 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
-import { backgroundFailure } from "./log.ts";
 
 type Row = { data: Record<string, unknown> };
 interface Database {
@@ -10,8 +9,34 @@ interface Database {
   close: () => Promise<void>;
 }
 
+export interface PluginState {
+  id: string;
+  enabled?: boolean;
+  /** Stored config: writeOnly values are AES-256-GCM vault envelopes. */
+  config?: Record<string, unknown>;
+  /** Doctor migration ids that have already run (global plugin scope). */
+  doctorMigrations?: string[];
+  updatedAt: string;
+}
+
 export class Store {
-  constructor(private readonly db: Database) {}
+  private readonly db: Database;
+  constructor(db: Database) {
+    this.db = db;
+  }
+  /**
+   * Run an arbitrary SQL statement against the underlying database. Used by
+   * subsystems (e.g. the email mirror) that need SQL beyond the key/value
+   * record API. Parameters use $1-style placeholders on both pg and PGlite.
+   */
+  async raw<T = Record<string, unknown>>(
+    sql: string,
+    params: unknown[] = [],
+  ): Promise<{ rows: T[] }> {
+    const result = await this.db.query(sql, params);
+    return result as { rows: T[] };
+  }
+
   async get<T = Record<string, unknown>>(
     owner: string,
     kind: string,
@@ -43,6 +68,13 @@ export class Store {
       kind,
       id,
     ]);
+  }
+  async removeAll(owner: string, kind: string): Promise<number> {
+    const result = await this.db.query(
+      "DELETE FROM records WHERE owner=$1 AND kind=$2 RETURNING id",
+      [owner, kind],
+    );
+    return result.rows.length;
   }
   async compareAndSwap<T>(
     owner: string,
@@ -110,13 +142,27 @@ export class Store {
     );
     return result.rows.length === 1;
   }
-}
-
-/** Idle clients can be disconnected by a database restart; without a listener pg's `error` event crashes the process. */
-export function createPool(connectionString: string) {
-  const pool = new pg.Pool({ connectionString, max: 5 });
-  pool.on("error", (error) => backgroundFailure("postgres pool", error));
-  return pool;
+  /** Plugin system state: per-owner enablement + config (plugin_config table). */
+  async getPluginState(owner: string, pluginId: string): Promise<PluginState | null> {
+    const result = await this.db.query(
+      "SELECT data FROM plugin_config WHERE owner=$1 AND plugin_id=$2",
+      [owner, pluginId],
+    );
+    return (result.rows[0]?.data as unknown as PluginState | undefined) ?? null;
+  }
+  async putPluginState(owner: string, pluginId: string, state: PluginState): Promise<void> {
+    await this.db.query(
+      "INSERT INTO plugin_config(owner,plugin_id,data) VALUES($1,$2,$3::jsonb) ON CONFLICT(owner,plugin_id) DO UPDATE SET data=excluded.data,updated_at=now()",
+      [owner, pluginId, JSON.stringify(state)],
+    );
+  }
+  async listPluginStates(pluginId: string): Promise<Array<{ owner: string; state: PluginState }>> {
+    const result = await this.db.query(
+      "SELECT jsonb_build_object('owner',owner,'state',data) AS data FROM plugin_config WHERE plugin_id=$1 ORDER BY owner",
+      [pluginId],
+    );
+    return result.rows.map((row) => row.data as { owner: string; state: PluginState });
+  }
 }
 
 export async function createStore(
@@ -124,7 +170,7 @@ export async function createStore(
 ): Promise<Store> {
   let database: Database;
   if (options.databaseUrl) {
-    const pool = createPool(options.databaseUrl);
+    const pool = new pg.Pool({ connectionString: options.databaseUrl, max: 5 });
     database = { query: async (sql, params) => pool.query(sql, params), close: () => pool.end() };
   } else {
     if (options.dataDir) await mkdir(dirname(options.dataDir), { recursive: true, mode: 0o700 });
@@ -137,6 +183,9 @@ export async function createStore(
   }
   await database.query(
     "CREATE TABLE IF NOT EXISTS records(owner text NOT NULL,kind text NOT NULL,id text NOT NULL,data jsonb NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(owner,kind,id))",
+  );
+  await database.query(
+    "CREATE TABLE IF NOT EXISTS plugin_config(owner text NOT NULL,plugin_id text NOT NULL,data jsonb NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(owner,plugin_id))",
   );
   return new Store(database);
 }

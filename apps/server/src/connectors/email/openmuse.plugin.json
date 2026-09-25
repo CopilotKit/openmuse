@@ -1,0 +1,63 @@
+{
+  "activation": "eager",
+  "catalog": {
+    "blurb": "Connect an IMAP/SMTP mailbox so the agent can search and read mail when Google is not connected.",
+    "tags": ["email", "imap", "smtp"],
+    "title": "Email accounts"
+  },
+  "categories": ["communication"],
+  "cliCommands": [],
+  "configGroups": [],
+  "configSchema": { "additionalProperties": false, "properties": {}, "type": "object" },
+  "contracts": {
+    "channels": [],
+    "routes": {
+      "mountPath": "/api/email-accounts",
+      "paths": [
+        "/",
+        "/sync",
+        "/ai-reply",
+        "/fix-grammar",
+        "/:id",
+        "/:id/test",
+        "/:id/folders",
+        "/:id/messages",
+        "/:id/messages/:uid"
+      ]
+    },
+    "tools": ["search_mail", "read_mail_thread"],
+    "webSearchProviders": []
+  },
+  "dashboard": {
+    "actionVerbs": [],
+    "dataBindings": [
+      {
+        "description": "Number of configured email accounts (metadata only).",
+        "name": "account_count",
+        "paramShape": { "additionalProperties": false, "properties": {}, "type": "object" }
+      }
+    ]
+  },
+  "description": "IMAP/SMTP email accounts with encrypted passwords. IMAP for reading; SMTP sends only through the reviewed action flow, never as a direct chat tool.",
+  "doctorContract": { "configRepair": { "dropUnknownKeys": true }, "stateMigrations": [] },
+  "enabledByDefault": true,
+  "id": "email",
+  "name": "Email accounts",
+  "skills": [],
+  "toolMetadata": {
+    "read_mail_thread": {
+      "description": "Provided by the workspace fallback: the chat read_mail_thread tool reads from the default IMAP account when Google is not connected.",
+      "kind": "chat",
+      "providedBy": "workspace-fallback",
+      "requiresApproval": false
+    },
+    "search_mail": {
+      "description": "Provided by the workspace fallback: the chat search_mail tool reads the default IMAP account when Google is not connected.",
+      "kind": "chat",
+      "providedBy": "workspace-fallback",
+      "requiresApproval": false
+    }
+  },
+  "version": "1.0.0",
+  "writeOnly": []
+}

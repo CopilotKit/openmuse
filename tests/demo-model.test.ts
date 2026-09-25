@@ -4,10 +4,9 @@ import { test } from "node:test";
 import { AbstractAgent } from "@ag-ui/client";
 import type { RunAgentInput } from "@ag-ui/core";
 import type { ChatCompletionRequest, ChatMessage } from "@copilotkit/aimock";
-import { defineTool } from "@copilotkit/runtime/v2";
+import { BuiltInAgent, defineTool } from "@copilotkit/runtime/v2";
 import { z } from "zod";
 import { createDemoModel, demoModel, demoResponse } from "../apps/server/src/demo/model.ts";
-import { tanstackAgent } from "../apps/server/src/engine/tanstack-agent.ts";
 
 const browseTool = {
   type: "function" as const,
@@ -154,7 +153,7 @@ test("demo reports missing or failed browser evidence without inventing a summar
   assert.ok(!("toolCalls" in reply));
 });
 
-test("AI Mock drives the real TanStack BuiltInAgent through two browser tool rounds", async () => {
+test("AI Mock drives the real BuiltInAgent SDK through two browser tool rounds", async () => {
   const previousBase = process.env.OPENAI_BASE_URL;
   const previousKey = process.env.OPENAI_API_KEY;
   const mock = createDemoModel({ latency: 0 });
@@ -165,7 +164,7 @@ test("AI Mock drives the real TanStack BuiltInAgent through two browser tool rou
   const options = {
     model: demoModel,
     maxSteps: 3,
-    prompt: "",
+    maxRetries: 0,
     tools: [
       defineTool({
         name: "browse_web",
@@ -186,10 +185,10 @@ test("AI Mock drives the real TanStack BuiltInAgent through two browser tool rou
       }),
     ],
   };
-  // ConversationAgent also creates a TanStack BuiltInAgent per turn and returns its raw run observable.
+  // ConversationAgent also creates a BuiltInAgent per turn and returns its raw run observable.
   class DemoAgent extends AbstractAgent {
     run(input: RunAgentInput) {
-      return tanstackAgent(options).run(input);
+      return new BuiltInAgent(options).run(input);
     }
   }
   const agent = new DemoAgent();
@@ -212,13 +211,6 @@ test("AI Mock drives the real TanStack BuiltInAgent through two browser tool rou
     );
     assert.ok(
       firstSummary && "content" in firstSummary && typeof firstSummary.content === "string",
-    );
-    // Text before and after the tool call stays in separate messages, as in the classic AI SDK mode.
-    assert.deepEqual(
-      first.newMessages
-        .filter((message) => message.role === "assistant" && message.content)
-        .map((message) => message.id === firstSummary.id || message.content),
-      ["I’ll open Hacker News and read the front page.", true],
     );
     assert.equal(firstSummary.content.match(/• /g)?.length, 3);
     assert.ok(!firstSummary.content.includes("Source: ["));

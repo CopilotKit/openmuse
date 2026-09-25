@@ -10,6 +10,7 @@
       "!**/ios",
       "!**/android",
       "!**/.openmuse",
+      "!apps/server/src/plugins/test/fixtures/plugins/invalid-json/**",
       "!**/artifacts"
     ]
   },

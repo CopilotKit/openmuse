@@ -3,7 +3,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import { createApp } from "../apps/server/src/app.ts";
 import type { Config } from "../apps/server/src/config.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
@@ -42,7 +41,6 @@ before(async () => {
     publicUrl: "http://localhost:8787",
     dataDir: directory,
     agentBackend: "model",
-    intelligenceApiKey: "test-project-key-never-sent",
     googleRedirectUri: "http://localhost:8787/api/google/callback",
     allowedOrigins: ["http://localhost:8081"],
   };
@@ -79,26 +77,19 @@ test("agent API requires a session and reports the actual worker state", async (
   assert.equal(workspace.identity.tone, "warm");
 });
 
-test("the main Rich Thread survives reopening and concurrent initialization", async (t) => {
-  t.mock.method(
-    CopilotKitIntelligence.prototype,
-    "getOrCreateThread",
-    async (input: Parameters<CopilotKitIntelligence["getOrCreateThread"]>[0]) => ({
-      id: input.threadId,
-    }),
-  );
+test("the main Rich Thread survives reopening and concurrent initialization", async () => {
   assert.equal((await server.app.request("/api/main-thread")).status, 401);
   const responses = await Promise.all(
     Array.from({ length: 3 }, () => server.app.request("/api/main-thread", { headers: headers() })),
   );
   const threads = await Promise.all(responses.map((response) => response.json()));
   assert.ok(threads.every((thread) => thread.threadId === threads[0].threadId));
-  assert.equal(threads[0].existing, true);
+  assert.equal(threads[0].existing, false);
   const reopened = await (
     await server.app.request("/api/main-thread", { headers: headers() })
   ).json();
   assert.equal(reopened.threadId, threads[0].threadId);
-  assert.equal(reopened.existing, true);
+  assert.equal(reopened.existing, false);
   assert.equal(await db.get("other-user", "conversation-settings", "main"), null);
 });
 
@@ -315,6 +306,40 @@ test("sample monitor saves its baseline and deduplicates notifications for repea
     (await db.get<AgentNotification>("other-user", "notifications", privateNotification.id))?.read,
     false,
   );
+
+  // Test single notification deletion via POST and DELETE methods
+  const beforeDelete = await notifications();
+  assert.equal(beforeDelete.length, 2);
+  const deleteRes = await read<{ ok: boolean }>(`/notifications/${beforeDelete[0].id}/delete`, {});
+  assert.equal(deleteRes.ok, true);
+  const remaining = await notifications();
+  assert.equal(remaining.length, 1);
+  assert.equal(remaining[0].id, beforeDelete[1].id);
+
+  // Test single deletion via HTTP DELETE method
+  const httpDeleteRes = await server.app.request(`/api/agent/notifications/${remaining[0].id}`, {
+    method: "DELETE",
+    headers: headers(),
+  });
+  assert.equal(httpDeleteRes.status, 200);
+  assert.equal((await notifications()).length, 0);
+
+  // Add a notification and test clear all
+  await server.agent.notify(
+    "local-user",
+    "To Clear",
+    "Will be cleared",
+    monitor.taskId,
+    "clear-notice",
+  );
+  assert.equal((await notifications()).length, 1);
+  const clearRes = await read<{ ok: boolean; count: number }>("/notifications/clear", {});
+  assert.equal(clearRes.ok, true);
+  assert.equal(clearRes.count, 1);
+  assert.equal((await notifications()).length, 0);
+
+  // Other user's notification should remain intact
+  assert.ok(await db.get<AgentNotification>("other-user", "notifications", privateNotification.id));
 });
 
 test("live mode rejects sample sources and hides the fixture mutation endpoint", async () => {

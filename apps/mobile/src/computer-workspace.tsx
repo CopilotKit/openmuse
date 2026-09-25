@@ -20,6 +20,7 @@ import type {
   ComputerSnapshot,
 } from "../../../packages/domain/src/computer";
 import { useComputerDraft } from "./computer-drafts";
+import { setMascotSource } from "./mascot-state";
 import { Button, Card, colors, Empty, ErrorNotice, Field, LinkRow, s, timeLabel } from "./ui";
 import { useWorkspace } from "./workspace";
 
@@ -119,6 +120,10 @@ export function LinuxWorkspace({ tab }: { tab: "Terminal" | "Files" }) {
   }
   const running = snapshot?.status === "running";
   const commandRunning = executing || snapshot?.commands.some((item) => item.status === "running");
+  useEffect(() => {
+    setMascotSource("terminal", commandRunning ? "coding" : "idle");
+    return () => setMascotSource("terminal", "idle");
+  }, [commandRunning]);
   return (
     <View style={{ gap: 16 }}>
       <Card style={{ backgroundColor: colors.sky, gap: 12 }}>

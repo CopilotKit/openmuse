@@ -1,0 +1,47 @@
+{
+  "activation": "eager",
+  "catalog": {
+    "blurb": "Connect a Telegram Bot to converse with Muse from your phone, send messages, and receive agent replies.",
+    "tags": ["telegram", "bot", "messaging"],
+    "title": "Telegram Bot"
+  },
+  "categories": ["communication"],
+  "cliCommands": [],
+  "configGroups": [],
+  "configSchema": { "additionalProperties": false, "properties": {}, "type": "object" },
+  "contracts": {
+    "channels": [],
+    "routes": {
+      "mountPath": "/api/telegram",
+      "paths": ["/status", "/config", "/test"]
+    },
+    "tools": ["telegram_send_message"],
+    "webSearchProviders": []
+  },
+  "dashboard": {
+    "actionVerbs": [],
+    "dataBindings": [
+      {
+        "description": "Connection status for the Telegram bot.",
+        "name": "telegram_status",
+        "paramShape": { "additionalProperties": false, "properties": {}, "type": "object" }
+      }
+    ]
+  },
+  "description": "Direct Telegram Bot connection: chat with Muse remotely, send voice and text notes, receive proactive notifications with an authorized chat ID allowlist.",
+  "doctorContract": { "configRepair": { "dropUnknownKeys": true }, "stateMigrations": [] },
+  "enabledByDefault": false,
+  "id": "telegram",
+  "name": "Telegram Bot",
+  "skills": [],
+  "toolMetadata": {
+    "telegram_send_message": {
+      "description": "Send a direct notification message to the owner's Telegram chat.",
+      "kind": "both",
+      "providedBy": "direct",
+      "requiresApproval": true
+    }
+  },
+  "version": "1.0.0",
+  "writeOnly": []
+}

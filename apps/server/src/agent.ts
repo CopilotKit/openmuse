@@ -28,7 +28,7 @@ export function makeRuntime(
   config: Config,
   service: AgentService,
   auth: Auth,
-  intelligence: CopilotKitIntelligence,
+  intelligence?: CopilotKitIntelligence,
 ) {
   const agents: AgentsFactory = async ({ request }) => ({
     default:
@@ -49,14 +49,16 @@ export function makeRuntime(
               await auth.owner(request.headers.get("authorization") ?? undefined),
             ),
   });
-  const runtime = new CopilotRuntime({
-    agents,
-    intelligence,
-    identifyUser: async (request) => ({
-      id: await auth.owner(request.headers.get("authorization") ?? undefined),
-      name: "OpenMuse user",
-    }),
-    generateThreadNames: false,
-  });
+  const runtime = intelligence
+    ? new CopilotRuntime({
+        agents,
+        intelligence,
+        identifyUser: async (request) => ({
+          id: await auth.owner(request.headers.get("authorization") ?? undefined),
+          name: "OpenMuse user",
+        }),
+        generateThreadNames: false,
+      })
+    : new CopilotRuntime({ agents });
   return createCopilotHonoHandler({ runtime, basePath: "/api/copilotkit" });
 }

@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Square,
   Target,
+  Trash2,
   Users,
   X,
 } from "lucide-react-native";
@@ -30,11 +31,14 @@ import type {
   Evidence,
   Goal,
   Idea,
+  MemoryCandidate,
   Monitor,
   RunEvent,
 } from "../../../packages/domain/src/agent";
 import { useAgentWorkspace } from "./agent-workspace";
+import { Workboard } from "./board";
 import { ActivityScreen, ConnectionsScreen } from "./screens";
+import { SubagentsLivePanel } from "./subagent-live";
 import {
   Button,
   Card,
@@ -191,6 +195,7 @@ export function AgentActivityScreen() {
   return (
     <View style={{ gap: 20 }}>
       <AgentStatus />
+      <SubagentsLivePanel />
       <View style={[s.row, { gap: 8 }]}>
         {["All", "In progress", "Finished"].map((item) => (
           <Button key={item} small primary={filter === item} onPress={() => setFilter(item)}>
@@ -376,6 +381,7 @@ export function TaskDetail({ taskId }: { taskId: string }) {
         task ? `${statusLabel(task.status)} · ${stamp(task.updatedAt)}` : "Loading saved progress…"
       }
       onClose={close}
+      wide
     >
       <ErrorNotice error={error} />
       {!task ? (
@@ -721,7 +727,7 @@ function FinanceArtifact({ artifact }: { artifact: AgentArtifact }) {
   const period = record(artifact.data.period);
   return (
     <Card
-      style={{ gap: 12, padding: 10, backgroundColor: "#EEEEF0", maxWidth: 440, width: "100%" }}
+      style={{ gap: 12, padding: 10, backgroundColor: "#EEEEF0", maxWidth: 640, width: "100%" }}
     >
       <Pressable
         accessibilityRole="button"
@@ -1141,6 +1147,8 @@ export function GoalsScreen() {
   const [selectedGoal, setSelectedGoal] = useState<string>();
   const [selectedMonitor, setSelectedMonitor] = useState<string>();
   const [showAll, setShowAll] = useState(false);
+  // List (monitors) stays the default; Board shows the agent workboard.
+  const [boardMode, setBoardMode] = useState<"list" | "board">("list");
   const goal = data?.goals.find((item) => item.id === selectedGoal);
   const monitor = data?.monitors.find((item) => item.id === selectedMonitor);
   const monitors = data?.monitors || [];
@@ -1162,39 +1170,57 @@ export function GoalsScreen() {
             />
             <Text style={[s.heading, { color: "#189A58" }]}>Tracking</Text>
           </View>
-          <Button small icon={Plus} onPress={() => setAdding("Tracking")}>
-            Track
-          </Button>
-        </View>
-        {(showAll ? monitors : monitors.slice(0, 3)).map((item) => (
-          <Pressable
-            key={item.id}
-            accessibilityRole="button"
-            accessibilityLabel={`Open tracking: ${item.title}`}
-            onPress={() => setSelectedMonitor(item.id)}
-            style={[s.row, { gap: 12, paddingVertical: 13 }]}
-          >
-            <Square size={21} color="#A7AAAC" />
-            <View style={{ flex: 1, gap: 4 }}>
-              <Text style={s.text}>{item.title}</Text>
-              <Text numberOfLines={1} style={s.muted}>
-                {item.status === "active"
-                  ? `Checking every ${item.intervalMinutes} minutes`
-                  : statusLabel(item.status)}
-              </Text>
+          <View style={[s.row, { gap: 8 }]}>
+            <View style={[s.row, { gap: 4 }]}>
+              <Button small primary={boardMode === "list"} onPress={() => setBoardMode("list")}>
+                List
+              </Button>
+              <Button small primary={boardMode === "board"} onPress={() => setBoardMode("board")}>
+                Board
+              </Button>
             </View>
-            <ChevronRight size={18} color="#A3A6A8" />
-          </Pressable>
-        ))}
-        {!monitors.length && (
-          <Text style={[s.muted, { paddingVertical: 10 }]}>
-            Ticket prices, a reservation, a page you’re watching.
-          </Text>
-        )}
-        {monitors.length > 3 && (
-          <Button small onPress={() => setShowAll(!showAll)}>
-            {showAll ? "Show less" : `Show ${monitors.length - 3} more`}
-          </Button>
+            {boardMode === "list" && (
+              <Button small icon={Plus} onPress={() => setAdding("Tracking")}>
+                Track
+              </Button>
+            )}
+          </View>
+        </View>
+        {boardMode === "board" ? (
+          <Workboard />
+        ) : (
+          <>
+            {(showAll ? monitors : monitors.slice(0, 3)).map((item) => (
+              <Pressable
+                key={item.id}
+                accessibilityRole="button"
+                accessibilityLabel={`Open tracking: ${item.title}`}
+                onPress={() => setSelectedMonitor(item.id)}
+                style={[s.row, { gap: 12, paddingVertical: 13 }]}
+              >
+                <Square size={21} color="#A7AAAC" />
+                <View style={{ flex: 1, gap: 4 }}>
+                  <Text style={s.text}>{item.title}</Text>
+                  <Text numberOfLines={1} style={s.muted}>
+                    {item.status === "active"
+                      ? `Checking every ${item.intervalMinutes} minutes`
+                      : statusLabel(item.status)}
+                  </Text>
+                </View>
+                <ChevronRight size={18} color="#A3A6A8" />
+              </Pressable>
+            ))}
+            {!monitors.length && (
+              <Text style={[s.muted, { paddingVertical: 10 }]}>
+                Ticket prices, a reservation, a page you’re watching.
+              </Text>
+            )}
+            {monitors.length > 3 && (
+              <Button small onPress={() => setShowAll(!showAll)}>
+                {showAll ? "Show less" : `Show ${monitors.length - 3} more`}
+              </Button>
+            )}
+          </>
         )}
       </View>
       <View style={{ height: 1, backgroundColor: colors.line }} />
@@ -1618,14 +1644,45 @@ export function NotificationsSheet() {
   const { data, mutate } = useAgentWorkspace();
   const { close, open } = useWorkspace();
   const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
+
   async function read(id: string, taskId?: string) {
     try {
+      setBusyId(id);
       await mutate(`/notifications/${id}/read`, {});
       if (taskId) open({ type: "task", taskId });
     } catch (e) {
       setError(errorText(e));
+    } finally {
+      setBusyId(null);
     }
   }
+
+  async function remove(id: string) {
+    try {
+      setBusyId(id);
+      await mutate(`/notifications/${id}/delete`, {});
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function clearAll() {
+    try {
+      setClearing(true);
+      await mutate("/notifications/clear", {});
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setClearing(false);
+    }
+  }
+
+  const hasNotifications = Boolean(data?.notifications && data.notifications.length > 0);
+
   return (
     <Sheet
       title="Notifications"
@@ -1634,6 +1691,13 @@ export function NotificationsSheet() {
     >
       <View style={{ gap: 14 }}>
         <ErrorNotice error={error} />
+        {hasNotifications && (
+          <View style={{ flexDirection: "row", justifyContent: "flex-end", marginBottom: 2 }}>
+            <Button small danger icon={Trash2} busy={clearing} onPress={() => void clearAll()}>
+              Clear all
+            </Button>
+          </View>
+        )}
         {data?.notifications.map((item) => (
           <Card
             key={item.id}
@@ -1645,9 +1709,25 @@ export function NotificationsSheet() {
             </View>
             <Text style={s.muted}>{item.body}</Text>
             <Text style={s.small}>{stamp(item.createdAt)}</Text>
-            <Button small onPress={() => void read(item.id, item.taskId)}>
-              {item.taskId ? "View task" : item.read ? "Read" : "Mark read"}
-            </Button>
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+              <Button
+                small
+                busy={busyId === item.id}
+                onPress={() => void read(item.id, item.taskId)}
+                style={{ flex: 1 }}
+              >
+                {item.taskId ? "View task" : item.read ? "Read" : "Mark read"}
+              </Button>
+              <Button
+                small
+                danger
+                icon={Trash2}
+                busy={busyId === item.id}
+                onPress={() => void remove(item.id)}
+              >
+                Delete
+              </Button>
+            </View>
           </Card>
         ))}
         {!data?.notifications.length && (
@@ -1807,6 +1887,17 @@ export function AppsScreen() {
           <Card style={{ gap: 12 }}>
             <SectionHeading title="Memory" />
             <Text style={s.muted}>Context you can inspect, correct or forget.</Text>
+            {(data?.memoryCandidates ?? []).length > 0 && (
+              <>
+                <SectionHeading title="Pending" />
+                <Text style={s.muted}>
+                  Captured from your messages — approve to save, reject to discard.
+                </Text>
+                {(data?.memoryCandidates ?? []).map((item) => (
+                  <CandidateRow key={item.id} candidate={item} />
+                ))}
+              </>
+            )}
             {data?.memories.map((item) => (
               <MemoryRow key={item.id} memory={item} />
             ))}
@@ -1874,6 +1965,44 @@ function MemoryRow({ memory }: { memory: AgentMemory }) {
         )}
         <Button small danger busy={busy} onPress={() => void act(true)}>
           Forget
+        </Button>
+      </View>
+      <ErrorNotice error={error} />
+    </View>
+  );
+}
+function CandidateRow({ candidate }: { candidate: MemoryCandidate }) {
+  const { mutate } = useAgentWorkspace();
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function decide(action: "approve" | "reject") {
+    setBusy(true);
+    setError("");
+    try {
+      await mutate(`/memories/candidates/${candidate.id}`, { action });
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <View
+      style={{ gap: 8, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: colors.line }}
+    >
+      <Text style={s.text}>{candidate.text}</Text>
+      <Text style={s.small}>
+        {candidate.source} · {stamp(candidate.createdAt)}
+      </Text>
+      {candidate.conflictWith && (
+        <Text style={s.small}>Conflicts with an existing memory — review carefully.</Text>
+      )}
+      <View style={[s.row, { gap: 8 }]}>
+        <Button small primary busy={busy} onPress={() => void decide("approve")}>
+          Approve
+        </Button>
+        <Button small danger busy={busy} onPress={() => void decide("reject")}>
+          Reject
         </Button>
       </View>
       <ErrorNotice error={error} />

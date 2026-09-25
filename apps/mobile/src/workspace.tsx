@@ -10,10 +10,22 @@ import type {
   Section,
   Workspace,
 } from "../../../packages/domain/src";
-import type { MuseApi } from "./api";
+import type { MuseApi, SessionUser } from "./api";
+/** Quoted original attached to a reply draft so the compose box can ask
+ * the server for an AI-drafted reply without another round-trip. */
+export interface ReplyToSnapshot {
+  from: string;
+  sender?: string;
+  subject: string;
+  body: string;
+}
 export type Detail =
+  | { type: "account" }
   | { type: "mail"; mail: Mail }
-  | { type: "email"; draft?: Partial<EmailDraft> & { id?: string } }
+  | {
+      type: "email";
+      draft?: Partial<EmailDraft> & { id?: string; replyToSnapshot?: ReplyToSnapshot };
+    }
   | { type: "event"; event?: CalendarEvent; draft?: EventDraft; neighbors?: CalendarEvent[] }
   | { type: "file"; file: Artifact }
   | { type: "browser"; browser: BrowserSession }
@@ -22,10 +34,12 @@ export type Detail =
   | { type: "delegate" }
   | { type: "notifications" }
   | { type: "computer" }
-  | { type: "menu" };
+  | { type: "menu" }
+  | { type: "users" };
 export interface WorkspaceContextValue {
   workspace: Workspace;
   api: MuseApi;
+  sessionUser: SessionUser;
   section: Section;
   navigate: (section: Section) => void;
   refresh: () => Promise<void>;
@@ -33,6 +47,7 @@ export interface WorkspaceContextValue {
   close: () => void;
   notify: (message: string) => void;
   ask: (prompt: string) => void;
+  logout: () => Promise<void>;
 }
 export const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 export function useWorkspace() {

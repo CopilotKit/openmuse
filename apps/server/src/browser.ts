@@ -1,4 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { z } from "zod";
 import type { BrowserSession } from "../../../packages/domain/src/index.ts";
 import type { Auth } from "./auth.ts";
@@ -14,6 +16,9 @@ const sessionSchema = z.object({
   url: z.string(),
   status: z.enum(["idle", "active", "closed", "error"]),
   updatedAt: z.string(),
+  download: z
+    .object({ id: z.string(), name: z.string(), size: z.number(), mimeType: z.string() })
+    .nullish(),
 });
 const readSchema = z.object({
   url: z.string(),
@@ -87,7 +92,7 @@ export class BrowserService {
     if (!value) throw new AppError("Browser session not found", 404);
     return value;
   }
-  decorate(owner: string, session: BrowserSession) {
+  decorate(owner: string, session: z.infer<typeof sessionSchema>) {
     return {
       ...session,
       consoleUrl: this.auth.sign(owner, `/api/browsers/${session.id}/console`),
@@ -184,7 +189,7 @@ export class BrowserService {
     });
     return this.serial(id, async () => {
       signal?.throwIfAborted();
-      await this.openOwned(owner, id, url, signal);
+      const opened = await this.openOwned(owner, id, url, signal);
       signal?.throwIfAborted();
       const page = await this.readOwned(owner, id, signal);
       signal?.throwIfAborted();
@@ -193,6 +198,10 @@ export class BrowserService {
         ...page,
         text: page.text.slice(0, 30_000),
         truncated: page.truncated || page.text.length > 30_000,
+        // A navigation preempted by a file download leaves the page blank;
+        // surface the download so the agent never mistakes the previous
+        // page's content for the requested URL.
+        ...(opened.download ? { download: opened.download } : {}),
       };
     });
   }
@@ -202,6 +211,60 @@ export class BrowserService {
       return this.save(owner, await (await this.request(`/sessions/${id}/close`, {})).json(), id);
     });
   }
+  /**
+   * Full clean slate for the browser: close every owned session on the
+   * worker (best-effort — a session that is already closed or unreachable
+   * still gets its saved record removed), then drop the saved session
+   * records and chat-browser associations.
+   */
+  async restart(owner: string) {
+    const owned = await this.db.list<BrowserSession>(owner, "browsers");
+    let closedSessions = 0;
+    await Promise.all(
+      owned.map((session) =>
+        this.serial(session.id, async () => {
+          try {
+            await this.request(`/sessions/${session.id}/close`, {});
+            closedSessions += 1;
+          } catch {
+            // Already closed, unknown to the worker, or the worker is down:
+            // the saved record is still removed below.
+          }
+        }),
+      ),
+    );
+    const clearedSessions = await this.db.removeAll(owner, "browsers");
+    await this.db.removeAll(owner, "chat-browsers");
+    return { closedSessions, clearedSessions };
+  }
+  /**
+   * The owner's saved sessions, newest first, with live status from the
+   * worker when it is reachable. Stored records are the fallback so the
+   * agent can still inspect sessions while the worker is down.
+   */
+  async listSessions(owner: string) {
+    const owned = await this.db.list<BrowserSession>(owner, "browsers");
+    const liveById = new Map<string, z.infer<typeof sessionSchema>>();
+    try {
+      const response = await this.request("/sessions");
+      const parsed = z.array(sessionSchema).safeParse(await response.json());
+      if (parsed.success) for (const session of parsed.data) liveById.set(session.id, session);
+    } catch {
+      // Fall back to the stored records when the worker is unreachable.
+    }
+    return owned
+      .map((session) => {
+        const live = liveById.get(session.id);
+        return {
+          id: session.id,
+          title: live?.title ?? session.title,
+          url: live?.url ?? session.url,
+          status: live?.status ?? session.status,
+          updatedAt: live?.updatedAt ?? session.updatedAt,
+        };
+      })
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
   async preview(owner: string, id: string) {
     await this.get(owner, id);
     return this.request(`/sessions/${id}/screenshot`);
@@ -209,11 +272,51 @@ export class BrowserService {
   async input(owner: string, id: string, value: unknown) {
     return this.serial(id, async () => {
       await this.get(owner, id);
+      // The dashboard agent's tool schema names the typing action "type";
+      // the worker speaks "text". Translate at this choke point so every
+      // caller (agent tools, tests, future routes) sends valid input.
+      const record = value as Record<string, unknown> | null;
+      const payload =
+        record !== null && typeof record === "object" && record.type === "type"
+          ? { ...record, type: "text" }
+          : value;
       return this.save(
         owner,
-        await (await this.request(`/sessions/${id}/input`, value)).json(),
+        await (await this.request(`/sessions/${id}/input`, payload)).json(),
         id,
       );
+    });
+  }
+  async snapshot(owner: string, id: string) {
+    await this.get(owner, id);
+    return (await this.request(`/sessions/${id}/snapshot`)).json();
+  }
+  /** Capture the session's current page as PNG bytes. */
+  async screenshot(owner: string, id: string) {
+    await this.get(owner, id);
+    return new Uint8Array(await (await this.request(`/sessions/${id}/screenshot`)).arrayBuffer());
+  }
+  /**
+   * Fill a login form in the session with a decrypted credential. The values
+   * travel only over the authenticated worker channel; they are never logged
+   * or returned to callers beyond the worker's receipt. The worker enforces
+   * the expected domain independently before typing anything.
+   */
+  async fillLogin(
+    owner: string,
+    id: string,
+    username: string,
+    password: string,
+    expectedDomain: string,
+  ) {
+    return this.serial(id, async () => {
+      await this.get(owner, id);
+      const payload = await (
+        await this.request(`/sessions/${id}/fill`, { username, password, expectedDomain })
+      ).json();
+      const receipt = z.object({ filled: z.boolean(), submitted: z.boolean() }).parse(payload);
+      await this.save(owner, payload, id);
+      return receipt;
     });
   }
   async imports(owner: string, id: string) {
@@ -254,4 +357,42 @@ export class BrowserService {
   console(owner: string, id: string) {
     return browserConsole(this.auth.sign(owner, `/api/browsers/${id}/preview`));
   }
+}
+
+const MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Keep a screenshot as durable evidence under DATA_DIR (0700 dir, 0600 file),
+ * next to the app's other owner-scoped data. Chat never receives the image
+ * bytes: the model gets a path plus size, which is what it can act on.
+ */
+export async function saveScreenshot(
+  dataDir: string,
+  owner: string,
+  kind: "browser" | "desktop",
+  bytes: Uint8Array,
+  extra: Record<string, unknown> = {},
+): Promise<Record<string, unknown>> {
+  if (bytes.length > MAX_SCREENSHOT_BYTES) {
+    return {
+      error: `The screenshot is ${Math.round(bytes.length / 1024 / 1024)} MB, over the ${Math.round(
+        MAX_SCREENSHOT_BYTES / 1024 / 1024,
+      )} MB evidence cap. Try again without fullPage.`,
+    };
+  }
+  const ownerHash = createHash("sha256").update(owner).digest("hex").slice(0, 24);
+  const directory = join(dataDir, "desktop-screenshots", ownerHash);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const capturedAt = new Date();
+  const stamp = capturedAt.toISOString().replace(/[:.]/g, "-");
+  const path = join(directory, `${stamp}-${kind}.png`);
+  await writeFile(path, bytes, { mode: 0o600 });
+  return {
+    kind: `${kind}-screenshot`,
+    path,
+    bytes: bytes.length,
+    capturedAt: capturedAt.toISOString(),
+    ...extra,
+    note: "Saved on the OpenMuse host as a PNG file; the image itself is not attached to this conversation.",
+  };
 }

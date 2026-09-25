@@ -15,7 +15,7 @@ export function FileThreadCard({ file }: { file: Artifact }) {
       accessibilityRole="button"
       accessibilityLabel={`Open PDF: ${file.name}`}
       onPress={() => open({ type: "file", file })}
-      style={{ width: "100%", maxWidth: 440 }}
+      style={{ width: "100%", maxWidth: 640 }}
     >
       <Card style={{ padding: 18, backgroundColor: "#F0F1F2", gap: 18 }}>
         <View style={{ borderRadius: 12, padding: 22, backgroundColor: "#FFF", gap: 14 }}>

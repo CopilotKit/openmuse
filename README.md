@@ -1,8 +1,8 @@
   <div align="center">
 
-# OpenMuse
+# Beli
 
-**A personal agent with a browser, terminal, files, and work that keeps going. Compatible with any agent harness.**
+**Beli means "friend". A personal agent with a browser, terminal, files, and work that keeps going. Compatible with any agent harness.**
 
 Ask for an outcome. Follow the plan, review actions, and come back to the result.
 Built with CopilotKit React Native for iOS, Android, and web.
@@ -14,7 +14,7 @@ Built with CopilotKit React Native for iOS, Android, and web.
 
 Clone this template and customize it however you want.
 
-**[Building on OpenMuse? Meet with the CopilotKit team →](https://www.copilotkit.ai/openmuse)**
+> **Public fork notice:** This is `onlinegill/beli`, a fork of CopilotKit OpenMuse. It adds the Beli personal-agent extensions described below and is not an official CopilotKit release. Upstream OpenMuse remains the source of truth for the original project.
 
 [![OpenMuse 🪁 — Ask it to browse. Watch the 38-second mobile demo.](assets/demos/2026-09-16/mobile.png)](assets/demos/2026-09-16/mobile.mp4)
 
@@ -26,7 +26,31 @@ Clone this template and customize it however you want.
 
 </div>
 
+## Credits
+
+This project is based on and inspired by OpenMuse, originally developed by CopilotKit.
+OpenMuse: https://github.com/CopilotKit/OpenMuse
+Thank you to the CopilotKit team and OpenMuse contributors for making their work open source.
+
+Fork modifications are Copyright (c) 2026 Sukhpal Gill and are released under the MIT License.
+
 > **Alpha, for self-hosting and building on.** Open-ended reasoning, live Google accounts, and CopilotKit Rich Threads require their own configuration. See [what is verified](docs/VERIFICATION.md) and the [roadmap](ROADMAP.md).
+
+**[Build with OpenMuse →](https://go.copilotkit.ai/engineering-openmuse)**
+
+## Latest changes
+
+**Updated September 24, 2026.** This fork extends the upstream application with:
+
+- Plugin and skill discovery, validation, routing, and per-plugin configuration.
+- Provider and model settings backed by encrypted credential storage.
+- Durable personal context, memory, persona, and background-update preferences.
+- Subagents, tool policy enforcement, MCP support, and voice notes.
+- Connector management for email, Telegram, and WhatsApp.
+- Durable automations, heartbeat scheduling, and workboard workflows.
+- User/session management and expanded native navigation and settings.
+
+[Compare Beli with upstream OpenMuse](https://github.com/CopilotKit/openmuse/compare/main...onlinegill:main?expand=1). The comparison is intended to make the fork's changes visible; it is not a claim that every subsystem is ready for upstream review.
 
 ## Demo
 
@@ -55,22 +79,19 @@ The computer combines **persistent Chromium and an optional Linux workspace**. T
 | **Finance** | Import transaction CSV to create a spending summary with categories, transactions, and a savings-goal action. |
 | **Gmail & Calendar** | Google OAuth adapters, complete mail threads, drafts/attachments, calendar discovery, and reviewed event creation/update/deletion. Live credentials required. |
 | **Personal context** | Editable name, tone, avatar, and memories. Background-update preferences and durable in-app notifications. |
-| **Rich Threads** | CopilotKit Intelligence persistence in every mode, with a stable main conversation, side chats, renaming, archiving, restoring, and replay. A server-only project key is required. |
+| **Rich Threads** | CopilotKit Intelligence persistence for live deployments, with a stable main conversation, side chats, renaming, archiving, restoring, and replay. A server-only project key is required in live mode; sample mode uses local history. |
 
 The [feature inventory](docs/FEATURES.md) describes implemented capabilities and planned extensions. Health/bank/social connectors, device push, voice, generated executable tools, and automatic reservations/payments are on the [roadmap](ROADMAP.md).
 
 ## Quick start
 
-**Requirements:** Node 24 LTS, pnpm 11.19.0, and a CopilotKit Intelligence project key. The local sample app needs no model, Google account, or Docker.
+**Requirements:** Node 24 LTS and pnpm 11.19.0. The local sample app needs no model, Google account, Docker, or Intelligence subscription.
 
 ```sh
 git clone https://github.com/CopilotKit/OpenMuse.git openmuse
 cd openmuse
 pnpm install --frozen-lockfile
 cp .env.example .env
-npx copilotkit@latest login
-npx copilotkit@latest project select
-# Set CPK_INTELLIGENCE_API_KEY in .env to the generated server-only project key.
 pnpm dev
 ```
 
@@ -80,14 +101,14 @@ In another terminal:
 pnpm dev:web
 ```
 
-Open [localhost:8081](http://localhost:8081). The API runs at [localhost:8787/api/health](http://localhost:8787/api/health).
+Open [localhost:8090](http://localhost:8090). The API runs at [localhost:8787/api/health](http://localhost:8787/api/health).
 
 ### Try it
 
 1. In Chat, send **“Complete the permission slip”**. Open the task, supply fictional form values, inspect the saved PDF, and review the prepared reply. This writes only to the local mailbox.
 2. In **Goals → Track**, create a built-in availability watch, then change the built-in test page to trigger an alert.
 3. In **Menu → Delegate task → Finance**, use **Try example transactions** to create an interactive spending tracker.
-4. Start the [browser worker](#browser-worker) and configure a model, then ask **“Check out Hacker News for cool stuff”** or **“Summarize copilotkit.ai”**. Follow the browser inline and use **Take control** to open its session. For a model-free version of this flow, follow the [AI Mock demo setup](docs/DEMO.md#run-the-agent-browser-demo).
+4. Start the [browser worker](#browser-worker) and configure a model, then ask **“Check out Hacker News for cool stuff”** or **“Summarize copilotkit.ai”**. Follow the browser inline and use **Take control** to open its session. For a key-free version of this flow, follow the [AI Mock demo setup](docs/DEMO.md#run-the-agent-browser-demo).
 
 For iOS or Android, use `pnpm --dir apps/mobile ios` or `pnpm --dir apps/mobile android`. Xcode or Android tooling is required. The PDF reader needs an Expo development build; use [native setup](apps/mobile/README.md).
 
@@ -137,9 +158,9 @@ No hidden retry occurs after an uncertain external write. Review its provider ou
 
 ## CopilotKit Rich Threads
 
-Every deployment requires `CPK_INTELLIGENCE_API_KEY` on the API server for CopilotKit Intelligence conversation persistence and replay. Create or select a project with `npx copilotkit@latest login` and `npx copilotkit@latest project select`, set the generated server-only key, and restart the API. The native menu uses `useThreads`; rich tool results link back to saved tasks, documents, and browser sessions.
+Live deployments require `CPK_INTELLIGENCE_API_KEY` on the API server for CopilotKit Intelligence conversation persistence and replay. Create or select a project with `npx copilotkit@latest login` and `npx copilotkit@latest project select`, set the generated server-only key, and restart the API. The native menu uses `useThreads`; rich tool results link back to saved tasks, documents, and browser sessions.
 
-Intelligence is a separate service and is not included in this repository's MIT license. No project key is shipped. [Configuration and validation boundaries](docs/RICH-THREADS.md).
+Sample mode can leave the key unset and keeps one conversation in the local database. Intelligence is a separate service and is not included in this repository's MIT license. No project key is shipped. [Configuration and validation boundaries](docs/RICH-THREADS.md).
 
 ## Architecture
 
@@ -147,7 +168,7 @@ Intelligence is a separate service and is not included in this repository's MIT 
 flowchart TD
   Client[Expo / React Native / Web] -->|AG-UI and authenticated API| API[Hono + CopilotKit runtime]
   API --> Tasks[Durable task worker]
-  API --> Threads[CopilotKit Intelligence required in every mode]
+  API --> Threads[CopilotKit Intelligence required in live mode]
   API --> Store[(PGlite or PostgreSQL)]
   Tasks --> Store
   Tasks --> Review[Stored action review]
@@ -197,4 +218,4 @@ Platform build scripts export JavaScript/Hermes bundles; they do not produce sig
 
 Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), [ROADMAP.md](ROADMAP.md), and the [security policy](SECURITY.md).
 
-MIT licensed. Built by CopilotKit. Its original interface and fictional assets are included. Website, email, and document content supplies evidence, not permission to act.
+MIT licensed. OpenMuse is not an official CopilotKit product. Its original interface and fictional assets are included. Website, email, and document content supplies evidence, not permission to act.

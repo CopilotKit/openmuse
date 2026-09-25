@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { nextCronRun } from "./cron.ts";
 
 export type TaskStatus =
   | "queued"
@@ -10,6 +11,51 @@ export type TaskStatus =
   | "succeeded"
   | "failed"
   | "cancelled";
+/** Kanban columns of the agent workboard. */
+export type CardStatus = "backlog" | "todo" | "doing" | "review" | "done" | "failed";
+export const CARD_STATUSES: readonly CardStatus[] = [
+  "backlog",
+  "todo",
+  "doing",
+  "review",
+  "done",
+  "failed",
+];
+export type CardPriority = "low" | "medium" | "high";
+/**
+ * A workboard card: a unit of agent work tracked on the Kanban board.
+ * Backed by the generic store (kind "workboard-cards"), owner-scoped.
+ * Card text is plain text only — never rendered as HTML.
+ */
+export interface WorkboardCard {
+  id: string;
+  title: string;
+  description: string;
+  status: CardStatus;
+  priority: CardPriority;
+  labels: string[];
+  goalId?: string;
+  /** Task worker task id, set when the card is dispatched in task mode. */
+  taskId?: string;
+  /** Fan-out id, set when the card is dispatched in fanout mode. */
+  fanoutId?: string;
+  /** Child card ids created by a fanout dispatch. */
+  childCardIds: string[];
+  /** Set on cards created by a fanout dispatch. */
+  parentCardId?: string;
+  createdBy: "user" | "agent";
+  /** Ordering within a column; assigned as max+1 on create. */
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+/** The workboard.cards.list/stats binding shape: one call renders the board. */
+export interface WorkboardStats {
+  total: number;
+  byStatus: Record<CardStatus, number>;
+  /** Cards in doing + review. */
+  active: number;
+}
 export interface Evidence {
   id: string;
   kind: "mail" | "file" | "web" | "user";
@@ -27,7 +73,7 @@ export interface AgentTask {
   id: string;
   title: string;
   prompt: string;
-  kind: "agent" | "document" | "monitor" | "finance" | "plan";
+  kind: "agent" | "document" | "monitor" | "finance" | "plan" | "scheduled";
   status: TaskStatus;
   goalId?: string;
   plan: TaskStep[];
@@ -79,6 +125,21 @@ export interface Monitor {
   error?: string;
   checks: number;
 }
+export interface Schedule {
+  id: string;
+  taskId: string;
+  title: string;
+  cron: string;
+  timezone: string;
+  prompt: string;
+  status: "active" | "paused" | "stopped";
+  nextRunAt: string;
+  lastRunAt?: string;
+  lastResult?: string;
+  error?: string;
+  runs: number;
+  createdAt: string;
+}
 export interface Idea {
   id: string;
   title: string;
@@ -95,6 +156,21 @@ export interface AgentMemory {
   id: string;
   text: string;
   source: string;
+  createdAt: string;
+}
+/**
+ * A "remember this" moment captured from a user turn, awaiting human review.
+ * Additive: AgentMemory is untouched. Candidates live under the
+ * "memory-candidates" store kind with status "pending" and are NEVER written
+ * into "memories" except by an explicit authenticated approveCandidate() call.
+ */
+export interface MemoryCandidate {
+  id: string;
+  text: string;
+  source: string;
+  status: "pending" | "approved" | "rejected";
+  /** Id of an existing memory this candidate contradicts, when detected. */
+  conflictWith?: string;
   createdAt: string;
 }
 export interface AgentArtifact {
@@ -124,8 +200,10 @@ export interface AgentWorkspace {
   tasks: AgentTask[];
   goals: Goal[];
   monitors: Monitor[];
+  schedules: Schedule[];
   ideas: Idea[];
   memories: AgentMemory[];
+  memoryCandidates: MemoryCandidate[];
   artifacts: AgentArtifact[];
   notifications: AgentNotification[];
   identity: AgentIdentity;
@@ -134,11 +212,55 @@ export interface AgentWorkspace {
 export const createTaskSchema = z.object({
   title: z.string().trim().min(1).max(160).optional(),
   prompt: z.string().trim().min(1).max(12000),
-  kind: z.enum(["agent", "document", "monitor", "finance", "plan"]).default("agent"),
+  kind: z.enum(["agent", "document", "monitor", "finance", "plan", "scheduled"]).default("agent"),
   goalId: z.string().optional(),
   input: z.record(z.string(), z.unknown()).default({}),
 });
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
+export const MAX_SUBAGENTS = 5;
+export const spawnSubagentsSchema = z.object({
+  purpose: z.string().trim().min(1).max(160).optional(),
+  goalId: z.string().optional(),
+  subagents: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1).max(120),
+        prompt: z.string().trim().min(1).max(12000),
+      }),
+    )
+    .min(1)
+    .max(MAX_SUBAGENTS),
+});
+export type SpawnSubagentsInput = z.infer<typeof spawnSubagentsSchema>;
+/**
+ * Reviewed-action payload for a workboard fan-out dispatch requested from
+ * chat. The agent proposes; the owner approves in the app; approval executes
+ * the dispatch via WorkboardService. All parameters are pinned at propose
+ * time so the approval applies to the exact details shown.
+ */
+export const workboardDispatchSchema = z.object({
+  kind: z.literal("workboard.dispatch"),
+  data: z.object({
+    cardId: z.string().min(1).max(200),
+    cardTitle: z.string().trim().min(1).max(160),
+    mode: z.enum(["task", "fanout"]),
+    /** Fully-resolved task prompt (card text wrapped as data), for task mode. */
+    prompt: z.string().trim().min(1).max(12000).optional(),
+    goalId: z.string().min(1).max(200).optional(),
+    purpose: z.string().trim().max(160).optional(),
+    subagents: z
+      .array(
+        z.object({
+          label: z.string().trim().min(1).max(120),
+          prompt: z.string().trim().min(1).max(12000),
+        }),
+      )
+      .min(1)
+      .max(MAX_SUBAGENTS)
+      .optional(),
+  }),
+});
+export type WorkboardDispatchInput = z.infer<typeof workboardDispatchSchema>;
 export const monitorInputSchema = z
   .object({
     title: z.string().min(1).max(160),
@@ -162,3 +284,21 @@ export const goalInputSchema = z.object({
   category: z.string().max(80).default("Personal"),
   milestones: z.array(z.string().min(1).max(200)).max(20).default([]),
 });
+export const scheduleInputSchema = z
+  .object({
+    title: z.string().min(1).max(160),
+    prompt: z.string().trim().min(1).max(12000),
+    cron: z.string().trim().min(1).max(100),
+    timezone: z.string().trim().min(1).max(80).default("America/Chicago"),
+  })
+  .superRefine((v, c) => {
+    try {
+      nextCronRun(v.cron, v.timezone, new Date());
+    } catch (error) {
+      c.addIssue({
+        code: "custom",
+        message: error instanceof Error ? error.message : "Invalid schedule",
+      });
+    }
+  });
+export type ScheduleInput = z.infer<typeof scheduleInputSchema>;

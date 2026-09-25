@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Artifact } from "../../../packages/domain/src/index.ts";
 import { fillPdf, inspectPdf } from "../../../packages/integrations/src/pdf.ts";
@@ -61,6 +61,17 @@ export class Files {
   async bytes(owner: string, id: string) {
     await this.get(owner, id);
     return readFile(join(this.config.dataDir, "files", `${id}.pdf`));
+  }
+  async delete(owner: string, id: string): Promise<void> {
+    // Ownership is enforced by get(): it throws for missing or foreign records.
+    await this.get(owner, id);
+    await this.db.remove(owner, "files", id);
+    try {
+      await unlink(join(this.config.dataDir, "files", `${id}.pdf`));
+    } catch (error) {
+      // A missing byte file must not block history deletion.
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+    }
   }
   async fill(owner: string, id: string, values: Record<string, string | boolean>) {
     const file = await this.get(owner, id);

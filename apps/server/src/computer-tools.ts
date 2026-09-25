@@ -6,6 +6,13 @@ import {
   computerPathSchema,
   computerWriteSchema,
 } from "./computer.ts";
+import {
+  bindingOf,
+  evaluateToolPolicy,
+  type PolicyBase,
+  policyError,
+  sessionIdOf,
+} from "./engine/tool-policy.ts";
 import type { Files } from "./files.ts";
 
 export const computerInstructions =
@@ -16,7 +23,17 @@ export function computerTools(
   files: Files,
   owner: string,
   scope: string,
-  options: { before?: () => Promise<void>; signal?: AbortSignal } = {},
+  options: {
+    before?: () => Promise<void>;
+    signal?: AbortSignal;
+    /** Extra policy context (task/thread binding, login-words flag, approval token, hooks). */
+    policy?: Partial<
+      Pick<
+        PolicyBase,
+        "taskId" | "threadId" | "userLoginWords" | "approvalToken" | "hooks" | "loopClosed"
+      >
+    >;
+  } = {},
 ) {
   const tool = <T extends z.ZodType>(
     name: string,
@@ -31,7 +48,31 @@ export function computerTools(
       execute: async (args) => {
         try {
           await options.before?.();
-          return await action(parameters.parse(args));
+          const parsed = parameters.parse(args);
+          // Policy runs after argument parsing, before the handler.
+          const sessionId = sessionIdOf(parsed);
+          const verdict = await evaluateToolPolicy({
+            owner,
+            toolName: name,
+            args: parsed,
+            scope,
+            taskId: options.policy?.taskId,
+            threadId: options.policy?.threadId,
+            sessionId,
+            binding: bindingOf({
+              scope,
+              taskId: options.policy?.taskId,
+              threadId: options.policy?.threadId,
+              sessionId,
+            }),
+            signal: options.signal,
+            loopClosed: options.policy?.loopClosed,
+            userLoginWords: options.policy?.userLoginWords,
+            approvalToken: options.policy?.approvalToken,
+            hooks: options.policy?.hooks,
+          });
+          if (verdict.kind !== "allow") return { error: policyError(name, verdict) };
+          return await action(parsed);
         } catch (error) {
           return { error: error instanceof Error ? error.message : "Computer operation failed" };
         }

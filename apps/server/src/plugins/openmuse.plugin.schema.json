@@ -1,0 +1,254 @@
+{
+  "$id": "https://openmuse.dev/schemas/openmuse.plugin.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Manifest convention for OpenMuse plugins (capabilities). One folder + one manifest per capability; a Hono-native loader/registry replaces hand-wiring. `writeOnly` and `skills` are OpenMuse extensions.",
+  "properties": {
+    "activation": {
+      "description": "eager = activated at startup; lazy = activated on first use.",
+      "enum": ["eager", "lazy"],
+      "type": "string"
+    },
+    "catalog": {
+      "additionalProperties": false,
+      "properties": {
+        "blurb": { "maxLength": 500, "minLength": 1, "type": "string" },
+        "tags": { "items": { "maxLength": 64, "type": "string" }, "type": "array" },
+        "title": { "maxLength": 120, "minLength": 1, "type": "string" }
+      },
+      "required": ["title", "blurb", "tags"],
+      "type": "object"
+    },
+    "categories": {
+      "items": { "maxLength": 64, "minLength": 1, "type": "string" },
+      "minItems": 1,
+      "type": "array"
+    },
+    "cliCommands": {
+      "description": "CLI command names contributed by the plugin. \"..\" segments are rejected.",
+      "items": { "type": "string" },
+      "type": "array"
+    },
+    "configGroups": {
+      "description": "Named settings groups. Every group must be referenced by at least one configSchema property's \"group\" keyword.",
+      "items": { "maxLength": 64, "minLength": 1, "type": "string" },
+      "type": "array"
+    },
+    "configSchema": {
+      "description": "JSON-Schema subset describing the plugin's per-owner settings. Properties may use the OpenMuse extensions \"widget\" (e.g. \"password\") and \"group\".",
+      "properties": {
+        "additionalProperties": { "const": false },
+        "properties": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[a-zA-Z][a-zA-Z0-9_]{1,63}$": {
+              "properties": {
+                "default": {},
+                "description": { "type": "string" },
+                "enum": { "type": "array" },
+                "format": { "enum": ["email", "uri", "hostname"], "type": "string" },
+                "group": {
+                  "description": "OpenMuse extension: must name an entry of configGroups.",
+                  "type": "string"
+                },
+                "maxLength": { "minimum": 1, "type": "integer" },
+                "maximum": { "type": "number" },
+                "minLength": { "minimum": 0, "type": "integer" },
+                "minimum": { "type": "number" },
+                "pattern": { "type": "string" },
+                "title": { "type": "string" },
+                "type": {
+                  "enum": ["string", "number", "integer", "boolean", "array", "object"],
+                  "type": "string"
+                },
+                "widget": {
+                  "description": "OpenMuse extension: hints the settings UI. writeOnly fields MUST use \"password\".",
+                  "enum": ["text", "textarea", "password", "number", "switch", "select"],
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "required": { "items": { "type": "string" }, "type": "array" },
+        "type": { "const": "object" }
+      },
+      "required": ["type", "properties"],
+      "type": "object"
+    },
+    "contracts": {
+      "additionalProperties": false,
+      "properties": {
+        "channels": {
+          "description": "Delivery channels the plugin can use (informational).",
+          "items": { "type": "string" },
+          "type": "array"
+        },
+        "routes": {
+          "additionalProperties": false,
+          "properties": {
+            "mountPath": {
+              "description": "Where the plugin's Hono sub-app is mounted.",
+              "pattern": "^/api/[a-z0-9/_-]+$",
+              "type": "string"
+            },
+            "paths": {
+              "description": "Informational list of route paths the sub-app serves.",
+              "items": { "type": "string" },
+              "type": "array"
+            }
+          },
+          "required": ["mountPath", "paths"],
+          "type": "object"
+        },
+        "tools": {
+          "description": "Agent tool names this plugin provides. Each must be registered by plugin.ts via ctx.registerTools(), unless its toolMetadata.providedBy is \"workspace-fallback\".",
+          "items": { "pattern": "^[a-z][a-z0-9_]{1,63}$", "type": "string" },
+          "type": "array"
+        },
+        "webSearchProviders": {
+          "description": "Web-search providers contributed by this plugin, if any.",
+          "items": { "type": "string" },
+          "type": "array"
+        }
+      },
+      "required": ["tools", "routes", "channels", "webSearchProviders"],
+      "type": "object"
+    },
+    "dashboard": {
+      "additionalProperties": false,
+      "properties": {
+        "actionVerbs": {
+          "description": "Dashboard action verbs (informational for now).",
+          "items": { "type": "string" },
+          "type": "array"
+        },
+        "dataBindings": {
+          "description": "Read-only, owner-scoped data exposed at POST /api/plugins/:id/invoke. No WebSocket. Handlers must return metadata only, never secrets.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "description": { "maxLength": 500, "type": "string" },
+              "name": { "pattern": "^[a-z][a-zA-Z0-9_]{1,63}$", "type": "string" },
+              "paramShape": {
+                "description": "JSON-Schema subset validated on POST /api/plugins/:id/invoke.",
+                "type": "object"
+              }
+            },
+            "required": ["name", "paramShape"],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["dataBindings", "actionVerbs"],
+      "type": "object"
+    },
+    "description": { "maxLength": 2000, "minLength": 1, "type": "string" },
+    "doctorContract": {
+      "additionalProperties": false,
+      "properties": {
+        "configRepair": {
+          "additionalProperties": false,
+          "properties": {
+            "dropUnknownKeys": {
+              "description": "When true, unknown stored config keys are dropped with a warning instead of failing startup.",
+              "type": "boolean"
+            }
+          },
+          "required": ["dropUnknownKeys"],
+          "type": "object"
+        },
+        "stateMigrations": {
+          "description": "Each migration runs once per plugin (recorded in plugin state). A failure blocks only that plugin.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "description": { "maxLength": 500, "type": "string" },
+              "id": { "pattern": "^[a-z][a-z0-9-]{1,63}$", "type": "string" }
+            },
+            "required": ["id", "description"],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["stateMigrations", "configRepair"],
+      "type": "object"
+    },
+    "enabledByDefault": { "type": "boolean" },
+    "id": {
+      "description": "Stable plugin id, e.g. \"email\". Lowercase letters, digits, dashes.",
+      "pattern": "^[a-z][a-z0-9-]{1,63}$",
+      "type": "string"
+    },
+    "name": { "maxLength": 120, "minLength": 1, "type": "string" },
+    "skills": {
+      "description": "OpenMuse extension (stub for AgentSkills): skill-folder paths relative to the plugin folder. \"..\" segments are rejected.",
+      "items": { "type": "string" },
+      "type": "array"
+    },
+    "toolMetadata": {
+      "additionalProperties": false,
+      "description": "Per-tool metadata. Every name in contracts.tools must have an entry.",
+      "patternProperties": {
+        "^[a-z][a-z0-9_]{1,63}$": {
+          "additionalProperties": false,
+          "properties": {
+            "description": { "maxLength": 500, "type": "string" },
+            "kind": {
+              "description": "Where the tool is registered: chat agent, durable worker, or both.",
+              "enum": ["chat", "worker", "both"],
+              "type": "string"
+            },
+            "providedBy": {
+              "description": "direct = registered by plugin.ts; workspace-fallback = served by an existing engine path (no registration required).",
+              "enum": ["direct", "workspace-fallback"],
+              "type": "string"
+            },
+            "requiresApproval": {
+              "description": "Declares the tool needs an owner approval. REQUIRED to be true for any tool whose name contains send, fill, login or delete — the loader refuses manifests that violate this.",
+              "type": "boolean"
+            }
+          },
+          "required": ["requiresApproval", "kind", "providedBy"],
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "version": {
+      "description": "Semver, e.g. \"1.0.0\".",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$",
+      "type": "string"
+    },
+    "writeOnly": {
+      "description": "OpenMuse extension: config keys that are never rendered back, never logged, and stored encrypted. Each must be a configSchema property with widget \"password\".",
+      "items": { "type": "string" },
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "description",
+    "version",
+    "categories",
+    "enabledByDefault",
+    "activation",
+    "contracts",
+    "toolMetadata",
+    "configGroups",
+    "configSchema",
+    "writeOnly",
+    "skills",
+    "cliCommands",
+    "dashboard",
+    "doctorContract",
+    "catalog"
+  ],
+  "title": "OpenMuse plugin manifest",
+  "type": "object"
+}

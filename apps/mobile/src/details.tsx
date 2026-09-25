@@ -9,17 +9,20 @@ import {
   ExternalLink,
   FileText,
   Globe2,
+  LogOut,
   Mail as MailIcon,
   Reply,
   RotateCw,
   Save,
   Send,
   ShieldCheck,
+  Sparkles,
   Trash2,
+  Wand2,
   X,
 } from "lucide-react-native";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Image, Linking, Platform, Text, View } from "react-native";
+import { ActivityIndicator, Image, Linking, Platform, Text, TextInput, View } from "react-native";
 import {
   type ActionProposal,
   type Artifact,
@@ -38,6 +41,8 @@ import { browserAddress, browserSite } from "./browser-address";
 import { ComputerSheet } from "./computer";
 import DateTimeEditor from "./DateTimeEditor";
 import { localDateTime, zonedInstant } from "./date-time";
+import EmailBody from "./EmailBody";
+import { setMascotSource } from "./mascot-state";
 import PdfReader from "./PdfReader";
 import {
   Button,
@@ -49,6 +54,7 @@ import {
   Empty,
   ErrorNotice,
   Field,
+  IconButton,
   LinkRow,
   resultSummary,
   SectionHeading,
@@ -56,10 +62,66 @@ import {
   s,
   timeLabel,
 } from "./ui";
-import { type Detail, useWorkspace } from "./workspace";
+import { UsersScreen } from "./users";
+import { type Detail, type ReplyToSnapshot, useWorkspace } from "./workspace";
+
+function AccountSheet() {
+  const { sessionUser, logout, close } = useWorkspace();
+  return (
+    <Sheet
+      title="Account & Session"
+      subtitle="Manage your current OpenMuse session."
+      onClose={close}
+    >
+      <Card style={{ gap: 14 }}>
+        <View style={[s.row, { gap: 12, alignItems: "center" }]}>
+          <View
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 24,
+              backgroundColor: colors.sky,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text style={{ fontSize: 20, fontWeight: "700", color: colors.blueDark }}>
+              {sessionUser.username.slice(0, 1).toUpperCase()}
+            </Text>
+          </View>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text }}>
+              @{sessionUser.username}
+            </Text>
+            <View style={[s.row, { gap: 8, alignItems: "center" }]}>
+              <Chip tint={sessionUser.role === "admin" ? colors.blueDark : undefined}>
+                {sessionUser.role.toUpperCase()}
+              </Chip>
+              <Text style={{ fontSize: 12, color: colors.muted }}>Active session</Text>
+            </View>
+          </View>
+        </View>
+        <View style={{ height: 1, backgroundColor: colors.line, marginVertical: 4 }} />
+        <Button
+          icon={LogOut}
+          danger
+          onPress={() => {
+            close();
+            void logout();
+          }}
+        >
+          Log out
+        </Button>
+      </Card>
+    </Sheet>
+  );
+}
+
 export function Details({ detail }: { detail: Detail }) {
   const { close, navigate } = useWorkspace();
+  if (detail.type === "account") return <AccountSheet />;
   if (detail.type === "computer") return <ComputerSheet />;
+  if (detail.type === "users") return <UsersScreen />;
   if (detail.type === "task") return <TaskDetail taskId={detail.taskId} />;
   if (detail.type === "delegate") return <DelegateSheet />;
   if (detail.type === "notifications") return <NotificationsSheet />;
@@ -157,9 +219,7 @@ function MailDetail({ mail: m }: { mail: Mail }) {
             </Text>
           </View>
           <View style={s.divider} />
-          <Text selectable style={[s.text, { lineHeight: 25 }]}>
-            {message.body}
-          </Text>
+          <EmailBody html={message.bodyHtml} text={message.body} />
           {message.attachments.map((id) => {
             const file = w.files.find((f) => f.id === id);
             return file ? (
@@ -201,6 +261,14 @@ function MailDetail({ mail: m }: { mail: Mail }) {
               attachmentIds: [],
               threadId: m.threadId,
               replyToMessageId: m.id,
+              // Snapshot of the original so the compose box can ask the
+              // server for an AI-drafted reply without another round-trip.
+              replyToSnapshot: {
+                from: m.from,
+                sender: m.sender,
+                subject: m.subject,
+                body: m.body.slice(0, 4000),
+              },
             },
           })
         }
@@ -210,7 +278,12 @@ function MailDetail({ mail: m }: { mail: Mail }) {
     </Sheet>
   );
 }
-function EmailEditor({ draft }: { draft?: Partial<EmailDraft> & { id?: string } }) {
+/** Draft opened from the mail UI, plus the quoted original for AI replies. */
+type ComposeDraft = Partial<EmailDraft> & {
+  id?: string;
+  replyToSnapshot?: ReplyToSnapshot;
+};
+function EmailEditor({ draft }: { draft?: ComposeDraft }) {
   const { workspace: w, api, refresh, open, close, notify } = useWorkspace();
   const [to, setTo] = useState(draft?.to?.join(", ") || "");
   const [cc, setCc] = useState(draft?.cc?.join(", ") || "");
@@ -220,6 +293,42 @@ function EmailEditor({ draft }: { draft?: Partial<EmailDraft> & { id?: string } 
   const [attachments, setAttachments] = useState(draft?.attachmentIds || []);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  function fail(e: unknown) {
+    setError(e instanceof Error ? e.message : String(e));
+  }
+  /** Ask the server to draft a reply to the quoted original message. */
+  async function aiReply() {
+    if (!draft?.replyToSnapshot || busy) return;
+    setBusy("ai");
+    setError("");
+    try {
+      const res = await api.request<{ reply: string }>(
+        "/api/email-accounts/ai-reply",
+        draft.replyToSnapshot,
+      );
+      setBody(res.reply);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy("");
+    }
+  }
+  /** Ask the server to fix the grammar of the typed message. */
+  async function fixGrammar() {
+    if (!body.trim() || busy) return;
+    setBusy("grammar");
+    setError("");
+    try {
+      const res = await api.request<{ text: string }>("/api/email-accounts/fix-grammar", {
+        text: body,
+      });
+      setBody(res.text);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy("");
+    }
+  }
   function emails(value: string) {
     return value
       .split(/[,;\n]/)
@@ -314,6 +423,26 @@ function EmailEditor({ draft }: { draft?: Partial<EmailDraft> & { id?: string } 
         placeholder="Start your message…"
         style={{ minHeight: 210 }}
       />
+      <View style={[s.row, { gap: 10, flexWrap: "wrap", marginBottom: 18 }]}>
+        {draft?.replyToSnapshot && (
+          <Button
+            icon={Sparkles}
+            busy={busy === "ai"}
+            disabled={!!busy}
+            onPress={() => void aiReply()}
+          >
+            AI reply
+          </Button>
+        )}
+        <Button
+          icon={Wand2}
+          busy={busy === "grammar"}
+          disabled={!!busy || !body.trim()}
+          onPress={() => void fixGrammar()}
+        >
+          Fix grammar
+        </Button>
+      </View>
       {w.files.length > 0 && (
         <Card style={{ padding: 16, marginBottom: 18 }}>
           <Text style={[s.heading, { fontSize: 13, marginBottom: 5 }]}>Attachments</Text>
@@ -370,6 +499,29 @@ function EventEditor({
 }) {
   const seed = e || draft;
   const { workspace: w, api, open, close, refresh } = useWorkspace();
+  // "Sending account" options: saved IMAP/SMTP accounts plus the connected
+  // Google account. Defaults to the first (default) email account.
+  const [accounts, setAccounts] = useState<{ id: string; label: string; emailAddress: string }[]>(
+    [],
+  );
+  useEffect(() => {
+    let active = true;
+    void api
+      .request<{ id: string; label: string; emailAddress: string }[]>("/api/email-accounts")
+      .then((items) => {
+        if (active) setAccounts(items);
+      })
+      .catch(() => {
+        // Backend unavailable (e.g. sample mode): no account choices.
+      });
+    return () => {
+      active = false;
+    };
+  }, [api]);
+  const [accountId, setAccountId] = useState(seed?.emailAccountId ?? "");
+  const googleConn = w.connections.find((c) => c.id === "google");
+  const googleInvites = googleConn?.status === "connected" || googleConn?.status === "sample";
+  const selectedAccountId = accountId || accounts[0]?.id || (googleInvites ? "google" : "");
   const initialStart = new Date();
   initialStart.setMinutes(0, 0, 0);
   initialStart.setHours(initialStart.getHours() + 1);
@@ -417,6 +569,7 @@ function EventEditor({
             .split(/[,;\n]/)
             .map((a) => a.trim())
             .filter(Boolean),
+          emailAccountId: selectedAccountId || undefined,
         });
         if (!parsed.success)
           throw new Error(
@@ -502,6 +655,43 @@ function EventEditor({
         onChangeText={setAttendees}
         placeholder="Email addresses, separated by commas"
       />
+      <View style={{ gap: 9, marginBottom: 15 }}>
+        <Text style={s.label}>Sending account</Text>
+        {accounts.length > 0 || googleInvites ? (
+          <>
+            <View style={[s.row, { gap: 8, flexWrap: "wrap" }]}>
+              {googleInvites && (
+                <Button
+                  small
+                  primary={selectedAccountId === "google"}
+                  onPress={() => setAccountId("google")}
+                >
+                  Google
+                </Button>
+              )}
+              {accounts.map((a) => (
+                <Button
+                  key={a.id}
+                  small
+                  primary={selectedAccountId === a.id}
+                  onPress={() => setAccountId(a.id)}
+                >
+                  {a.label}
+                </Button>
+              ))}
+            </View>
+            <Text style={s.small}>
+              Invites for this event&apos;s attendees go out from this account when the event is
+              approved.
+            </Text>
+          </>
+        ) : (
+          <Text style={s.small}>
+            No email accounts connected yet — add one from Connections → Email accounts to send
+            invites from it.
+          </Text>
+        )}
+      </View>
       <Field
         label="Notes"
         value={description}
@@ -587,6 +777,7 @@ function ReviewDetail({ initial }: { initial: ActionProposal }) {
     }
   }
   const email = action.kind === "email.send";
+  const whatsapp = action.kind === "whatsapp.send";
   return (
     <Sheet
       title={pending ? "One last look" : action.title}
@@ -610,66 +801,84 @@ function ReviewDetail({ initial }: { initial: ActionProposal }) {
         </Chip>
       </View>
       <Card style={{ gap: 13 }}>
-        <ReviewLine label="Account" value={action.account || w.profile.email} />
-        {email ? (
+        {action.kind === "workboard.dispatch" ? (
+          <WorkboardDispatchReview data={d} />
+        ) : whatsapp ? (
           <>
-            <ReviewLine label="To" value={arrayText(d.to)} />
-            <ReviewLine label="Cc" value={arrayText(d.cc) || "None"} />
-            <ReviewLine label="Bcc" value={arrayText(d.bcc) || "None"} />
-            <ReviewLine label="Subject" value={String(d.subject || "")} />
+            <ReviewLine label="From" value={action.account || "WhatsApp"} />
+            <ReviewLine label="To" value={String(d.toJid || "")} />
             <View style={s.divider} />
             <Text selectable style={[s.text, { lineHeight: 25 }]}>
-              {String(d.body || "")}
+              {String(d.text || "")}
             </Text>
-            <View style={s.divider} />
-            <Text style={s.label}>Attachments</Text>
-            {Array.isArray(d.attachmentIds) && d.attachmentIds.length ? (
-              d.attachmentIds.map((id) => {
-                const file = w.files.find((f) => f.id === id);
-                return (
-                  <Text key={String(id)} style={s.text}>
-                    {file?.name || String(id)} · version {String(id).slice(-8)}
-                  </Text>
-                );
-              })
-            ) : (
-              <Text style={s.muted}>No attachments</Text>
-            )}
+            <Text style={s.small}>
+              The recipient must be on your WhatsApp allow-list, or the send is refused.
+            </Text>
           </>
         ) : (
           <>
-            <ReviewLine label="Event" value={String(d.title || "")} />
-            {action.kind !== "calendar.delete" && (
+            <ReviewLine label="Account" value={action.account || w.profile.email} />
+            {email ? (
               <>
-                <ReviewLine
-                  label="Starts"
-                  value={
-                    d.allDay
-                      ? String(d.start || "")
-                      : `${dateLabel(String(d.start || ""), { year: "numeric", month: "short", day: "numeric", timeZone: String(d.timeZone || "UTC") })} · ${timeLabel(String(d.start || ""), String(d.timeZone || "UTC"))}`
-                  }
-                />
-                <ReviewLine
-                  label="Ends"
-                  value={
-                    d.allDay
-                      ? `${String(d.end || "")} (exclusive)`
-                      : `${dateLabel(String(d.end || ""), { year: "numeric", month: "short", day: "numeric", timeZone: String(d.timeZone || "UTC") })} · ${timeLabel(String(d.end || ""), String(d.timeZone || "UTC"))}`
-                  }
-                />
-                <ReviewLine label="Time zone" value={String(d.timeZone || "")} />
-                <ReviewLine label="All day" value={d.allDay ? "Yes" : "No"} />
-                <ReviewLine label="Location" value={String(d.location || "None")} />
-                <ReviewLine label="Attendees" value={arrayText(d.attendees) || "Just you"} />
-                <ReviewLine label="Notes" value={String(d.description || "None")} />
+                <ReviewLine label="To" value={arrayText(d.to)} />
+                <ReviewLine label="Cc" value={arrayText(d.cc) || "None"} />
+                <ReviewLine label="Bcc" value={arrayText(d.bcc) || "None"} />
+                <ReviewLine label="Subject" value={String(d.subject || "")} />
+                <View style={s.divider} />
+                <Text selectable style={[s.text, { lineHeight: 25 }]}>
+                  {String(d.body || "")}
+                </Text>
+                <View style={s.divider} />
+                <Text style={s.label}>Attachments</Text>
+                {Array.isArray(d.attachmentIds) && d.attachmentIds.length ? (
+                  d.attachmentIds.map((id) => {
+                    const file = w.files.find((f) => f.id === id);
+                    return (
+                      <Text key={String(id)} style={s.text}>
+                        {file?.name || String(id)} · version {String(id).slice(-8)}
+                      </Text>
+                    );
+                  })
+                ) : (
+                  <Text style={s.muted}>No attachments</Text>
+                )}
+              </>
+            ) : (
+              <>
+                <ReviewLine label="Event" value={String(d.title || "")} />
+                {action.kind !== "calendar.delete" && (
+                  <>
+                    <ReviewLine
+                      label="Starts"
+                      value={
+                        d.allDay
+                          ? String(d.start || "")
+                          : `${dateLabel(String(d.start || ""), { year: "numeric", month: "short", day: "numeric", timeZone: String(d.timeZone || "UTC") })} · ${timeLabel(String(d.start || ""), String(d.timeZone || "UTC"))}`
+                      }
+                    />
+                    <ReviewLine
+                      label="Ends"
+                      value={
+                        d.allDay
+                          ? `${String(d.end || "")} (exclusive)`
+                          : `${dateLabel(String(d.end || ""), { year: "numeric", month: "short", day: "numeric", timeZone: String(d.timeZone || "UTC") })} · ${timeLabel(String(d.end || ""), String(d.timeZone || "UTC"))}`
+                      }
+                    />
+                    <ReviewLine label="Time zone" value={String(d.timeZone || "")} />
+                    <ReviewLine label="All day" value={d.allDay ? "Yes" : "No"} />
+                    <ReviewLine label="Location" value={String(d.location || "None")} />
+                    <ReviewLine label="Attendees" value={arrayText(d.attendees) || "Just you"} />
+                    <ReviewLine label="Notes" value={String(d.description || "None")} />
+                  </>
+                )}
+                <ReviewLine label="Calendar" value={String(d.calendarId || "primary")} />
+                <Text style={s.small}>
+                  {action.kind === "calendar.delete"
+                    ? "This removes the event and may notify its attendees."
+                    : "Attendees may receive an invitation or update from your connected calendar."}
+                </Text>
               </>
             )}
-            <ReviewLine label="Calendar" value={String(d.calendarId || "primary")} />
-            <Text style={s.small}>
-              {action.kind === "calendar.delete"
-                ? "This removes the event and may notify its attendees."
-                : "Attendees may receive an invitation or update from your connected calendar."}
-            </Text>
           </>
         )}
       </Card>
@@ -699,15 +908,19 @@ function ReviewDetail({ initial }: { initial: ActionProposal }) {
             <Button primary icon={Check} busy={busy} onPress={() => void decide("approve")}>
               {w.mode === "sample"
                 ? "Approve locally"
-                : email
+                : email || whatsapp
                   ? "Approve & send"
-                  : "Approve change"}
+                  : action.kind === "workboard.dispatch"
+                    ? "Approve dispatch"
+                    : "Approve change"}
             </Button>
-            {action.kind !== "calendar.delete" && (
-              <Button icon={Edit3} disabled={busy} onPress={() => void edit()}>
-                Edit details
-              </Button>
-            )}
+            {action.kind !== "calendar.delete" &&
+              action.kind !== "workboard.dispatch" &&
+              action.kind !== "whatsapp.send" && (
+                <Button icon={Edit3} disabled={busy} onPress={() => void edit()}>
+                  Edit details
+                </Button>
+              )}
             <Button icon={X} disabled={busy} onPress={() => void decide("deny")}>
               Don’t proceed
             </Button>
@@ -732,6 +945,47 @@ function ReviewLine({ label, value }: { label: string; value: string }) {
         {value}
       </Text>
     </View>
+  );
+}
+/**
+ * A workboard fan-out dispatch proposed from chat. Not a calendar event or
+ * email: show the card, the subagent count, and each subagent's label +
+ * prompt in plain text.
+ */
+function WorkboardDispatchReview({ data }: { data: Record<string, unknown> }) {
+  const cardTitle = typeof data.cardTitle === "string" ? data.cardTitle : "";
+  const purpose = typeof data.purpose === "string" ? data.purpose : "";
+  const subagents = Array.isArray(data.subagents)
+    ? data.subagents.flatMap((entry) => {
+        if (typeof entry !== "object" || entry === null) return [];
+        const { label, prompt } = entry as { label?: unknown; prompt?: unknown };
+        return typeof label === "string" && typeof prompt === "string" ? [{ label, prompt }] : [];
+      })
+    : [];
+  return (
+    <>
+      <ReviewLine label="Card" value={cardTitle || "Untitled"} />
+      <ReviewLine
+        label="Runs"
+        value={`Fan out ${subagents.length} subagent${subagents.length === 1 ? "" : "s"} (spends ${subagents.length} model run${subagents.length === 1 ? "" : "s"})`}
+      />
+      {!!purpose && purpose !== cardTitle && <ReviewLine label="Purpose" value={purpose} />}
+      <View style={s.divider} />
+      <Text style={s.label}>Subagents</Text>
+      {subagents.map((sub, index) => (
+        <View key={`subagent:${sub.label}:${sub.prompt.length}`} style={{ gap: 3 }}>
+          <Text style={[s.text, { fontWeight: "600" }]}>
+            {index + 1}. {sub.label}
+          </Text>
+          <Text selectable numberOfLines={3} style={s.muted}>
+            {sub.prompt}
+          </Text>
+        </View>
+      ))}
+      <Text style={s.small}>
+        Approving dispatches the subagents and creates one child card per subagent on the workboard.
+      </Text>
+    </>
   );
 }
 function FileDetail({ file: f }: { file: Artifact }) {
@@ -847,6 +1101,11 @@ function BrowserDetail({ initial }: { initial: BrowserSession }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
+  // Mascot: navigating/importing in the browser reads as "searching".
+  useEffect(() => {
+    setMascotSource("browser", busy ? "searching" : "idle");
+    return () => setMascotSource("browser", "idle");
+  }, [busy]);
   const latest = w.browsers.find((b) => b.id === initial.id);
   const browser = {
     ...(latest && latest.updatedAt > local.updatedAt ? latest : local),
@@ -916,31 +1175,127 @@ function BrowserDetail({ initial }: { initial: BrowserSession }) {
       setBusy(false);
     }
   }
-  return (
-    <Sheet
-      title={browserSite(browser.url)}
-      subtitle={`${browser.status} · updated ${timeLabel(browser.updatedAt)}`}
-      onClose={close}
-      wide
+  const browserHeader = (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.line,
+        backgroundColor: "#FAFBFB",
+        gap: 8,
+      }}
     >
-      <View style={[s.row, { gap: 10, marginBottom: 16 }]}>
-        <View style={{ flex: 1 }}>
-          <Field
-            label="Website address"
-            value={url}
-            onChangeText={setUrl}
-            autoCapitalize="none"
-            keyboardType="url"
-            onSubmitEditing={() => void mutate()}
-          />
-        </View>
-        <Button primary busy={busy} disabled={loading || !url.trim()} onPress={() => void mutate()}>
+      <View style={[s.row, { gap: 6, alignItems: "center", flexShrink: 0 }]}>
+        <Globe2 size={16} color={colors.blueDark} />
+        <Text
+          numberOfLines={1}
+          style={{ fontWeight: "700", fontSize: 13, color: colors.text, maxWidth: 130 }}
+        >
+          {browserSite(browser.url)}
+        </Text>
+        <View
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: 4,
+            backgroundColor: browser.status === "active" ? "#10B981" : "#94A3B8",
+          }}
+        />
+      </View>
+
+      <View
+        style={[
+          s.row,
+          {
+            flex: 1,
+            borderWidth: 1,
+            borderColor: colors.line,
+            borderRadius: 8,
+            paddingHorizontal: 8,
+            backgroundColor: "#FFF",
+            minHeight: 32,
+            alignItems: "center",
+          },
+        ]}
+      >
+        <TextInput
+          accessibilityLabel="Website address"
+          value={url}
+          onChangeText={setUrl}
+          autoCapitalize="none"
+          keyboardType="url"
+          placeholder="Enter website address..."
+          placeholderTextColor={colors.muted}
+          onSubmitEditing={() => void mutate()}
+          style={
+            {
+              flex: 1,
+              color: colors.text,
+              fontSize: 13,
+              paddingVertical: 4,
+              outlineStyle: "none",
+            } as any
+          }
+        />
+        <Button
+          small
+          primary
+          busy={busy}
+          disabled={loading || !url.trim()}
+          onPress={() => void mutate()}
+          style={{ paddingVertical: 2, paddingHorizontal: 8, minHeight: 24, borderRadius: 6 }}
+        >
           {browser.status === "closed" ? "Reopen" : browser.status === "error" ? "Reconnect" : "Go"}
         </Button>
       </View>
+
+      <View style={[s.row, { gap: 2, alignItems: "center", flexShrink: 0 }]}>
+        {!loading && browser.status === "active" && browser.consoleUrl && (
+          <IconButton
+            size={34}
+            icon={ExternalLink}
+            label="Open in new window"
+            onPress={() => void Linking.openURL(api.url(browser.consoleUrl || ""))}
+          />
+        )}
+        {!loading && (
+          <IconButton
+            size={34}
+            icon={RotateCw}
+            label="Refresh connection"
+            onPress={() => setRetry(retry + 1)}
+          />
+        )}
+        {!loading && browser.status !== "closed" && (
+          <IconButton
+            size={34}
+            icon={Download}
+            label="Import PDF downloads"
+            onPress={() => void importDownloads()}
+          />
+        )}
+        {!loading && browser.status !== "closed" && (
+          <IconButton
+            size={34}
+            danger
+            icon={LogOut}
+            label="Close session"
+            onPress={() => void mutate(true)}
+          />
+        )}
+        <IconButton size={34} icon={X} label="Close view" onPress={close} />
+      </View>
+    </View>
+  );
+
+  return (
+    <Sheet customHeader={browserHeader} onClose={close} wide contentStyle={{ padding: 6 }}>
       <ErrorNotice error={error} />
       {loading ? (
-        <View style={[s.row, { gap: 10, paddingVertical: 24 }]}>
+        <View style={[s.row, { gap: 10, paddingVertical: 24, justifyContent: "center" }]}>
           {error ? (
             <Button onPress={() => setRetry(retry + 1)}>Retry connection</Button>
           ) : (
@@ -955,7 +1310,7 @@ function BrowserDetail({ initial }: { initial: BrowserSession }) {
       ) : browser.status === "active" && browser.previewUrl ? (
         <Image
           source={{ uri: api.url(browser.previewUrl) }}
-          style={{ width: "100%", height: 450, backgroundColor: colors.canvas }}
+          style={{ width: "100%", height: 500, backgroundColor: colors.canvas }}
           resizeMode="contain"
         />
       ) : (
@@ -971,31 +1326,6 @@ function BrowserDetail({ initial }: { initial: BrowserSession }) {
           }
         />
       )}
-      <View style={[s.row, { gap: 10, marginTop: 18, flexWrap: "wrap" }]}>
-        {!loading && browser.status === "active" && browser.consoleUrl && (
-          <Button
-            icon={ExternalLink}
-            onPress={() => void Linking.openURL(api.url(browser.consoleUrl || ""))}
-          >
-            Open browser in a window
-          </Button>
-        )}
-        {!loading && (
-          <Button icon={RotateCw} disabled={busy} onPress={() => setRetry(retry + 1)}>
-            Refresh connection
-          </Button>
-        )}
-        {!loading && browser.status !== "closed" && (
-          <Button icon={Download} busy={busy} onPress={() => void importDownloads()}>
-            Import PDF downloads
-          </Button>
-        )}
-        {!loading && browser.status !== "closed" && (
-          <Button icon={X} danger busy={busy} onPress={() => void mutate(true)}>
-            Close session
-          </Button>
-        )}
-      </View>
     </Sheet>
   );
 }

@@ -407,6 +407,10 @@ export class ComputerService {
     }
     return commands.sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, 100);
   }
+  /** Wipe the terminal command history. Used by the browser "restart everything" escape hatch. */
+  async clearCommands(owner: string): Promise<number> {
+    return this.db.removeAll(owner, "computer-commands");
+  }
   async snapshot(owner: string): Promise<ComputerSnapshot> {
     const base = {
       enabled: Boolean(this.config.computerEnabled),

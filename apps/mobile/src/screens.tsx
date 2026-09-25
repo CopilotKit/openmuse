@@ -1,6 +1,7 @@
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import {
+  Archive,
   ArrowDownToLine,
   ArrowUpRight,
   CalendarDays,
@@ -10,17 +11,25 @@ import {
   ChevronRight,
   Clock3,
   FileText,
+  Folder,
   Globe2,
   Inbox,
+  KeyRound,
   Link2,
+  type LucideIcon,
   Mail,
+  Pencil,
   Plus,
+  RefreshCw,
   Search,
+  Send,
   ShieldCheck,
   Sparkles,
+  Trash2,
   Upload,
+  Users,
 } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -36,10 +45,23 @@ import type {
   Artifact,
   BrowserSession,
   CalendarEvent,
+  Mail as DomainMail,
   EmailDraft,
 } from "../../../packages/domain/src";
-import { API_URL } from "./api";
+import { API_URL, type MuseApi } from "./api";
 import { localDateTime, zonedInstant } from "./date-time";
+import { setMascotSource, useActivityMascot } from "./mascot-state";
+import { ModelSettingsScreen } from "./model-settings";
+import { RestartBrowserButton } from "./restart-browser";
+import {
+  addShortcut,
+  type ChatShortcut,
+  deleteShortcut,
+  ensureShortcutsLoaded,
+  getShortcutsSnapshot,
+  subscribeShortcuts,
+  updateShortcut,
+} from "./shortcuts";
 import {
   Button,
   Card,
@@ -48,6 +70,7 @@ import {
   dateLabel,
   Empty,
   ErrorNotice,
+  Field,
   IconButton,
   LinkRow,
   Mascot,
@@ -77,7 +100,7 @@ export function TodayScreen() {
     .filter((e) => eventDate(e) === today)
     .sort((a, b) => a.start.localeCompare(b.start));
   return (
-    <View style={{ gap: 25 }}>
+    <View style={{ gap: 22 }}>
       <View
         style={[
           {
@@ -141,7 +164,7 @@ export function TodayScreen() {
                 borderColor: "#C8DBE6",
               }}
             />
-            <Mascot size={94} />
+            <Mascot size={130} />
             <View
               style={[
                 s.row,
@@ -446,19 +469,358 @@ export function AgendaRow({
     </Pressable>
   );
 }
+const MAIL_PAGE_SIZE = 25;
+const MAIL_AUTO_REFRESH_MS = 60_000;
+/** "INBOX" -> "Inbox" for the folder list. */
+function prettyFolder(name: string) {
+  return name.length <= 5 ? name.charAt(0).toUpperCase() + name.slice(1).toLowerCase() : name;
+}
+function folderIcon(name: string): LucideIcon {
+  const n = name.toLowerCase();
+  if (n === "inbox") return Inbox;
+  if (n === "sent") return Send;
+  if (n.includes("draft")) return FileText;
+  if (n.includes("trash") || n.includes("delete")) return Trash2;
+  if (n.includes("archiv")) return Archive;
+  if (n.includes("spam") || n.includes("junk")) return ShieldCheck;
+  return Folder;
+}
+/** Compact page window like 1 ... 6 7 [8] 9 10 ... 347. */
+function pageWindow(current: number, total: number): (number | "...")[] {
+  const keep = new Set([1, total, current - 1, current, current + 1]);
+  const sorted = [...keep].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+  const out: (number | "...")[] = [];
+  sorted.forEach((p, i) => {
+    if (i > 0 && p - sorted[i - 1] > 1) out.push("...");
+    out.push(p);
+  });
+  return out;
+}
+/** Numbered pages for the mailbox (Outlook-style), newest first. */
+function MailPagination({
+  page,
+  total,
+  pageSize,
+  busy,
+  onPage,
+}: {
+  page: number;
+  total: number;
+  pageSize: number;
+  busy: boolean;
+  onPage: (page: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (totalPages <= 1) return null;
+  const btnStyle = (active: boolean) => [
+    {
+      minWidth: 34,
+      paddingVertical: 8,
+      paddingHorizontal: 6,
+      borderRadius: 9,
+      borderWidth: 1,
+      borderColor: active ? colors.blueDark : colors.line,
+      backgroundColor: active ? colors.blueDark : "#FFF",
+      alignItems: "center" as const,
+      justifyContent: "center" as const,
+      opacity: busy ? 0.6 : 1,
+    },
+  ];
+  return (
+    <View
+      style={[
+        s.row,
+        {
+          gap: 6,
+          justifyContent: "center",
+          alignItems: "center",
+          paddingTop: 18,
+          flexWrap: "wrap",
+        },
+      ]}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Previous page"
+        disabled={page <= 1 || busy}
+        onPress={() => onPage(page - 1)}
+        style={btnStyle(false)}
+      >
+        <ChevronLeft size={15} color={page <= 1 ? colors.muted : colors.text} />
+      </Pressable>
+      {pageWindow(page, totalPages).map((p, i) =>
+        p === "..." ? (
+          <Text key={`gap-before-${p}`} style={s.muted}>
+            {"..."}
+          </Text>
+        ) : (
+          <Pressable
+            key={p}
+            accessibilityRole="button"
+            accessibilityLabel={`Page ${p}`}
+            disabled={busy}
+            onPress={() => onPage(p)}
+            style={btnStyle(p === page)}
+          >
+            <Text
+              style={[
+                s.text,
+                {
+                  fontSize: 13,
+                  fontWeight: p === page ? "600" : "400",
+                  color: p === page ? "#FFF" : colors.text,
+                },
+              ]}
+            >
+              {p}
+            </Text>
+          </Pressable>
+        ),
+      )}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Next page"
+        disabled={page >= totalPages || busy}
+        onPress={() => onPage(page + 1)}
+        style={btnStyle(false)}
+      >
+        <ChevronRight size={15} color={page >= totalPages ? colors.muted : colors.text} />
+      </Pressable>
+      <Text style={[s.small, { marginLeft: 6 }]}>{totalPages} pages</Text>
+    </View>
+  );
+}
+
+/** One row from GET /api/email-accounts/:id/messages (metadata only). */
+interface MailRow {
+  uid: number;
+  folder: string;
+  messageId?: string;
+  from: string;
+  fromName?: string;
+  to: string[];
+  subject: string;
+  date?: string;
+  snippet: string;
+  unread: boolean;
+}
+interface MailPage {
+  total: number;
+  page: number;
+  pageSize: number;
+  items: MailRow[];
+}
+interface MailAccount {
+  id: string;
+  label: string;
+  emailAddress: string;
+}
+
 export function MailScreen() {
   const { workspace: w, api, open } = useWorkspace();
+  const { width } = useWindowDimensions();
+  const narrow = width < 720;
   const [query, setQuery] = useState("");
-  const [tab, setTab] = useState("all");
+  const [debounced, setDebounced] = useState("");
+  const [tab, setTab] = useState<"browse" | "all" | "unread" | "drafts">("browse");
   const [drafts, setDrafts] = useState<(EmailDraft & { id: string; createdAt: string })[]>([]);
+  const [accounts, setAccounts] = useState<MailAccount[]>([]);
+  const [accountId, setAccountId] = useState("");
+  const [folders, setFolders] = useState<string[]>([]);
+  const [folder, setFolder] = useState("INBOX");
+  const [items, setItems] = useState<MailRow[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [loadingPage, setLoadingPage] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [error, setError] = useState("");
+
+  // Debounce the search box so typing does not hammer the mailbox.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(query), 400);
+    return () => clearTimeout(timer);
+  }, [query]);
+
   useEffect(() => {
     void api
       .request<(EmailDraft & { id: string; createdAt: string })[]>("/api/drafts")
       .then(setDrafts)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, [api, w]);
-  const items = w.mail.filter(
+
+  // Mailbox accounts drive browse mode; with none, fall back to the
+  // workspace snapshot list (Google / sample mail).
+  useEffect(() => {
+    let live = true;
+    void api
+      .request<MailAccount[]>("/api/email-accounts")
+      .then((list) => {
+        if (!live) return;
+        setAccounts(list);
+        if (list.length) {
+          setAccountId((current) => current || list[0].id);
+          setTab((current) => (current === "all" || current === "unread" ? "browse" : current));
+        } else {
+          setTab((current) => (current === "browse" ? "all" : current));
+        }
+      })
+      .catch(() => {
+        if (live) setTab((current) => (current === "browse" ? "all" : current));
+      });
+    return () => {
+      live = false;
+    };
+  }, [api]);
+
+  // Folders for the selected account.
+  useEffect(() => {
+    if (!accountId) return;
+    let live = true;
+    setFolders([]);
+    void api
+      .request<string[]>(`/api/email-accounts/${encodeURIComponent(accountId)}/folders`)
+      .then((list) => {
+        if (!live) return;
+        setFolders(list);
+        setFolder((current) => (list.includes(current) ? current : (list[0] ?? "INBOX")));
+      })
+      .catch((e) => {
+        if (live) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      live = false;
+    };
+  }, [api, accountId]);
+
+  // First page whenever the account, folder, or debounced search changes.
+  useEffect(() => {
+    if (!accountId || tab !== "browse") return;
+    let live = true;
+    setLoading(true);
+    setError("");
+    const params = new URLSearchParams({ folder, page: "1", pageSize: String(MAIL_PAGE_SIZE) });
+    const q = debounced.trim();
+    if (q) params.set("query", q);
+    void api
+      .request<MailPage>(
+        `/api/email-accounts/${encodeURIComponent(accountId)}/messages?${params.toString()}`,
+      )
+      .then((result) => {
+        if (!live) return;
+        setItems(result.items);
+        setTotal(result.total);
+        setPage(1);
+        setSyncedAt(new Date().toISOString());
+      })
+      .catch((e) => {
+        if (live) setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (live) setLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [api, accountId, folder, debounced, tab]);
+
+  /**
+   * Manual refresh keeps the current list on screen while re-fetching page 1
+   * (replaced only on success), so an IMAP hiccup never blanks the inbox and
+   * the last good sync stays visible alongside any error notice.
+   */
+  const refreshMail = useCallback(() => {
+    if (!accountId || tab !== "browse") return;
+    setRefreshing(true);
+    setError("");
+    const params = new URLSearchParams({
+      folder,
+      page: String(page),
+      pageSize: String(MAIL_PAGE_SIZE),
+    });
+    const q = debounced.trim();
+    if (q) params.set("query", q);
+    void api
+      .request<MailPage>(
+        `/api/email-accounts/${encodeURIComponent(accountId)}/messages?${params.toString()}`,
+      )
+      .then((result) => {
+        setItems(result.items);
+        setTotal(result.total);
+        setPage(page);
+        setSyncedAt(new Date().toISOString());
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setRefreshing(false));
+  }, [api, accountId, folder, debounced, tab, page]);
+
+  // Auto-refresh the mailbox in browse mode so new mail lands without a
+  // manual tap. The first-page effect above remains the trigger for actual
+  // account/folder/search changes; this interval only re-checks the current
+  // view and is torn down when the tab or account changes.
+  useEffect(() => {
+    if (!accountId || tab !== "browse") return;
+    const timer = setInterval(() => refreshMail(), MAIL_AUTO_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [refreshMail, accountId, tab]);
+
+  /** Numbered-page navigation (replaces the old "Load more" append). */
+  const gotoPage = useCallback(
+    async (next: number) => {
+      const totalPages = Math.max(1, Math.ceil(total / MAIL_PAGE_SIZE));
+      if (next < 1 || next > totalPages || next === page || loadingPage || loading) return;
+      setLoadingPage(true);
+      setError("");
+      try {
+        const params = new URLSearchParams({
+          folder,
+          page: String(next),
+          pageSize: String(MAIL_PAGE_SIZE),
+        });
+        const q = debounced.trim();
+        if (q) params.set("query", q);
+        const result = await api.request<MailPage>(
+          `/api/email-accounts/${encodeURIComponent(accountId)}/messages?${params.toString()}`,
+        );
+        setItems(result.items);
+        setTotal(result.total);
+        setPage(next);
+        setSyncedAt(new Date().toISOString());
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setLoadingPage(false);
+      }
+    },
+    [api, accountId, folder, debounced, page, total, loadingPage, loading],
+  );
+
+  function openRow(row: MailRow) {
+    const label = accounts.find((a) => a.id === accountId)?.label ?? "";
+    // The id doubles as the thread id; the detail sheet fetches the full
+    // body through /api/mail/threads/:id, which understands "folder:uid".
+    const mail: DomainMail = {
+      id: `${folder}:${row.uid}`,
+      threadId: `${folder}:${row.uid}`,
+      from: row.from,
+      sender: row.fromName ?? row.from,
+      to: row.to,
+      subject: row.subject,
+      body: row.snippet,
+      date: row.date ?? new Date(0).toISOString(),
+      unread: row.unread,
+      label: `${label} · ${folder}`,
+      attachments: [],
+    };
+    open({ type: "mail", mail });
+  }
+
+  // Browse mode is available when at least one mailbox account exists; otherwise
+  // the workspace snapshot list (Google / sample mail) is shown instead.
+  const hasAccounts = accounts.length > 0;
+  const showBrowse = hasAccounts && tab === "browse";
+  const snapshotItems = w.mail.filter(
     (m) =>
       (tab !== "unread" || m.unread) &&
       `${m.sender} ${m.subject} ${m.body}`.toLowerCase().includes(query.toLowerCase()),
@@ -466,8 +828,12 @@ export function MailScreen() {
   const filteredDrafts = drafts.filter((d) =>
     `${d.to.join(" ")} ${d.subject} ${d.body}`.toLowerCase().includes(query.toLowerCase()),
   );
+  // A background re-check is in flight when a manual/auto refresh runs, or
+  // when a folder/search change lands with a list already on screen.
+  const checking = refreshing || (loading && items.length > 0) || loadingPage;
+
   return (
-    <View style={{ gap: 20 }}>
+    <View style={{ gap: 22 }}>
       <View style={[s.between, { gap: 12, flexWrap: "wrap" }]}>
         <View
           style={[
@@ -487,7 +853,7 @@ export function MailScreen() {
           <Search size={16} color={colors.muted} />
           <TextInput
             accessibilityLabel="Search mail"
-            placeholder="Search your inbox"
+            placeholder={hasAccounts ? "Search this mailbox" : "Search your inbox"}
             placeholderTextColor={colors.muted}
             value={query}
             onChangeText={setQuery}
@@ -501,16 +867,74 @@ export function MailScreen() {
       <ErrorNotice error={error} />
       <Card>
         <View style={[s.row, { gap: 10, marginBottom: 15, flexWrap: "wrap" }]}>
-          <Button small primary={tab === "all"} onPress={() => setTab("all")}>
-            All messages
-          </Button>
-          <Button small primary={tab === "unread"} onPress={() => setTab("unread")}>
-            Unread · {w.mail.filter((m) => m.unread).length}
-          </Button>
-          <Button small primary={tab === "drafts"} onPress={() => setTab("drafts")}>
-            Drafts · {drafts.length}
-          </Button>
+          {hasAccounts ? (
+            <>
+              <Button small primary={tab === "browse"} onPress={() => setTab("browse")}>
+                Mailbox{total ? ` · ${total}` : ""}
+              </Button>
+              <Button small primary={tab === "drafts"} onPress={() => setTab("drafts")}>
+                Drafts · {drafts.length}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button small primary={tab === "all"} onPress={() => setTab("all")}>
+                All messages
+              </Button>
+              <Button small primary={tab === "unread"} onPress={() => setTab("unread")}>
+                Unread · {w.mail.filter((m) => m.unread).length}
+              </Button>
+              <Button small primary={tab === "drafts"} onPress={() => setTab("drafts")}>
+                Drafts · {drafts.length}
+              </Button>
+            </>
+          )}
         </View>
+        {showBrowse && accounts.length > 1 && (
+          <View style={[s.row, { gap: 8, flexWrap: "wrap", marginBottom: 15 }]}>
+            {accounts.map((account) => (
+              <Button
+                key={account.id}
+                small
+                primary={account.id === accountId}
+                onPress={() => setAccountId(account.id)}
+              >
+                {account.label}
+              </Button>
+            ))}
+          </View>
+        )}
+        {showBrowse && (
+          <View
+            style={[
+              s.row,
+              {
+                gap: 8,
+                marginBottom: 14,
+                justifyContent: "space-between",
+                alignItems: "center",
+              },
+            ]}
+          >
+            <View style={[s.row, { gap: 6, flex: 1 }]}>
+              {checking ? (
+                <ActivityIndicator size="small" color={colors.blueDark} />
+              ) : (
+                <RefreshCw size={13} color={colors.muted} />
+              )}
+              <Text style={s.small}>
+                {checking
+                  ? "Checking for new mail\u2026"
+                  : syncedAt
+                    ? `Updated ${relativeDate(syncedAt)}`
+                    : "Mailbox"}
+              </Text>
+            </View>
+            <Button small icon={RefreshCw} busy={checking} onPress={() => void refreshMail()}>
+              Refresh
+            </Button>
+          </View>
+        )}
         {tab === "drafts" ? (
           filteredDrafts.length ? (
             filteredDrafts.map((d) => (
@@ -529,8 +953,159 @@ export function MailScreen() {
               detail="Messages you save as drafts will be here when you’re ready."
             />
           )
-        ) : items.length ? (
-          items.map((m, i) => (
+        ) : showBrowse ? (
+          <View
+            style={[
+              s.row,
+              narrow
+                ? { flexDirection: "column", alignItems: "stretch" }
+                : { alignItems: "flex-start" },
+              { gap: 18 },
+            ]}
+          >
+            {narrow ? (
+              <View style={[s.row, { gap: 8, flexWrap: "wrap" }]}>
+                {folders.map((name) => {
+                  const FolderIcon = folderIcon(name);
+                  return (
+                    <Button
+                      key={name}
+                      small
+                      primary={name === folder}
+                      icon={FolderIcon}
+                      onPress={() => setFolder(name)}
+                    >
+                      {prettyFolder(name)}
+                    </Button>
+                  );
+                })}
+              </View>
+            ) : (
+              <View style={{ width: 205, gap: 2, paddingTop: 4 }}>
+                <Text
+                  style={[
+                    s.small,
+                    {
+                      fontWeight: "600",
+                      color: colors.muted,
+                      paddingHorizontal: 10,
+                      paddingBottom: 6,
+                    },
+                  ]}
+                >
+                  Folders
+                </Text>
+                {folders.map((name) => {
+                  const FolderIcon = folderIcon(name);
+                  const active = name === folder;
+                  return (
+                    <Pressable
+                      key={name}
+                      onPress={() => setFolder(name)}
+                      style={[
+                        s.row,
+                        {
+                          gap: 10,
+                          alignItems: "center",
+                          paddingVertical: 9,
+                          paddingHorizontal: 10,
+                          borderRadius: 10,
+                          backgroundColor: active ? colors.sky : "transparent",
+                        },
+                      ]}
+                    >
+                      <FolderIcon size={15} color={active ? colors.blueDark : colors.muted} />
+                      <Text
+                        style={[
+                          s.text,
+                          {
+                            fontSize: 13,
+                            fontWeight: active ? "600" : "400",
+                            color: active ? colors.blueDark : colors.text,
+                          },
+                        ]}
+                      >
+                        {prettyFolder(name)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+            <View style={{ flex: 1, minWidth: 0 }}>
+              {loading && !items.length ? (
+                <View style={[s.row, { gap: 10, paddingVertical: 24, justifyContent: "center" }]}>
+                  <ActivityIndicator color={colors.blueDark} />
+                  <Text style={s.muted}>Loading {folder}…</Text>
+                </View>
+              ) : items.length ? (
+                <>
+                  {items.map((row, i) => (
+                    <Pressable
+                      key={`${folder}:${row.uid}`}
+                      onPress={() => openRow(row)}
+                      style={[
+                        s.row,
+                        {
+                          gap: 15,
+                          paddingVertical: 20,
+                          borderTopWidth: 1,
+                          borderTopColor: colors.line,
+                        },
+                      ]}
+                    >
+                      <Avatar name={row.fromName ?? row.from} index={i} />
+                      <View style={{ flex: 1, gap: 5 }}>
+                        <View style={s.between}>
+                          <Text style={[s.text, { fontWeight: row.unread ? "600" : "400" }]}>
+                            {row.fromName ?? row.from}
+                          </Text>
+                          <Text style={s.small}>{row.date ? dateLabel(row.date) : ""}</Text>
+                        </View>
+                        <Text style={[s.text, { fontWeight: "500", fontSize: 13 }]}>
+                          {row.subject}
+                        </Text>
+                        <Text style={s.muted} numberOfLines={1}>
+                          {row.snippet}
+                        </Text>
+                      </View>
+                      {row.unread && (
+                        <View
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: 4,
+                            backgroundColor: "#83B5D3",
+                          }}
+                        />
+                      )}
+                    </Pressable>
+                  ))}
+                  <MailPagination
+                    page={page}
+                    total={total}
+                    pageSize={MAIL_PAGE_SIZE}
+                    busy={loadingPage}
+                    onPage={(next) => void gotoPage(next)}
+                  />
+                </>
+              ) : (
+                <Empty
+                  icon={Inbox}
+                  title={debounced ? "No matching messages" : `Nothing in ${folder}`}
+                  detail={
+                    debounced
+                      ? "Try a different name or subject — search runs across the whole folder."
+                      : accounts.length
+                        ? "This folder has no messages yet."
+                        : "Connect Google in Connections to read your mail here."
+                  }
+                />
+              )}
+            </View>
+          </View>
+        ) : snapshotItems.length ? (
+          snapshotItems.map((m, i) => (
             <Pressable
               key={m.id}
               onPress={() => open({ type: "mail", mail: m })}
@@ -675,7 +1250,7 @@ export function CalendarScreen() {
     });
   }
   return (
-    <View style={{ gap: 20 }}>
+    <View style={{ gap: 22 }}>
       <View style={[s.between, { gap: 12, flexWrap: "wrap" }]}>
         <View style={[s.row, { gap: 8 }]}>
           <Text style={s.title}>
@@ -839,27 +1414,21 @@ export function BrowserScreen() {
     }
   }
   return (
-    <View style={{ gap: 22 }}>
-      <Card style={{ backgroundColor: colors.sky }}>
-        <View style={[s.row, { gap: 12, marginBottom: 15 }]}>
-          <Globe2 size={22} color={colors.blueDark} />
-          <View>
-            <Text style={s.heading}>A place for your open tabs</Text>
-            <Text style={s.muted}>Browse in a private, persistent workspace session.</Text>
-          </View>
-        </View>
-        <View style={[s.row, { gap: 10 }]}>
+    <View style={{ gap: 12 }}>
+      <Card style={{ padding: 10, borderRadius: 12 }}>
+        <View style={[s.row, { gap: 8 }]}>
           <TextInput
             accessibilityLabel="Website address"
             value={url}
             onChangeText={setUrl}
             onSubmitEditing={() => void create()}
             autoCapitalize="none"
-            placeholder="https://example.com"
+            placeholder="Enter website URL (e.g. https://www.google.com)"
             placeholderTextColor={colors.muted}
-            style={[s.input, { flex: 1 }]}
+            style={[s.input, { flex: 1, minHeight: 38, paddingVertical: 6 }]}
           />
           <Button
+            small
             primary
             icon={Plus}
             busy={busy}
@@ -872,7 +1441,10 @@ export function BrowserScreen() {
         <ErrorNotice error={error} />
       </Card>
       <Card>
-        <SectionHeading title="Browser sessions" />
+        <View style={[s.between, { marginBottom: 14 }]}>
+          <Text style={s.heading}>Browser sessions</Text>
+          <RestartBrowserButton small />
+        </View>
         {w.browsers.length ? (
           w.browsers.map((b) => (
             <Pressable
@@ -930,6 +1502,7 @@ export function FilesScreen() {
   async function upload() {
     setError("");
     setBusy(true);
+    setMascotSource("upload", "uploading");
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: "application/pdf",
@@ -963,10 +1536,11 @@ export function FilesScreen() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+      setMascotSource("upload", "idle");
     }
   }
   return (
-    <View style={{ gap: 20 }}>
+    <View style={{ gap: 22 }}>
       <View style={s.between}>
         <Text style={[s.muted, { flex: 1, marginRight: 15 }]}>
           Documents, with a little room to work.
@@ -1057,10 +1631,13 @@ export function FilesScreen() {
 export function ActivityScreen() {
   const { workspace: w, open } = useWorkspace();
   const [filter, setFilter] = useState("all");
+  // w.activity arrives projected from the server (honest statuses, routine
+  // noise filtered); the same projection feeds the mascot.
+  useActivityMascot(w.activity);
   const pending = w.actions.filter((a) => a.status === "awaiting_review");
   const actions = w.actions.filter((a) => filter === "all" || a.status === "awaiting_review");
   return (
-    <View style={{ gap: 20 }}>
+    <View style={{ gap: 22 }}>
       <View style={[s.row, { gap: 10 }]}>
         <Button small primary={filter === "all"} onPress={() => setFilter("all")}>
           All activity
@@ -1146,7 +1723,9 @@ export function ActivityScreen() {
                     {dateLabel(a.date)} · {timeLabel(a.date)}
                   </Text>
                 </View>
-                <Chip>{a.status}</Chip>
+                <Chip tint={a.honestStatus === "failed" ? "#FBEFED" : colors.canvas}>
+                  {a.label}
+                </Chip>
               </View>
             ))
           ) : (
@@ -1171,10 +1750,58 @@ export function ActivityScreen() {
   );
 }
 export function ConnectionsScreen({ query = "" }: { query?: string }) {
-  const { workspace: w, api, refresh, notify, open } = useWorkspace();
+  const { workspace: w, api, refresh, notify, open, navigate, sessionUser } = useWorkspace();
+  const isAdmin = sessionUser.role === "admin";
+  const [tab, setTab] = useState<"connections" | "services">("connections");
   const [selected, setSelected] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const showModelsSection =
+    isAdmin &&
+    (!query.trim() || "models api keys providers llm".includes(query.trim().toLowerCase()));
+  // User-configurable chat shortcuts (buttons on the empty chat screen).
+  const shortcuts = useSyncExternalStore(subscribeShortcuts, getShortcutsSnapshot);
+  const [editingShortcut, setEditingShortcut] = useState<ChatShortcut | null>(null);
+  const [shortcutError, setShortcutError] = useState("");
+  const showShortcutsSection = !query.trim() || "shortcuts".includes(query.trim().toLowerCase());
+  useEffect(() => {
+    void ensureShortcutsLoaded();
+  }, []);
+  async function removeShortcut(id: string) {
+    setShortcutError("");
+    try {
+      await deleteShortcut(id);
+    } catch (e) {
+      setShortcutError(e instanceof Error ? e.message : String(e));
+    }
+  }
+  // Saved website-login / email-account counts (redacted metadata only — the
+  // list endpoints never return secrets). Drives the Connected grouping below.
+  const [savedCounts, setSavedCounts] = useState<{ credentials: number; email: number } | null>(
+    null,
+  );
+  useEffect(() => {
+    let live = true;
+    if (!isAdmin) {
+      setSavedCounts({ credentials: 0, email: 0 });
+      return;
+    }
+    (async () => {
+      try {
+        const [credentials, email] = await Promise.all([
+          api.request<unknown[]>("/api/credentials"),
+          api.request<unknown[]>("/api/email-accounts"),
+        ]);
+        if (live) setSavedCounts({ credentials: credentials.length, email: email.length });
+      } catch {
+        // Backend unavailable (e.g. sample mode): treat as nothing saved yet.
+        if (live) setSavedCounts({ credentials: 0, email: 0 });
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [api, isAdmin]);
   async function connect(capability: "read" | "write") {
     setBusy(true);
     setError("");
@@ -1211,7 +1838,16 @@ export function ConnectionsScreen({ query = "" }: { query?: string }) {
   }
   const google = w.connections.find((c) => c.id === "google");
   const connected = google?.status === "connected" || google?.status === "sample";
-  const rows = [
+  type ConnectorRow = {
+    id: string;
+    name: string;
+    detail?: string;
+    icon: LucideIcon;
+    color: string;
+    connected: boolean;
+    group: string;
+  };
+  const rows: ConnectorRow[] = [
     { id: "gmail", name: "Gmail", icon: Mail, color: "#EA5B4D", connected, group: "google" },
     {
       id: "calendar",
@@ -1237,39 +1873,181 @@ export function ConnectionsScreen({ query = "" }: { query?: string }) {
       connected: false,
       group: "openbot",
     },
-  ].filter((row) => `${row.name} ${row.group}`.toLowerCase().includes(query.toLowerCase()));
+    {
+      id: "credentials",
+      name: "Website logins",
+      detail: "Saved logins · domain-locked “Log in now”",
+      icon: KeyRound,
+      color: "#8A5FC0",
+      connected: (savedCounts?.credentials ?? 0) > 0,
+      group: "connectors",
+    },
+    {
+      id: "email-accounts",
+      name: "Email accounts",
+      detail: "IMAP/SMTP · test connection",
+      icon: Inbox,
+      color: "#E8912D",
+      connected: (savedCounts?.email ?? 0) > 0,
+      group: "connectors",
+    },
+    ...(isAdmin
+      ? [
+          {
+            id: "users",
+            name: "Users",
+            detail: "Usernames, passwords & roles",
+            icon: Users,
+            color: "#3D7BFF",
+            connected: false,
+            group: "users",
+          },
+        ]
+      : []),
+  ]
+    .filter((row) => isAdmin || row.group !== "connectors")
+    .filter((row) => `${row.name} ${row.group}`.toLowerCase().includes(query.toLowerCase()));
   return (
     <View style={{ gap: 22 }}>
-      {[true, false].map((isConnected) => {
-        const group = rows.filter((row) => row.connected === isConnected);
-        if (!group.length) return null;
-        return (
-          <View key={String(isConnected)} style={{ gap: 8 }}>
-            <Text style={[s.small, { marginLeft: 12 }]}>
-              {isConnected
-                ? w.mode === "sample"
-                  ? "Your connections"
-                  : "Connected"
-                : "Available integrations"}
-            </Text>
-            <View style={{ paddingHorizontal: 16, borderRadius: 23, backgroundColor: "#F3F4F5" }}>
-              {group.map((row, index) => (
+      <View style={[s.row, { gap: 8, paddingHorizontal: 2 }]}>
+        <Button small primary={tab === "connections"} onPress={() => setTab("connections")}>
+          Connections
+        </Button>
+        {isAdmin && (
+          <Button small primary={tab === "services"} onPress={() => setTab("services")}>
+            Services
+          </Button>
+        )}
+      </View>
+      {tab === "services" ? (
+        <ServicesTab api={api} />
+      ) : (
+        <>
+          {[true, false].map((isConnected) => {
+            const group = rows.filter((row) => row.connected === isConnected);
+            if (!group.length) return null;
+            return (
+              <View key={String(isConnected)} style={{ gap: 8 }}>
+                <Text style={[s.small, { marginLeft: 12 }]}>
+                  {isConnected
+                    ? w.mode === "sample"
+                      ? "Your connections"
+                      : "Connected"
+                    : "Available integrations"}
+                </Text>
+                <View
+                  style={{ paddingHorizontal: 16, borderRadius: 23, backgroundColor: "#F3F4F5" }}
+                >
+                  {group.map((row, index) => (
+                    <Pressable
+                      key={row.id}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Manage ${row.name}`}
+                      onPress={() =>
+                        row.group === "users"
+                          ? open({ type: "users" })
+                          : row.group === "browser"
+                            ? open({ type: "computer" })
+                            : row.group === "connectors"
+                              ? navigate("connectors")
+                              : setSelected(row.group)
+                      }
+                      style={[
+                        s.row,
+                        {
+                          gap: 14,
+                          minHeight: 61,
+                          borderBottomWidth: index < group.length - 1 ? 1 : 0,
+                          borderBottomColor: "#E5E7E9",
+                        },
+                      ]}
+                    >
+                      <View
+                        style={{
+                          width: 29,
+                          height: 29,
+                          borderRadius: 7,
+                          backgroundColor: "#FFF",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <row.icon size={23} color={row.color} />
+                      </View>
+                      <View style={{ flex: 1, gap: 2 }}>
+                        <Text style={s.text}>{row.name}</Text>
+                        {row.detail ? <Text style={s.small}>{row.detail}</Text> : null}
+                      </View>
+                      {row.connected && row.group === "google" && w.mode === "sample" && (
+                        <Text style={s.small}>Local data</Text>
+                      )}
+                      {row.connected ? (
+                        <ChevronRight size={18} color="#A4A7AA" />
+                      ) : (
+                        <Text
+                          style={{
+                            fontSize: 13,
+                            color: row.group === "google" ? colors.blueDark : colors.muted,
+                          }}
+                        >
+                          {row.group === "google" ? "Connect" : "Setup"}
+                        </Text>
+                      )}
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            );
+          })}
+          {!rows.length && <Text style={s.muted}>No matching connectors.</Text>}
+          {showModelsSection && <ModelSettingsScreen api={api} />}
+          {showShortcutsSection && (
+            <View style={{ gap: 8 }}>
+              <Text style={[s.small, { marginLeft: 12 }]}>Chat shortcuts</Text>
+              <View style={{ paddingHorizontal: 16, borderRadius: 23, backgroundColor: "#F3F4F5" }}>
+                {shortcuts.map((shortcut) => (
+                  <View
+                    key={shortcut.id}
+                    style={[
+                      s.row,
+                      {
+                        gap: 6,
+                        minHeight: 61,
+                        borderBottomWidth: 1,
+                        borderBottomColor: "#E5E7E9",
+                        paddingVertical: 10,
+                      },
+                    ]}
+                  >
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <Text style={s.text}>{shortcut.label}</Text>
+                      <Text style={s.small} numberOfLines={2}>
+                        {shortcut.instruction}
+                      </Text>
+                    </View>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Edit ${shortcut.label}`}
+                      onPress={() => setEditingShortcut(shortcut)}
+                      style={{ padding: 8 }}
+                    >
+                      <Pencil size={18} color={colors.muted} />
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Delete ${shortcut.label}`}
+                      onPress={() => void removeShortcut(shortcut.id)}
+                      style={{ padding: 8 }}
+                    >
+                      <Trash2 size={18} color={colors.danger} />
+                    </Pressable>
+                  </View>
+                ))}
                 <Pressable
-                  key={row.id}
                   accessibilityRole="button"
-                  accessibilityLabel={`Manage ${row.name}`}
-                  onPress={() =>
-                    row.group === "browser" ? open({ type: "computer" }) : setSelected(row.group)
-                  }
-                  style={[
-                    s.row,
-                    {
-                      gap: 14,
-                      minHeight: 61,
-                      borderBottomWidth: index < group.length - 1 ? 1 : 0,
-                      borderBottomColor: "#E5E7E9",
-                    },
-                  ]}
+                  accessibilityLabel="Add shortcut"
+                  onPress={() => setEditingShortcut({ id: "", label: "", instruction: "" })}
+                  style={[s.row, { gap: 14, minHeight: 61 }]}
                 >
                   <View
                     style={{
@@ -1281,101 +2059,238 @@ export function ConnectionsScreen({ query = "" }: { query?: string }) {
                       justifyContent: "center",
                     }}
                   >
-                    <row.icon size={23} color={row.color} />
+                    <Plus size={20} color={colors.blueDark} />
                   </View>
-                  <Text style={[s.text, { flex: 1 }]}>{row.name}</Text>
-                  {row.connected && row.group === "google" && w.mode === "sample" && (
-                    <Text style={s.small}>Local data</Text>
-                  )}
-                  {row.connected ? (
-                    <ChevronRight size={18} color="#A4A7AA" />
-                  ) : (
-                    <Text
-                      style={{
-                        fontSize: 13,
-                        color: row.group === "google" ? colors.blueDark : colors.muted,
-                      }}
-                    >
-                      {row.group === "google" ? "Connect" : "Setup"}
-                    </Text>
-                  )}
+                  <Text style={[s.text, { color: colors.blueDark }]}>Add shortcut</Text>
                 </Pressable>
-              ))}
-            </View>
-          </View>
-        );
-      })}
-      {!rows.length && <Text style={s.muted}>No matching connectors.</Text>}
-      {selected && (
-        <Sheet
-          title={selected === "google" ? "Google connections" : "OpenBot"}
-          subtitle={selected === "google" ? google?.account : "A computer for your agent"}
-          onClose={() => setSelected(undefined)}
-        >
-          {selected === "google" ? (
-            <View style={{ gap: 18 }}>
-              <Text style={s.muted}>
-                Bring Gmail and Google Calendar into your conversations. Choose read access, then
-                enable sending and editing when you need it.
-              </Text>
-              <View style={[s.row, { gap: 7, flexWrap: "wrap" }]}>
-                {google?.capabilities.map((cap) => (
-                  <Chip key={cap}>{capabilityLabel(cap)}</Chip>
-                ))}
               </View>
-              <ErrorNotice error={error} />
-              <Button busy={busy} primary icon={Link2} onPress={() => void connect("read")}>
-                Connect Google
-              </Button>
-              <Button busy={busy} onPress={() => void connect("write")}>
-                Enable sending & editing
-              </Button>
-              {connected && (
-                <Button busy={busy} danger onPress={() => void disconnect()}>
-                  Disconnect Google
-                </Button>
-              )}
-              <SettingsLine
-                label="Environment"
-                value={w.mode === "sample" ? "Local · example data" : "Live workspace"}
-              />
-              <SettingsLine
-                label="Assistant"
-                value={
-                  w.runtime.provider === "sample"
-                    ? "Guided workflows"
-                    : w.runtime.configured
-                      ? "Model connected"
-                      : "Model not configured"
-                }
-              />
-              <SettingsLine
-                label="Rich Threads"
-                value={w.runtime.richThreads ? "CopilotKit Intelligence" : "Not connected"}
-              />
-              <Button
-                small
-                icon={ArrowDownToLine}
-                onPress={() => void refresh().catch((e) => setError(String(e)))}
-              >
-                Refresh connections
-              </Button>
-            </View>
-          ) : (
-            <View style={{ gap: 14 }}>
-              <Text style={s.text}>
-                The OpenBot adapter is available in this open-source project. A live OpenBot backend
-                has not been configured.
-              </Text>
-              <Text style={s.muted}>
-                Your current computer uses OpenMuse’s persistent Chromium worker. OpenBot
-                integration will expand the execution backend while keeping this interface.
+              {!!shortcutError && <ErrorNotice error={shortcutError} />}
+              <Text style={[s.small, { marginLeft: 12 }]}>
+                Shortcuts appear as buttons on the empty chat screen, with their instruction text
+                underneath. Tapping a button sends its instruction.
               </Text>
             </View>
           )}
-        </Sheet>
+          {editingShortcut && (
+            <ShortcutEditorSheet
+              shortcut={editingShortcut}
+              onClose={() => setEditingShortcut(null)}
+            />
+          )}
+          {selected && (
+            <Sheet
+              title={selected === "google" ? "Google connections" : "OpenBot"}
+              subtitle={selected === "google" ? google?.account : "A computer for your agent"}
+              onClose={() => setSelected(undefined)}
+            >
+              {selected === "google" ? (
+                <View style={{ gap: 18 }}>
+                  <Text style={s.muted}>
+                    Bring Gmail and Google Calendar into your conversations. Choose read access,
+                    then enable sending and editing when you need it.
+                  </Text>
+                  <View style={[s.row, { gap: 7, flexWrap: "wrap" }]}>
+                    {google?.capabilities.map((cap) => (
+                      <Chip key={cap}>{capabilityLabel(cap)}</Chip>
+                    ))}
+                  </View>
+                  <ErrorNotice error={error} />
+                  <Button busy={busy} primary icon={Link2} onPress={() => void connect("read")}>
+                    Connect Google
+                  </Button>
+                  <Button busy={busy} onPress={() => void connect("write")}>
+                    Enable sending & editing
+                  </Button>
+                  {connected && (
+                    <Button busy={busy} danger onPress={() => void disconnect()}>
+                      Disconnect Google
+                    </Button>
+                  )}
+                  <SettingsLine
+                    label="Environment"
+                    value={w.mode === "sample" ? "Local · example data" : "Live workspace"}
+                  />
+                  <SettingsLine
+                    label="Assistant"
+                    value={
+                      w.runtime.provider === "sample"
+                        ? "Guided workflows"
+                        : w.runtime.configured
+                          ? "Model connected"
+                          : "Model not configured"
+                    }
+                  />
+                  <SettingsLine
+                    label="Rich Threads"
+                    value={w.runtime.richThreads ? "CopilotKit Intelligence" : "Not connected"}
+                  />
+                  <Button
+                    small
+                    icon={ArrowDownToLine}
+                    onPress={() => void refresh().catch((e) => setError(String(e)))}
+                  >
+                    Refresh connections
+                  </Button>
+                </View>
+              ) : (
+                <View style={{ gap: 14 }}>
+                  <Text style={s.text}>
+                    The OpenBot adapter is available in this open-source project. A live OpenBot
+                    backend has not been configured.
+                  </Text>
+                  <Text style={s.muted}>
+                    Your current computer uses OpenMuse’s persistent Chromium worker. OpenBot
+                    integration will expand the execution backend while keeping this interface.
+                  </Text>
+                </View>
+              )}
+            </Sheet>
+          )}
+        </>
       )}
     </View>
+  );
+}
+type ServiceHealth = {
+  id: string;
+  label: string;
+  status: "up" | "down" | "not-configured";
+  detail: string;
+  latencyMs: number | null;
+};
+
+function ServicesTab({ api }: { api: MuseApi }) {
+  const [services, setServices] = useState<ServiceHealth[] | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api.request<{ services: ServiceHealth[] }>("/api/health/services");
+      setServices(result.services);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const dot = (status: ServiceHealth["status"]) =>
+    status === "up" ? "#24A46B" : status === "down" ? "#E5484D" : "#A7AAAC";
+  const word = (status: ServiceHealth["status"]) =>
+    status === "up" ? "Healthy" : status === "down" ? "Down" : "Not configured";
+  return (
+    <View style={{ gap: 8 }}>
+      <View style={[s.row, { justifyContent: "space-between", alignItems: "center" }]}>
+        <Text style={[s.small, { marginLeft: 12 }]}>Service health</Text>
+        <Button small busy={busy} onPress={() => void load()}>
+          Refresh
+        </Button>
+      </View>
+      {error ? <Text style={[s.small, { color: colors.danger }]}>{error}</Text> : null}
+      <View style={{ paddingHorizontal: 16, borderRadius: 23, backgroundColor: "#F3F4F5" }}>
+        {services === null && !error ? (
+          <Text style={[s.muted, { paddingVertical: 18 }]}>Checking services…</Text>
+        ) : (
+          (services ?? []).map((svc, index) => (
+            <View
+              key={svc.id}
+              style={[
+                s.row,
+                {
+                  gap: 14,
+                  minHeight: 61,
+                  borderBottomWidth: index < (services ?? []).length - 1 ? 1 : 0,
+                  borderBottomColor: "#E5E7E9",
+                },
+              ]}
+            >
+              <View
+                style={{
+                  width: 14,
+                  height: 14,
+                  borderRadius: 7,
+                  backgroundColor: dot(svc.status),
+                }}
+              />
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={s.text}>{svc.label}</Text>
+                <Text style={s.small}>{svc.detail}</Text>
+              </View>
+              <Text style={[s.small, { color: dot(svc.status), fontWeight: "600" }]}>
+                {word(svc.status)}
+              </Text>
+            </View>
+          ))
+        )}
+      </View>
+    </View>
+  );
+}
+
+function ShortcutEditorSheet({
+  shortcut,
+  onClose,
+}: {
+  shortcut: ChatShortcut;
+  onClose: () => void;
+}) {
+  const isNew = shortcut.id === "";
+  const [label, setLabel] = useState(shortcut.label);
+  const [instruction, setInstruction] = useState(shortcut.instruction);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      if (isNew) await addShortcut(label, instruction);
+      else await updateShortcut(shortcut.id, { label, instruction });
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Sheet
+      title={isNew ? "Add shortcut" : "Edit shortcut"}
+      subtitle="The label shows on the button; the instruction underneath is sent when tapped."
+      onClose={onClose}
+    >
+      <View style={{ gap: 14 }}>
+        <Field
+          label="Label"
+          value={label}
+          onChangeText={setLabel}
+          placeholder="e.g. Morning briefing"
+          maxLength={80}
+          autoFocus
+        />
+        <Field
+          label="Instruction"
+          value={instruction}
+          onChangeText={setInstruction}
+          placeholder="e.g. Summarize my unread email from this morning"
+          maxLength={4000}
+          multiline
+        />
+        <ErrorNotice error={error} />
+        <View style={[s.row, { gap: 10, justifyContent: "flex-end" }]}>
+          <Button small onPress={onClose}>
+            Cancel
+          </Button>
+          <Button small primary busy={busy} onPress={() => void save()}>
+            Save shortcut
+          </Button>
+        </View>
+      </View>
+    </Sheet>
   );
 }
 function SettingsLine({ label, value }: { label: string; value: string }) {

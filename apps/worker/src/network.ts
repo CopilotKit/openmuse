@@ -43,6 +43,22 @@ export function isPublicIp(address: string): boolean {
 
 export type Resolver = (hostname: string) => Promise<LookupAddress[]>;
 
+// Domains the owner explicitly trusts (their own sites), comma-separated via
+// BROWSER_TRUSTED_DOMAINS. Trusted hosts may resolve to private/loopback
+// addresses (e.g. split-horizon DNS or /etc/hosts pointing at a LAN server)
+// while every other destination keeps the public-IP requirement.
+export function trustedDomains(): string[] {
+  return (process.env.BROWSER_TRUSTED_DOMAINS ?? "")
+    .split(",")
+    .map((d) => d.trim().toLowerCase().replace(/\.$/, ""))
+    .filter(Boolean);
+}
+
+export function isTrustedDomain(hostname: string): boolean {
+  const name = hostname.toLowerCase().replace(/\.$/, "");
+  return trustedDomains().some((d) => name === d || name.endsWith(`.${d}`));
+}
+
 export async function validatePublicUrl(
   value: string,
   resolve: Resolver = (hostname) => lookup(hostname, { all: true, verbatim: true }),
@@ -88,7 +104,8 @@ export async function validatePublicUrl(
       clearTimeout(timer);
     }
   }
-  if (addresses.length === 0 || addresses.some((entry) => !isPublicIp(entry.address)))
+  if (addresses.length === 0) throw blocked();
+  if (!isTrustedDomain(hostname) && addresses.some((entry) => !isPublicIp(entry.address)))
     throw blocked();
   const selected = addresses.find((entry) => entry.family === 4) ?? addresses[0];
   if (!selected) throw blocked();

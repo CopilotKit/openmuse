@@ -9,7 +9,9 @@
     "test:docker": "node tests/run-docker.mjs"
   },
   "dependencies": {
-    "playwright": "1.62.1"
+    "playwright": "1.62.1",
+    "playwright-extra": "4.3.6",
+    "puppeteer-extra-plugin-stealth": "2.11.2"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

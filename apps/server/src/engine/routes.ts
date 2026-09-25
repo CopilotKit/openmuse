@@ -43,15 +43,30 @@ export function agentRoutes(service: AgentService): Hono<{ Variables: { owner: s
   app.post("/tasks/:id/input", async (c) => {
     const body = z
       .object({
-        answer: z.string().trim().min(1).max(12000),
+        answer: z.string().trim().min(1).max(12000).optional(),
+        message: z.string().trim().min(1).max(12000).optional(),
         fields: z
           .record(z.string().min(1).max(300), z.union([z.string().max(12000), z.boolean()]))
           .optional(),
       })
       .parse(await c.req.json());
-    return c.json(
-      await service.answer(c.get("owner"), c.req.param("id"), body.answer, body.fields),
-    );
+    const text = body.answer || body.message;
+    if (!text) throw new AppError("Answer or message cannot be empty", 400);
+    return c.json(await service.reply(c.get("owner"), c.req.param("id"), text, body.fields));
+  });
+  app.post("/tasks/:id/reply", async (c) => {
+    const body = z
+      .object({
+        answer: z.string().trim().min(1).max(12000).optional(),
+        message: z.string().trim().min(1).max(12000).optional(),
+        fields: z
+          .record(z.string().min(1).max(300), z.union([z.string().max(12000), z.boolean()]))
+          .optional(),
+      })
+      .parse(await c.req.json());
+    const text = body.message || body.answer;
+    if (!text) throw new AppError("Message cannot be empty", 400);
+    return c.json(await service.reply(c.get("owner"), c.req.param("id"), text, body.fields));
   });
   app.post("/goals", async (c) =>
     c.json(await service.createGoal(c.get("owner"), await c.req.json()), 201),
@@ -68,6 +83,15 @@ export function agentRoutes(service: AgentService): Hono<{ Variables: { owner: s
       .object({ action: z.enum(["pause", "resume", "stop", "check"]) })
       .parse(await c.req.json());
     return c.json(await service.controlMonitor(c.get("owner"), c.req.param("id"), action));
+  });
+  app.post("/schedules", async (c) =>
+    c.json(await service.createSchedule(c.get("owner"), await c.req.json()), 201),
+  );
+  app.post("/schedules/:id/control", async (c) => {
+    const { action } = z
+      .object({ action: z.enum(["pause", "resume", "stop", "run"]) })
+      .parse(await c.req.json());
+    return c.json(await service.controlSchedule(c.get("owner"), c.req.param("id"), action));
   });
   app.post("/ideas/refresh", async (c) => c.json(await service.refreshIdeas(c.get("owner"))));
   app.post("/ideas/:id", async (c) => {
@@ -108,6 +132,19 @@ export function agentRoutes(service: AgentService): Hono<{ Variables: { owner: s
       throw new AppError("Memory not found", 404);
     return c.json({ ok: true });
   });
+  app.post("/memories/candidates/:id", async (c) => {
+    // Explicit human decision on a captured candidate: approve moves it into
+    // memories (the only path that does), reject deletes it. Candidates can
+    // never silently overwrite memories.
+    const { action } = z
+      .object({ action: z.enum(["approve", "reject"]) })
+      .parse(await c.req.json());
+    const owner = c.get("owner");
+    const id = c.req.param("id");
+    return action === "approve"
+      ? c.json(await service.approveCandidate(owner, id), 201)
+      : c.json(await service.rejectCandidate(owner, id));
+  });
   app.post("/identity", async (c) => {
     const body = z
       .object({
@@ -142,6 +179,22 @@ export function agentRoutes(service: AgentService): Hono<{ Variables: { owner: s
     );
     if (!notification) throw new AppError("Notification not found", 404);
     return c.json(notification);
+  });
+  app.delete("/notifications/:id", async (c) => {
+    await service.db.remove(c.get("owner"), "notifications", c.req.param("id"));
+    return c.json({ ok: true });
+  });
+  app.post("/notifications/:id/delete", async (c) => {
+    await service.db.remove(c.get("owner"), "notifications", c.req.param("id"));
+    return c.json({ ok: true });
+  });
+  app.delete("/notifications", async (c) => {
+    const count = await service.db.removeAll(c.get("owner"), "notifications");
+    return c.json({ ok: true, count });
+  });
+  app.post("/notifications/clear", async (c) => {
+    const count = await service.db.removeAll(c.get("owner"), "notifications");
+    return c.json({ ok: true, count });
   });
   app.post("/sample-page", async (c) => {
     if (service.config.mode !== "sample") throw new AppError("Not found", 404);

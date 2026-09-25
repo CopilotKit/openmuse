@@ -1,4 +1,6 @@
 import {
+  ChevronDown,
+  ChevronUp,
   FileText,
   FolderOpen,
   Globe2,
@@ -8,9 +10,10 @@ import {
   Terminal,
 } from "lucide-react-native";
 import { useEffect, useState } from "react";
-import { AppState, Image, Pressable, Text, View } from "react-native";
+import { AppState, Image, Pressable, Text, useWindowDimensions, View } from "react-native";
 import type { BrowserSession } from "../../../packages/domain/src";
 import { browserAddress } from "./browser-address";
+import { BROWSER_PREVIEW_DEFAULT_COLLAPSED, browserPreviewMaxHeight } from "./browser-panel-layout";
 import { useComputerDraft } from "./computer-drafts";
 import { LinuxWorkspace } from "./computer-workspace";
 import { Button, Card, colors, ErrorNotice, Field, LinkRow, Sheet, s } from "./ui";
@@ -58,19 +61,47 @@ export function ComputerEntry() {
 export function BrowserThreadCard({ browser }: { browser: BrowserSession }) {
   const { open } = useWorkspace();
   const [failed, setFailed] = useState(false);
+  // Same compact-panel rules as BrowserToolCard: height-capped preview plus a
+  // collapse toggle so the chat stays visible on narrow viewports.
+  const [collapsed, setCollapsed] = useState(BROWSER_PREVIEW_DEFAULT_COLLAPSED);
+  const { height: windowHeight } = useWindowDimensions();
+  // Status dot: green = live session, red = error/closed, gray = idle.
+  const statusDot =
+    browser.status === "error" || browser.status === "closed"
+      ? "#D64545"
+      : browser.status === "active"
+        ? "#3FA45B"
+        : "#B9BEC4";
   useEffect(() => {
     setFailed(false);
   }, [browser.previewUrl, browser.updatedAt]);
   return (
     <Card
-      style={{ padding: 13, backgroundColor: "#EEEEF0", gap: 12, maxWidth: 440, width: "100%" }}
+      style={{ padding: 12, backgroundColor: "#EEEEF0", gap: 10, maxWidth: 640, width: "100%" }}
     >
       <View style={[s.row, { gap: 10 }]}>
         <View style={[s.iconBox, { width: 36, height: 36, borderRadius: 9 }]}>
           <Globe2 size={21} color={colors.blueDark} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[s.text, { fontWeight: "600" }]}>Browser</Text>
+          <View style={[s.row, { gap: 6, alignItems: "center" }]}>
+            <View
+              accessibilityLabel={
+                statusDot === "#3FA45B"
+                  ? "Browser session active"
+                  : statusDot === "#D64545"
+                    ? "Browser session needs attention"
+                    : "Browser session idle"
+              }
+              style={{
+                width: 9,
+                height: 9,
+                borderRadius: 5,
+                backgroundColor: statusDot,
+              }}
+            />
+            <Text style={[s.text, { fontWeight: "600" }]}>Browser</Text>
+          </View>
           <Text numberOfLines={1} style={s.small}>
             {browser.status === "closed"
               ? "Session saved"
@@ -79,38 +110,75 @@ export function BrowserThreadCard({ browser }: { browser: BrowserSession }) {
                 : browser.title}
           </Text>
         </View>
-      </View>
-      {browser.previewUrl && browser.status === "active" && !failed ? (
-        <Image
-          accessibilityLabel={`Browser preview: ${browser.title}`}
-          source={{ uri: browser.previewUrl }}
-          style={{ width: "100%", aspectRatio: 1.6, borderRadius: 11, backgroundColor: "#FFF" }}
-          resizeMode="contain"
-          onError={() => setFailed(true)}
-        />
-      ) : (
-        <View
-          style={{
-            padding: 24,
-            borderRadius: 12,
-            backgroundColor: "#FFF",
-            alignItems: "center",
-            gap: 10,
-          }}
+        {collapsed && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Take control of the browser"
+            onPress={() => open({ type: "browser", browser })}
+            style={{
+              paddingHorizontal: 10,
+              paddingVertical: 6,
+              borderRadius: 8,
+              backgroundColor: "#E4E9F2",
+            }}
+          >
+            <Text style={[s.small, { fontWeight: "600", color: colors.blueDark }]}>Control</Text>
+          </Pressable>
+        )}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={collapsed ? "Expand browser preview" : "Collapse browser preview"}
+          onPress={() => setCollapsed((value) => !value)}
+          style={{ padding: 6, borderRadius: 8 }}
         >
-          <Globe2 size={30} color={colors.muted} />
-          <Text numberOfLines={2} style={[s.muted, { textAlign: "center" }]}>
-            {failed ? "Preview unavailable. Open the browser to reconnect." : browser.url}
-          </Text>
-        </View>
+          {collapsed ? (
+            <ChevronDown size={18} color={colors.muted} />
+          ) : (
+            <ChevronUp size={18} color={colors.muted} />
+          )}
+        </Pressable>
+      </View>
+      {!collapsed && (
+        <>
+          {browser.previewUrl && browser.status === "active" && !failed ? (
+            <Image
+              accessibilityLabel={`Browser preview: ${browser.title}`}
+              source={{ uri: browser.previewUrl }}
+              style={{
+                width: "100%",
+                aspectRatio: 1.6,
+                borderRadius: 11,
+                backgroundColor: "#FFF",
+                maxHeight: browserPreviewMaxHeight(windowHeight),
+              }}
+              resizeMode="contain"
+              onError={() => setFailed(true)}
+            />
+          ) : (
+            <View
+              style={{
+                padding: 16,
+                borderRadius: 12,
+                backgroundColor: "#FFF",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <Globe2 size={30} color={colors.muted} />
+              <Text numberOfLines={2} style={[s.muted, { textAlign: "center" }]}>
+                {failed ? "Preview unavailable. Open the browser to reconnect." : browser.url}
+              </Text>
+            </View>
+          )}
+          <Button onPress={() => open({ type: "browser", browser })}>
+            {browser.status === "closed"
+              ? "Reopen browser"
+              : browser.status === "error"
+                ? "Reconnect browser"
+                : "Take control"}
+          </Button>
+        </>
       )}
-      <Button onPress={() => open({ type: "browser", browser })}>
-        {browser.status === "closed"
-          ? "Reopen browser"
-          : browser.status === "error"
-            ? "Reconnect browser"
-            : "Take control"}
-      </Button>
     </Card>
   );
 }
@@ -157,6 +225,7 @@ export function ComputerSheet() {
       title="Agent computer"
       subtitle="Your agent works here. Step in whenever you need."
       onClose={close}
+      wide
     >
       <View style={{ gap: 20 }}>
         {tab === "Browser" && (
@@ -197,7 +266,7 @@ export function ComputerSheet() {
                 label="Website address"
                 value={url}
                 onChangeText={setUrl}
-                placeholder="https://example.com"
+                placeholder="https://www.google.com"
                 autoCapitalize="none"
                 keyboardType="url"
                 onSubmitEditing={() => void create()}

@@ -8,8 +8,80 @@ import {
   readDownloadFailures,
 } from "./downloads.ts";
 import { WorkerError } from "./errors.ts";
-import { validatePublicUrl } from "./network.ts";
+import { trustedDomains, validatePublicUrl } from "./network.ts";
 import { startEgressProxy } from "./proxy.ts";
+
+// Stealth plugin hides automated-browser fingerprints (navigator.webdriver,
+// missing plugins, etc.) so bot protection on news sites lets the worker in.
+let stealthChromium: typeof import("playwright-extra").chromium | undefined;
+async function getChromium() {
+  if (!stealthChromium) {
+    const { chromium } = await import("playwright-extra");
+    const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
+    chromium.use(StealthPlugin());
+    stealthChromium = chromium;
+  }
+  return stealthChromium;
+}
+
+// Cloudflare challenge handling, ported from Scrapling's _cloudflare_solver:
+// wait out non-interactive ("Verifying you are human") pages, and click the
+// Turnstile checkbox at randomized coordinates for interactive ones.
+const CF_CHALLENGE_PATTERN =
+  /^https?:\/\/challenges\.cloudflare\.com\/cdn-cgi\/challenge-platform\//;
+const CF_MAX_SOLVE_ATTEMPTS = 3;
+
+function detectCloudflareChallenge(
+  html: string,
+  title: string,
+): "non-interactive" | "interactive" | null {
+  if (/challenges\.cloudflare\.com/i.test(html)) {
+    return /cf-turnstile|cf_turnstile|class="[^"]*turnstile/i.test(html)
+      ? "interactive"
+      : "non-interactive";
+  }
+  return /just a moment|verifying you are human/i.test(html) || /just a moment/i.test(title)
+    ? "non-interactive"
+    : null;
+}
+
+async function challengeCleared(page: Page): Promise<boolean> {
+  const html = await page.content().catch(() => "");
+  return detectCloudflareChallenge(html, "") === null;
+}
+
+async function solveCloudflare(page: Page, attempts = 0): Promise<void> {
+  if (attempts >= CF_MAX_SOLVE_ATTEMPTS) return;
+  const html = await page.content().catch(() => "");
+  const title = await page.title().catch(() => "");
+  const challenge = detectCloudflareChallenge(html, title);
+  if (!challenge) return;
+  if (challenge === "non-interactive") {
+    for (let i = 0; i < 30; i++) {
+      await page.waitForTimeout(1000);
+      if (await challengeCleared(page)) return;
+    }
+    return;
+  }
+  // Interactive Turnstile: locate the challenge iframe and click the checkbox.
+  for (let i = 0; i < 20; i++) {
+    const frame = page.frames().find((f) => CF_CHALLENGE_PATTERN.test(f.url()));
+    const frameEl = frame ? await frame.frameElement().catch(() => null) : null;
+    const box = frameEl ? await frameEl.boundingBox().catch(() => null) : null;
+    if (box) {
+      const x = box.x + 26 + Math.random() * 2;
+      const y = box.y + 25 + Math.random() * 2;
+      await page.mouse.click(x, y, { delay: 100 + Math.random() * 100 });
+      break;
+    }
+    await page.waitForTimeout(500);
+  }
+  for (let i = 0; i < 100; i++) {
+    await page.waitForTimeout(100);
+    if (await challengeCleared(page)) return;
+  }
+  return solveCloudflare(page, attempts + 1);
+}
 
 export interface Session {
   id: string;
@@ -17,6 +89,10 @@ export interface Session {
   url: string;
   status: "active" | "closed" | "error";
   updatedAt: string;
+  /** Updated whenever the session is used; used for idle eviction. */
+  lastUsedAt?: string;
+  /** Set when the last navigation was preempted by a file download. */
+  download?: PdfDownload | null;
 }
 type Running = {
   context: BrowserContext;
@@ -26,6 +102,25 @@ type Running = {
   downloadError?: boolean;
 };
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** The hostname of a URL, or "" when it cannot be parsed. */
+function safeHostname(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * True when the page hostname is exactly the expected login domain or a
+ * subdomain of it. Lookalike domains (evil-example.com) never match.
+ */
+function domainMatches(hostname: string, expected: string): boolean {
+  const actual = hostname.toLowerCase();
+  const wanted = expected.toLowerCase();
+  return actual === wanted || actual.endsWith(`.${wanted}`);
+}
 
 export function validateSessionId(id: unknown): string {
   if (typeof id !== "string" || !SESSION_ID.test(id))
@@ -50,13 +145,33 @@ export async function createBrowserManager(options: {
       const stored = JSON.parse(
         await readFile(join(dataDir, id, "session.json"), "utf8"),
       ) as Session;
-      sessions.set(id, { ...stored, id, status: "closed" });
+      sessions.set(id, {
+        ...stored,
+        id,
+        status: "closed",
+        lastUsedAt: stored.lastUsedAt ?? stored.updatedAt,
+      });
     } catch {
       /* An incomplete first launch has no session metadata to restore. */
     }
     if (sessions.has(id)) await readDownloadFailures(join(dataDir, id), true);
   }
   const directory = (id: string) => join(dataDir, validateSessionId(id));
+  // Auto-evict closed sessions that haven't been used in 7 days to prevent profile accumulation.
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+  for (const [id, session] of [...sessions.entries()]) {
+    if (session.status === "closed") {
+      const lastUsed = session.lastUsedAt ? new Date(session.lastUsedAt).getTime() : 0;
+      if (Date.now() - lastUsed > SEVEN_DAYS_MS) {
+        sessions.delete(id);
+        try {
+          await rm(join(dataDir, id), { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
   async function persist(session: Session) {
     const path = join(directory(session.id), "session.json");
     await writeFile(`${path}.tmp`, JSON.stringify(session), { mode: 0o600 });
@@ -112,9 +227,16 @@ export async function createBrowserManager(options: {
   }
   async function navigate(id: string, url: string) {
     const target = await validatePublicUrl(url);
-    const { page } = active(id);
+    const instance = active(id);
+    const { page } = instance;
+    // Downloads are captured asynchronously; snapshot the known ids so a
+    // download that preempts this navigation can be identified below.
+    const knownDownloads = new Set((await downloads(id)).map((d) => d.id));
     try {
       await page.goto(target.url.href, { waitUntil: "domcontentloaded", timeout: 20_000 });
+      // Scrapling-style: clear Cloudflare Turnstile / "Verifying you are human"
+      // challenges before reporting the page.
+      await solveCloudflare(page);
       // Chromium can follow redirects outside Playwright's initial route hook.
       // The proxy blocks those sockets, but its 403 is still an HTTP response:
       // validate the final location so the API does not report it as success.
@@ -123,14 +245,22 @@ export async function createBrowserManager(options: {
       if (error instanceof WorkerError && error.code === "BLOCKED_URL") {
         await page.goto("about:blank", { timeout: 5000 });
       }
-      // A successful attachment intentionally aborts page navigation.
-      if (!(error instanceof Error && /Download is starting/.test(error.message))) {
-        throw new WorkerError(
-          "NAVIGATION_FAILED",
-          "The page could not be loaded. It may be unreachable or contain a blocked destination.",
-          502,
-        );
+      // A download aborts page.goto: the requested URL never loaded, so the
+      // previous page must not be left up as if it were the current one
+      // (it would be reported as the navigation result). Park on
+      // about:blank and report the download that preempted the navigation.
+      if (error instanceof Error && /Download is starting/.test(error.message)) {
+        await page.goto("about:blank", { timeout: 5000 }).catch(() => {});
+        await Promise.allSettled([...instance.pending]);
+        const fresh = (await downloads(id)).filter((d) => !knownDownloads.has(d.id));
+        return { ...(await refresh(id)), download: fresh[0] ?? null };
       }
+      // A successful attachment intentionally aborts page navigation.
+      throw new WorkerError(
+        "NAVIGATION_FAILED",
+        "The page could not be loaded. It may be unreachable or contain a blocked destination.",
+        502,
+      );
     }
     return refresh(id);
   }
@@ -152,16 +282,31 @@ export async function createBrowserManager(options: {
   async function createSession(id: string, url: string) {
     await validatePublicUrl(url);
     if (running.has(id)) return navigate(id, url);
-    if (running.size >= maxSessions)
-      throw new WorkerError(
-        "SESSION_LIMIT",
-        `Close an active session before opening another (limit ${maxSessions}).`,
-        409,
-      );
-    if (!sessions.has(id) && sessions.size >= 20)
+    if (running.size >= maxSessions) {
+      // A personal agent must never dead-end at the cap: evict the
+      // least-recently-used running session instead of refusing the new one.
+      // Touches come from navigation, input, reads and screenshots, so the
+      // session the owner is actively viewing is never the victim. The hard
+      // cap on concurrent sessions is unchanged.
+      let oldest: string | undefined;
+      let oldestTouched = Number.POSITIVE_INFINITY;
+      for (const [other, instance] of running)
+        if (instance.touched < oldestTouched) {
+          oldest = other;
+          oldestTouched = instance.touched;
+        }
+      if (!oldest)
+        throw new WorkerError(
+          "SESSION_LIMIT",
+          `Close an active session before opening another (limit ${maxSessions}).`,
+          409,
+        );
+      await closeSession(oldest);
+    }
+    if (!sessions.has(id) && sessions.size >= 200)
       throw new WorkerError(
         "PROFILE_LIMIT",
-        "The worker has reached its 20 saved-profile limit.",
+        "The worker has reached its 200 saved-profile limit.",
         409,
       );
     const previous = sessions.get(id);
@@ -171,7 +316,26 @@ export async function createBrowserManager(options: {
     await mkdir(tempDirectory, { recursive: true, mode: 0o700 });
     let context: BrowserContext;
     try {
-      const { chromium } = await import("playwright");
+      const chromium = await getChromium();
+      // Trusted self-hosted domains (BROWSER_TRUSTED_DOMAINS) resolve via the
+      // worker's own DNS (/etc/hosts) to the owner's LAN origin. They must
+      // bypass the egress proxy: the proxy resolves them publicly, which
+      // hits CloudFront instead of the origin (403s) and defeats the
+      // split-horizon setup. Chromium honors /etc/hosts only when it dials
+      // directly, so list the trusted domains (apex + wildcard for
+      // subdomains, matching isTrustedDomain) in the proxy bypass.
+      const proxyBypass = ["<-loopback>", ...trustedDomains().flatMap((d) => [d, `*.${d}`])].join(
+        ",",
+      );
+      // Chromium's own DNS is locked down to loopback (everything else must go
+      // through the egress proxy), so the proxy-bypassed trusted domains
+      // above need matching resolver excludes or their direct connections
+      // would fail with ~NOTFOUND.
+      const resolverExcludes = ["127.0.0.1", ...trustedDomains().flatMap((d) => [d, `*.${d}`])];
+      const hostResolverRules = [
+        "MAP * ~NOTFOUND",
+        ...resolverExcludes.map((host) => `EXCLUDE ${host}`),
+      ].join(", ");
       context = await chromium.launchPersistentContext(profileDir, {
         // Chromium does not need the worker API credential in its environment.
         env: {
@@ -181,7 +345,12 @@ export async function createBrowserManager(options: {
         },
         headless: true,
         viewport: { width: 1280, height: 800 },
-        proxy: { server: proxy.url, bypass: "<-loopback>" },
+        // The owner's Cloudflare-fronted sites serve self-signed origin
+        // certificates (normal with Cloudflare in front); the worker talks to
+        // them over the owner's own LAN. Destination SSRF validation still
+        // applies to every request.
+        ignoreHTTPSErrors: true,
+        proxy: { server: proxy.url, bypass: proxyBypass },
         serviceWorkers: "block",
         acceptDownloads: true,
         downloadsPath: tempDirectory,
@@ -190,7 +359,7 @@ export async function createBrowserManager(options: {
           "--disable-quic",
           "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
           "--disable-extensions",
-          "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
+          `--host-resolver-rules=${hostResolverRules}`,
         ],
       });
     } catch {
@@ -299,7 +468,9 @@ export async function createBrowserManager(options: {
     read: (id: string) =>
       serial(id, async () => {
         const { page } = active(id);
-        await validatePublicUrl(page.url());
+        // A download-preempted navigation parks the page on about:blank;
+        // there is no destination to validate (mirrors refresh()).
+        if (page.url() !== "about:blank") await validatePublicUrl(page.url());
         // Evaluation is fixed by the worker; callers cannot inject JavaScript.
         const result = await page.evaluate(() => {
           const text = document.body?.innerText ?? "";
@@ -310,7 +481,7 @@ export async function createBrowserManager(options: {
             truncated: text.length > 100_000,
           };
         });
-        await validatePublicUrl(result.url);
+        if (result.url !== "about:blank") await validatePublicUrl(result.url);
         const session: Session = {
           id,
           url: result.url,
@@ -322,10 +493,57 @@ export async function createBrowserManager(options: {
         await persist(session);
         return result;
       }),
+    snapshot: (id: string) =>
+      serial(id, async () => {
+        const { page } = active(id);
+        if (page.url() !== "about:blank") await validatePublicUrl(page.url());
+        // Evaluation is fixed by the worker; callers cannot inject JavaScript.
+        const elements = await page.evaluate(() => {
+          const labelFor = (el: Element): string => {
+            const htmlEl = el as HTMLElement;
+            const input = el as HTMLInputElement;
+            const direct =
+              htmlEl.innerText ||
+              input.placeholder ||
+              input.value ||
+              el.getAttribute("aria-label") ||
+              "";
+            if (direct.trim()) return direct;
+            const idAttr = el.getAttribute("id");
+            if (idAttr) {
+              const label = document.querySelector(`label[for="${CSS.escape(idAttr)}"]`);
+              const text = label?.textContent?.trim();
+              if (text) return text;
+            }
+            return el.getAttribute("name") || "";
+          };
+          const out: Array<{ tag: string; type: string; label: string; x: number; y: number }> = [];
+          const nodes = document.querySelectorAll(
+            "a[href], button, input, select, textarea, [role=button], [role=link], [role=checkbox], [role=radio], [role=textbox]",
+          );
+          for (const el of Array.from(nodes).slice(0, 200)) {
+            const rect = (el as HTMLElement).getBoundingClientRect();
+            if (rect.width < 1 || rect.height < 1) continue;
+            out.push({
+              tag: el.tagName.toLowerCase(),
+              type: (el as HTMLInputElement).type || el.getAttribute("role") || "",
+              label: labelFor(el).trim().replace(/\s+/g, " ").slice(0, 80),
+              x: Math.round(rect.left + rect.width / 2),
+              y: Math.round(rect.top + rect.height / 2),
+            });
+          }
+          return out;
+        });
+        return {
+          url: page.url(),
+          title: (await page.title()).slice(0, 300),
+          elements,
+        };
+      }),
     input: (id: string, input: Record<string, unknown>) =>
       serial(id, async () => {
         const { page } = active(id);
-        const { type, x, y, key, text, deltaY } = input;
+        const { type, x, y, key, text, deltaY, option } = input;
         if (
           type === "click" &&
           typeof x === "number" &&
@@ -355,8 +573,123 @@ export async function createBrowserManager(options: {
           Math.abs(deltaY) <= 5000
         )
           await page.mouse.wheel(0, deltaY);
-        else throw new WorkerError("INVALID_INPUT", "Unsupported browser input or coordinates.");
+        else if (
+          type === "select" &&
+          typeof x === "number" &&
+          typeof y === "number" &&
+          Number.isFinite(x) &&
+          Number.isFinite(y) &&
+          x >= 0 &&
+          x < 1280 &&
+          y >= 0 &&
+          y < 800 &&
+          typeof option === "string" &&
+          option.length > 0 &&
+          option.length <= 500
+        ) {
+          // Native <select> dropdowns only. The evaluation is fixed by the
+          // worker: find the select under the point, tag it, then drive it
+          // with Playwright's selectOption (matches label first, then value).
+          const marker = await page.evaluate(
+            ({ px, py }: { px: number; py: number }) => {
+              const el = document.elementFromPoint(px, py);
+              const select = el?.closest ? el.closest("select") : null;
+              if (!select || (select as HTMLSelectElement).disabled) return null;
+              const token = `om-${Math.random().toString(36).slice(2)}`;
+              select.setAttribute("data-om-select", token);
+              return token;
+            },
+            { px: x, py: y },
+          );
+          if (!marker)
+            throw new WorkerError("INVALID_INPUT", "No dropdown found at those coordinates.");
+          try {
+            const locator = page.locator(`select[data-om-select="${marker}"]`);
+            const picked = await locator.selectOption({ label: option });
+            if (picked.length === 0) await locator.selectOption(option);
+          } finally {
+            await page.evaluate((token: string) => {
+              document
+                .querySelector(`select[data-om-select="${CSS.escape(token)}"]`)
+                ?.removeAttribute("data-om-select");
+            }, marker);
+          }
+        } else throw new WorkerError("INVALID_INPUT", "Unsupported browser input or coordinates.");
         return refresh(id);
+      }),
+    fill: (id: string, input: Record<string, unknown>) =>
+      serial(id, async () => {
+        const { page } = active(id);
+        const { username, password, expectedDomain } = input;
+        if (
+          typeof username !== "string" ||
+          typeof password !== "string" ||
+          username.length === 0 ||
+          username.length > 1024 ||
+          password.length === 0 ||
+          password.length > 4096
+        )
+          throw new WorkerError("INVALID_FILL", "A username and password are required.");
+        if (typeof expectedDomain !== "string" || expectedDomain.length === 0)
+          throw new WorkerError("INVALID_FILL", "The expected login domain is required.");
+        // Independent domain check: the worker refuses to type credentials
+        // into any page whose hostname is not the expected domain (or a
+        // subdomain of it), even if the caller already checked.
+        const hostname = safeHostname(page.url());
+        if (!domainMatches(hostname, expectedDomain))
+          throw new WorkerError(
+            "DOMAIN_MISMATCH",
+            `The current page is not on ${expectedDomain}; credentials were not filled.`,
+            403,
+          );
+        // Locate the login form heuristically: the first visible password field
+        // plus a username/email-shaped text field. Nothing is typed unless a
+        // password field exists, so this can never fill a search box.
+        const fields = await page.evaluateHandle(() => {
+          const visible = (element: Element) => {
+            const rect = (element as HTMLElement).getBoundingClientRect();
+            return (
+              rect.width > 0 &&
+              rect.height > 0 &&
+              getComputedStyle(element).visibility !== "hidden" &&
+              !(element as HTMLInputElement).disabled
+            );
+          };
+          const inputs = Array.from(document.querySelectorAll("input")).filter(
+            (element) => visible(element) && (element as HTMLInputElement).type !== "hidden",
+          ) as HTMLInputElement[];
+          const passwordField = inputs.find((element) => element.type === "password") ?? null;
+          const usernameField =
+            inputs.find((element) => {
+              if (element === passwordField) return false;
+              if (element.type === "email") return true;
+              if (element.type !== "text" && element.type !== "tel") return false;
+              const haystack =
+                `${element.name} ${element.id} ${element.placeholder} ${element.getAttribute("aria-label") ?? ""}`.toLowerCase();
+              return /user|email|login|account/.test(haystack);
+            }) ??
+            inputs.find(
+              (element) =>
+                element !== passwordField && (element.type === "text" || element.type === "email"),
+            ) ??
+            null;
+          return { usernameField, passwordField };
+        });
+        const usernameElement = (await fields.getProperty("usernameField")).asElement();
+        const passwordElement = (await fields.getProperty("passwordField")).asElement();
+        await fields.dispose();
+        if (!passwordElement)
+          throw new WorkerError(
+            "LOGIN_FIELDS_NOT_FOUND",
+            "No password field was found on this page. Open the site's login form first.",
+          );
+        if (usernameElement) await usernameElement.fill(username);
+        await passwordElement.fill(password);
+        // Most login forms submit on Enter; fall back to leaving the filled
+        // form in place if nothing navigates.
+        await passwordElement.press("Enter");
+        await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => undefined);
+        return { ...(await refresh(id)), filled: true, submitted: true };
       }),
     downloads: async (id: string) => {
       const saved = await downloads(id);

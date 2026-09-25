@@ -25,7 +25,6 @@ test("real isolated computer executes commands, persists files, bridges PDFs and
     publicUrl: "http://localhost:8787",
     dataDir: directory,
     agentBackend: "sample",
-    intelligenceApiKey: "test-project-key-never-sent",
     googleRedirectUri: "http://localhost/callback",
     allowedOrigins: [],
     computerEnabled: true,

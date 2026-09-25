@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
+import { projectRunEvents } from "../../../../packages/domain/src/activity-presentation.ts";
 import {
   type AgentArtifact,
   type AgentIdentity,
@@ -12,10 +13,15 @@ import {
   type Goal,
   goalInputSchema,
   type Idea,
+  type MemoryCandidate,
   type Monitor,
   monitorInputSchema,
   type RunEvent,
+  type Schedule,
+  scheduleInputSchema,
+  spawnSubagentsSchema,
 } from "../../../../packages/domain/src/agent.ts";
+import { nextCronRun } from "../../../../packages/domain/src/cron.ts";
 import type {
   ActionProposal,
   Artifact,
@@ -27,10 +33,13 @@ import type { ActionService } from "../actions.ts";
 import type { BrowserService } from "../browser.ts";
 import { ComputerService } from "../computer.ts";
 import type { Config } from "../config.ts";
+import type { CredentialsService } from "../connectors/credentials/service.ts";
 import type { Store } from "../db.ts";
 import { AppError } from "../errors.ts";
 import type { Files } from "../files.ts";
 import { backgroundFailure } from "../log.ts";
+import type { PluginRegistry } from "../plugins/registry.ts";
+import type { WorkboardService } from "../workboard/service.ts";
 import type { WorkspaceService } from "../workspace.ts";
 import { analyzeSpending } from "./finance.ts";
 import { executeModelTask } from "./model.ts";
@@ -39,10 +48,51 @@ import { LostLeaseError, type TaskContext, TaskWorker } from "./worker.ts";
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const date = () => new Date().toISOString();
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
+export const SUBAGENT_ANIMALS = [
+  "Turtle",
+  "Falcon",
+  "Otter",
+  "Beaver",
+  "Fox",
+  "Cheetah",
+  "Owl",
+  "Badger",
+  "Panda",
+  "Dolphin",
+  "Koala",
+  "Hawk",
+  "Wolf",
+  "Lynx",
+  "Raven",
+  "Tiger",
+  "Bear",
+  "Eagle",
+];
+
+const summarizeSubagent = (task: AgentTask) => ({
+  id: task.id,
+  label: (task.input?.rawLabel as string) || task.title,
+  title: task.title,
+  animal: (task.input?.animal as string) || undefined,
+  status: task.status,
+  question: task.question ?? undefined,
+});
 export class AgentService {
   readonly worker: TaskWorker;
   private maintenance?: ReturnType<typeof setInterval>;
   private refreshing = false;
+  /**
+   * Optional hook invoked from publishOutcome after a task's outcome is
+   * published. Used by the workboard for settle sync. Must be idempotent:
+   * publishOutcome also runs during maintenance for tasks that settled long
+   * ago. Never touches worker leases.
+   */
+  onTaskSettled?: (owner: string, task: AgentTask) => unknown;
+  /**
+   * Workboard service, attached by app wiring (undefined for
+   * unit-constructed services). Chat/worker tool registration reads it.
+   */
+  workboard?: WorkboardService;
   constructor(
     readonly db: Store,
     readonly config: Config,
@@ -51,6 +101,9 @@ export class AgentService {
     readonly actions: ActionService,
     readonly browser: BrowserService,
     readonly computer: ComputerService = new ComputerService(db, config),
+    readonly credentials?: CredentialsService,
+    /** Plugin registry: chat/worker tools now come from here. */
+    readonly plugins?: PluginRegistry,
   ) {
     this.worker = new TaskWorker(db, (owner, task, context) => this.execute(owner, task, context), {
       settled: (owner, task) => this.publishOutcome(owner, task),
@@ -79,6 +132,8 @@ export class AgentService {
         await this.publishOutcome(owner, value);
       for (const { owner, value } of await this.db.scan<Monitor>("monitors"))
         await this.activateMonitor(owner, value);
+      for (const { owner, value } of await this.db.scan<Schedule>("schedules"))
+        await this.activateSchedule(owner, value);
       for (const { owner, value } of await this.db.scan<Idea>("ideas"))
         if (
           value.status === "accepted" &&
@@ -123,24 +178,38 @@ export class AgentService {
   }
   async snapshot(owner: string): Promise<AgentWorkspace> {
     await this.ensure(owner);
-    const [tasks, goals, monitors, ideas, memories, artifacts, notifications, identity] =
-      await Promise.all([
-        this.db.list<AgentTask>(owner, "tasks"),
-        this.db.list<Goal>(owner, "goals"),
-        this.db.list<Monitor>(owner, "monitors"),
-        this.db.list<Idea>(owner, "ideas"),
-        this.db.list<AgentMemory>(owner, "memories"),
-        this.db.list<AgentArtifact>(owner, "agent-artifacts"),
-        this.db.list<AgentNotification>(owner, "notifications"),
-        this.db.get<AgentIdentity>(owner, "agent-settings", "identity"),
-      ]);
+    const [
+      tasks,
+      goals,
+      monitors,
+      schedules,
+      ideas,
+      memories,
+      memoryCandidates,
+      artifacts,
+      notifications,
+      identity,
+    ] = await Promise.all([
+      this.db.list<AgentTask>(owner, "tasks"),
+      this.db.list<Goal>(owner, "goals"),
+      this.db.list<Monitor>(owner, "monitors"),
+      this.db.list<Schedule>(owner, "schedules"),
+      this.db.list<Idea>(owner, "ideas"),
+      this.db.list<AgentMemory>(owner, "memories"),
+      this.db.list<MemoryCandidate>(owner, "memory-candidates"),
+      this.db.list<AgentArtifact>(owner, "agent-artifacts"),
+      this.db.list<AgentNotification>(owner, "notifications"),
+      this.db.get<AgentIdentity>(owner, "agent-settings", "identity"),
+    ]);
     const heartbeat = await this.db.get<{ lastTickAt: string }>("system", "worker-status", "tasks");
     return {
       tasks,
       goals,
       monitors,
+      schedules,
       ideas,
       memories,
+      memoryCandidates,
       artifacts,
       notifications,
       identity: identity ?? { name: "OpenMuse", tone: "warm" },
@@ -151,6 +220,34 @@ export class AgentService {
         lastTickAt: heartbeat?.lastTickAt ?? this.worker.lastTickAt,
       },
     };
+  }
+  /**
+   * Approve a pending memory candidate: the ONLY path that moves a captured
+   * candidate into `memories`. The candidate row is deleted atomically-ish
+   * (take first) so a rejected or already-decided candidate can never be
+   * double-applied, and only `pending` candidates are eligible.
+   */
+  async approveCandidate(owner: string, id: string): Promise<AgentMemory> {
+    const candidate = await this.db.take<MemoryCandidate>(owner, "memory-candidates", id);
+    if (!candidate) throw new AppError("Memory candidate not found", 404);
+    if (candidate.status !== "pending")
+      throw new AppError("Memory candidate was already decided", 409);
+    const memory: AgentMemory = {
+      id: randomUUID(),
+      text: candidate.text,
+      source: candidate.source,
+      createdAt: date(),
+    };
+    await this.db.put(owner, "memories", memory);
+    return memory;
+  }
+  /** Reject a pending memory candidate: deletes it, never touching memories. */
+  async rejectCandidate(owner: string, id: string): Promise<{ ok: true }> {
+    const candidate = await this.db.take<MemoryCandidate>(owner, "memory-candidates", id);
+    if (!candidate) throw new AppError("Memory candidate not found", 404);
+    if (candidate.status !== "pending")
+      throw new AppError("Memory candidate was already decided", 409);
+    return { ok: true };
   }
   async getTask(owner: string, id: string) {
     const task = await this.db.get<AgentTask>(owner, "tasks", id);
@@ -169,9 +266,17 @@ export class AgentService {
       task,
       files: files.map((file) => this.files.signed(owner, file)),
       browsers: browsers.map((browser) => this.browser.decorate(owner, browser)),
-      events: (await this.db.list<RunEvent>(owner, "run-events"))
-        .filter((e) => e.taskId === id)
-        .sort((a, b) => a.date.localeCompare(b.date)),
+      events: projectRunEvents(
+        (await this.db.list<RunEvent>(owner, "run-events"))
+          .filter((e) => e.taskId === id)
+          .sort((a, b) => a.date.localeCompare(b.date)),
+        {
+          onHidden: (hidden) =>
+            console.debug(
+              `[activity] hid run event ${hidden.id} (${hidden.pattern}): ${hidden.title} [${hidden.honestStatus}]`,
+            ),
+        },
+      ),
       artifacts: (await this.db.list<AgentArtifact>(owner, "agent-artifacts")).filter(
         (a) => a.taskId === id,
       ),
@@ -200,9 +305,16 @@ export class AgentService {
           ]
         : input.kind === "monitor"
           ? ["Check the source", "Compare with the last observation", "Report a meaningful change"]
-          : input.kind === "finance"
-            ? ["Validate transactions", "Calculate the summary", "Save your tracker"]
-            : ["Understand the outcome", "Plan the work", "Use connected tools", "Return a result"];
+          : input.kind === "scheduled"
+            ? ["Run the scheduled instruction", "Report the outcome", "Schedule the next run"]
+            : input.kind === "finance"
+              ? ["Validate transactions", "Calculate the summary", "Save your tracker"]
+              : [
+                  "Understand the outcome",
+                  "Plan the work",
+                  "Use connected tools",
+                  "Return a result",
+                ];
     const task: AgentTask = {
       id,
       title: input.title ?? input.prompt.slice(0, 90),
@@ -216,6 +328,7 @@ export class AgentService {
       state: {
         connectionId: (await this.workspace.connection(owner))?.id ?? null,
         ...(held && input.kind === "monitor" ? { initializingMonitor: true } : {}),
+        ...(held && input.kind === "scheduled" ? { initializingSchedule: true } : {}),
       },
       createdAt: date(),
       updatedAt: date(),
@@ -227,6 +340,121 @@ export class AgentService {
     await this.ensure(owner);
     await this.db.insertIfAbsent(owner, "tasks", task);
     return (await this.db.get<AgentTask>(owner, "tasks", id)) ?? task;
+  }
+  /**
+   * Orchestra mode: fan out one request into up to MAX_SUBAGENTS parallel
+   * subagent tasks. Returns immediately — the worker picks the children up and
+   * the caller gathers results later with collectSubagents. Depth is capped at
+   * 1: subagent tasks run through executeModelTask, whose toolset has no spawn
+   * or delegate tools, and this method refuses depth >= 1 defensively.
+   */
+  async spawnSubagents(
+    owner: string,
+    raw: unknown,
+    opts: { depth: number; threadId?: string; idempotencyKey?: string; timeoutMs?: number },
+  ) {
+    if (opts.depth >= 1) throw new AppError("Subagents cannot spawn further subagents", 400);
+    const input = spawnSubagentsSchema.parse(raw);
+    const fanoutId = hash(`fanout:${opts.idempotencyKey ?? randomUUID()}`);
+    const children = (await this.db.list<AgentTask>(owner, "tasks")).filter(
+      (task) => task.input.fanoutId === fanoutId,
+    );
+    if (children.length) return { fanoutId, spawned: children.map(summarizeSubagent) };
+    // Track which animals were already used in this fanout so siblings get different names
+    const usedAnimals = new Set<string>(children.map((c) => (c.input?.animal as string) || ""));
+    const spawned = [];
+    for (let i = 0; i < input.subagents.length; i++) {
+      const spec = input.subagents[i];
+      const clean = spec.label.trim();
+      const matched = SUBAGENT_ANIMALS.find((a) => clean.toLowerCase().startsWith(a.toLowerCase()));
+      // Pick a random unused animal; fall back to any random one if all are used
+      let animal: string;
+      if (matched) {
+        animal = matched;
+      } else {
+        const unused = SUBAGENT_ANIMALS.filter((a) => !usedAnimals.has(a));
+        const pool = unused.length > 0 ? unused : SUBAGENT_ANIMALS;
+        animal = pool[Math.floor(Math.random() * pool.length)];
+      }
+      usedAnimals.add(animal);
+      const title = clean.includes(" - ") ? clean : `${animal} - ${clean}`;
+
+      const task = await this.createTask(
+        owner,
+        {
+          kind: "agent",
+          title,
+          prompt: spec.prompt,
+          goalId: input.goalId,
+          input: {
+            fanoutId,
+            subagent: true,
+            animal,
+            rawLabel: spec.label,
+            depth: 1,
+            partialOnTimeout: true,
+            ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
+            ...(opts.threadId ? { threadId: opts.threadId } : {}),
+            ...(input.purpose ? { purpose: input.purpose } : {}),
+          },
+        },
+        `${fanoutId}:${spec.label}`,
+      );
+      spawned.push(summarizeSubagent(task));
+    }
+    return { fanoutId, spawned };
+  }
+  /**
+   * Non-blocking read of subagent results. Each entry reports the child's
+   * current status plus a truncated result when finished; ids that do not
+   * belong to this owner read as "missing".
+   */
+  async collectSubagents(owner: string, ids: unknown) {
+    const parsed = z.array(z.string().min(1)).min(1).max(25).parse(ids);
+    return Promise.all(
+      parsed.map(async (id) => {
+        const task = await this.db.get<AgentTask>(owner, "tasks", id);
+        if (!task) return { id, status: "missing" as const };
+        return {
+          ...summarizeSubagent(task),
+          result:
+            typeof task.result === "string" && task.result ? task.result.slice(0, 2000) : undefined,
+          error: task.error ?? undefined,
+          updatedAt: task.updatedAt,
+        };
+      }),
+    );
+  }
+  /** One aggregated notification per fanout when every child has settled. */
+  private async maybeNotifyFanoutComplete(owner: string, child: AgentTask) {
+    const fanoutId = typeof child.input.fanoutId === "string" ? child.input.fanoutId : null;
+    if (!fanoutId) return;
+    const siblings = (await this.db.list<AgentTask>(owner, "tasks")).filter(
+      (task) => task.input.fanoutId === fanoutId,
+    );
+    if (!siblings.length || siblings.some((task) => !terminal.has(task.status))) return;
+    const purpose =
+      typeof child.input.purpose === "string" && child.input.purpose ? child.input.purpose : null;
+    const lines = siblings
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .map((task) => {
+        const summary =
+          typeof task.result === "string" && task.result.trim()
+            ? task.result.trim().slice(0, 160)
+            : task.status === "succeeded"
+              ? "Done."
+              : task.status === "failed"
+                ? `Failed: ${(task.error ?? "unknown error").slice(0, 120)}`
+                : `Status: ${task.status}.`;
+        return `• ${task.title}: ${summary}`;
+      });
+    await this.notify(
+      owner,
+      `Subagents finished (${siblings.length}/${siblings.length})${purpose ? `: ${purpose}` : ""}`,
+      lines.join("\n").slice(0, 1200),
+      undefined,
+      `fanout-done:${fanoutId}`,
+    );
   }
   async control(owner: string, id: string, action: "pause" | "resume" | "cancel" | "retry") {
     const task = await this.getTask(owner, id);
@@ -288,6 +516,17 @@ export class AgentService {
           nextCheckAt: date(),
         },
       );
+    if (task.kind === "scheduled")
+      await this.db.compareAndSwap(
+        owner,
+        "schedules",
+        String(task.input.scheduleId),
+        {},
+        {
+          status: action === "cancel" ? "stopped" : action === "pause" ? "paused" : "active",
+          nextRunAt: date(),
+        },
+      );
     if (action === "cancel" && task.actionId) {
       const proposal = await this.db.get<ActionProposal>(owner, "actions", task.actionId);
       if (proposal?.status === "awaiting_review")
@@ -310,8 +549,9 @@ export class AgentService {
     fields?: Record<string, string | boolean>,
   ) {
     const task = await this.getTask(owner, id);
-    if (task.status !== "waiting_input")
-      throw new AppError("This task is not waiting for input", 409);
+    if (task.status !== "waiting_input") {
+      return this.reply(owner, id, answer, fields);
+    }
     const next = await this.db.compareAndSwap<AgentTask>(
       owner,
       "tasks",
@@ -327,6 +567,68 @@ export class AgentService {
     );
     if (!next) throw new AppError("Task changed; refresh and try again", 409);
     return next;
+  }
+  async reply(
+    owner: string,
+    id: string,
+    message: string,
+    fields?: Record<string, string | boolean>,
+  ) {
+    const task = await this.getTask(owner, id);
+    const text = message.trim();
+    if (!text) throw new AppError("Message cannot be empty", 400);
+
+    if (task.status === "waiting_input") {
+      const next = await this.db.compareAndSwap<AgentTask>(
+        owner,
+        "tasks",
+        id,
+        { status: "waiting_input" },
+        {
+          status: "queued",
+          question: null,
+          input: { ...task.input, ...(fields ? { fields } : {}) },
+          state: { ...task.state, answer: text },
+          updatedAt: date(),
+        },
+      );
+      if (!next) throw new AppError("Task changed; refresh and try again", 409);
+      return next;
+    }
+
+    const prevSteering = Array.isArray(task.state?.steering) ? (task.state.steering as any[]) : [];
+    const nextStatus = task.status === "paused" ? "queued" : task.status;
+    const updated = await this.db.compareAndSwap<AgentTask>(
+      owner,
+      "tasks",
+      id,
+      { status: task.status },
+      {
+        status: nextStatus,
+        prompt: `${task.prompt}\n\n[User Instruction]: ${text}`,
+        state: {
+          ...task.state,
+          steering: [...prevSteering, { text, date: date() }],
+        },
+        updatedAt: date(),
+      },
+    );
+    if (!updated) throw new AppError("Task changed; refresh and try again", 409);
+
+    await this.db.put(owner, "run-events", {
+      id: randomUUID(),
+      taskId: id,
+      kind: "observation",
+      date: date(),
+      title: "User guidance / reply",
+      detail: text,
+    });
+
+    if (task.status === "running") {
+      this.worker.abort(id);
+    }
+
+    return updated;
   }
   async createGoal(owner: string, raw: unknown, id?: string) {
     const input = goalInputSchema.parse(raw);
@@ -417,6 +719,90 @@ export class AgentService {
     const status = action === "pause" ? "paused" : action === "stop" ? "stopped" : "active";
     const saved = await this.db.put(owner, "monitors", { ...monitor, status, nextCheckAt: date() });
     const task = await this.getTask(owner, monitor.taskId);
+    if (action === "pause" || action === "stop")
+      await this.control(owner, task.id, action === "pause" ? "pause" : "cancel");
+    else {
+      this.worker.abort(task.id);
+      await this.db.compareAndSwap(
+        owner,
+        "tasks",
+        task.id,
+        { status: task.status, leaseId: task.leaseId ?? null },
+        {
+          status: "queued",
+          nextRunAt: date(),
+          leaseId: null,
+          leaseUntil: null,
+          error: null,
+          state: { ...task.state, failures: 0, notice: null },
+        },
+      );
+    }
+    return saved;
+  }
+  async createSchedule(owner: string, raw: unknown, idempotencyKey?: string) {
+    const input = scheduleInputSchema.parse(raw);
+    const id = idempotencyKey ? hash(`schedule:${idempotencyKey}`) : randomUUID();
+    const existing = await this.db.get<Schedule>(owner, "schedules", id);
+    if (existing) {
+      await this.activateSchedule(owner, existing);
+      return existing;
+    }
+    const task = await this.createTask(
+      owner,
+      {
+        kind: "scheduled",
+        title: input.title,
+        prompt: input.prompt,
+        input: { scheduleId: id },
+      },
+      `schedule:${id}`,
+      true,
+    );
+    const now = date();
+    const schedule: Schedule = {
+      id,
+      taskId: task.id,
+      title: input.title,
+      cron: input.cron,
+      timezone: input.timezone,
+      prompt: input.prompt,
+      status: "active",
+      nextRunAt: nextCronRun(input.cron, input.timezone, new Date(now)).toISOString(),
+      runs: 0,
+      createdAt: now,
+    };
+    await this.db.insertIfAbsent(owner, "schedules", schedule);
+    await this.activateSchedule(owner, schedule);
+    return schedule;
+  }
+  private async activateSchedule(owner: string, schedule: Schedule) {
+    if (schedule.status !== "active") return;
+    const task = await this.getTask(owner, schedule.taskId);
+    if (task.status !== "paused" || !task.state.initializingSchedule) return;
+    await this.db.compareAndSwap(
+      owner,
+      "tasks",
+      task.id,
+      { status: "paused", attempts: 0, state: { initializingSchedule: true } },
+      {
+        status: "queued",
+        state: { ...task.state, initializingSchedule: false },
+      },
+    );
+  }
+  async controlSchedule(owner: string, id: string, action: "pause" | "resume" | "stop" | "run") {
+    const schedule = await this.db.get<Schedule>(owner, "schedules", id);
+    if (!schedule) throw new AppError("Schedule not found", 404);
+    if (schedule.status === "stopped" && action !== "stop")
+      throw new AppError("Create a new schedule to restart this stopped job", 409);
+    const status = action === "pause" ? "paused" : action === "stop" ? "stopped" : "active";
+    const saved = await this.db.put(owner, "schedules", {
+      ...schedule,
+      status,
+      nextRunAt: date(),
+    });
+    const task = await this.getTask(owner, schedule.taskId);
     if (action === "pause" || action === "stop")
       await this.control(owner, task.id, action === "pause" ? "pause" : "cancel");
     else {
@@ -618,12 +1004,28 @@ export class AgentService {
     context: TaskContext,
   ) {
     await context.guard();
-    const connection = await this.workspace.connection(owner);
-    if (connection?.id !== task.state.connectionId)
-      throw new AppError(
-        "Google connection changed during this task. Start a new task using the current account.",
-        409,
-      );
+    if (input.kind === "email.send") {
+      // Email proposals pin the approving account (Google or IMAP/SMTP) at
+      // propose/decide time; the task-level Google connection id does not
+      // apply when the mailbox is an IMAP account.
+      const connection = await this.workspace.emailConnection(owner);
+      if (!connection) throw new AppError("Connect an email account before preparing email", 409);
+    } else if (
+      input.kind === "calendar.create" ||
+      input.kind === "calendar.update" ||
+      input.kind === "calendar.delete"
+    ) {
+      // Calendar proposals work against the local store (or Google when it
+      // is connected); the task-level Google connection id does not gate
+      // local events.
+    } else {
+      const connection = await this.workspace.connection(owner);
+      if (connection?.id !== task.state.connectionId)
+        throw new AppError(
+          "Google connection changed during this task. Start a new task using the current account.",
+          409,
+        );
+    }
     const proposal = await this.actions.propose(owner, input, `${task.id}:${key}`, task.id);
     try {
       await context.checkpoint({ actionId: proposal.id });
@@ -710,6 +1112,49 @@ export class AgentService {
         };
       }
     }
+    if (task.kind === "scheduled") {
+      try {
+        return await this.runSchedule(owner, task, context);
+      } catch (error) {
+        if (error instanceof LostLeaseError || context.signal.aborted) throw error;
+        await context.guard();
+        const failures = Number(task.state.failures ?? 0) + 1;
+        const detail = error instanceof Error ? error.message : "Scheduled run failed";
+        const nextRunAt = new Date(Date.now() + Math.min(60, 2 ** failures) * 60000).toISOString();
+        await this.db.compareAndSwap(
+          owner,
+          "schedules",
+          String(task.input.scheduleId),
+          { status: "active" },
+          {
+            error: detail,
+            nextRunAt,
+            ...(failures >= 5 ? { status: "paused" } : {}),
+          },
+        );
+        await context.event(
+          "error",
+          failures >= 5
+            ? "Schedule paused after repeated failures"
+            : "Scheduled run failed; retrying",
+          detail,
+        );
+        return {
+          status: failures >= 5 ? "paused" : "scheduled",
+          error: detail,
+          nextRunAt,
+          state: {
+            ...task.state,
+            failures,
+            notice: {
+              title: "Schedule needs attention",
+              body: detail,
+              key: `schedule-error:${task.id}:${failures >= 5 ? "paused" : "retry"}`,
+            },
+          },
+        };
+      }
+    }
     if (task.kind === "finance") {
       await context.event("step", "Analyzing the imported transactions");
       const csv = z.string().parse(task.input.csv);
@@ -748,14 +1193,18 @@ export class AgentService {
   }
   private async publishOutcome(owner: string, saved: AgentTask) {
     const task = await this.getTask(owner, saved.id);
+    const isSubagent = task.input.subagent === true;
     if (task.status === "succeeded") {
-      await this.notify(
-        owner,
-        task.title,
-        task.result ?? "Work completed",
-        task.id,
-        `task-done:${task.id}`,
-      );
+      // Subagent successes are synthesized by the parent; the single fanout
+      // notification below reports them instead of one ping per helper.
+      if (!isSubagent)
+        await this.notify(
+          owner,
+          task.title,
+          task.result ?? "Work completed",
+          task.id,
+          `task-done:${task.id}`,
+        );
       if (task.goalId) {
         for (let attempt = 0; attempt < 8; attempt++) {
           const goal = await this.db.get<Goal>(owner, "goals", task.goalId);
@@ -804,6 +1253,78 @@ export class AgentService {
       .safeParse(task.state.notice);
     if ((task.status === "scheduled" || (task.status === "paused" && task.error)) && notice.success)
       await this.notify(owner, notice.data.title, notice.data.body, task.id, notice.data.key);
+    if (isSubagent && terminal.has(task.status)) await this.maybeNotifyFanoutComplete(owner, task);
+    // Settle sync (e.g. workboard cards). Fail-open and idempotent: settle
+    // must never break outcome publication, and publishOutcome also runs
+    // from maintenance for long-settled tasks.
+    try {
+      await this.onTaskSettled?.(owner, task);
+    } catch (error) {
+      backgroundFailure("task settle hook", error);
+    }
+  }
+  private async runSchedule(
+    owner: string,
+    task: AgentTask,
+    context: TaskContext,
+  ): Promise<Partial<AgentTask>> {
+    const scheduleId = String(task.input.scheduleId ?? "");
+    const schedule = await this.db.get<Schedule>(owner, "schedules", scheduleId);
+    if (!schedule) throw new Error("Schedule not found. Stop this task and create a new schedule.");
+    if (schedule.status !== "active") {
+      await context.event("status", "Schedule is no longer active", schedule.title);
+      return { status: "paused", state: { ...task.state, notice: null } };
+    }
+    await context.guard();
+    await context.event("step", "Running scheduled job", schedule.title);
+    const outcome = await executeModelTask(this, owner, task, context);
+    const at = date();
+    // Anchor the next fire on the later of now and the fire slot this run just
+    // consumed, so an early or forced run can't reschedule onto the same slot.
+    const anchor = Math.max(new Date(at).getTime(), new Date(schedule.nextRunAt).getTime());
+    const nextRunAt = nextCronRun(schedule.cron, schedule.timezone, new Date(anchor)).toISOString();
+    const runs = schedule.runs + 1;
+    const saved = await this.db.compareAndSwap<Schedule>(
+      owner,
+      "schedules",
+      schedule.id,
+      { status: "active", runs: schedule.runs },
+      {
+        lastRunAt: at,
+        nextRunAt,
+        runs,
+        error: null,
+        lastResult:
+          typeof outcome.result === "string" ? outcome.result.slice(0, 2000) : schedule.lastResult,
+      },
+    );
+    if (!saved) throw new LostLeaseError();
+    if (outcome.status === "succeeded") {
+      const summary =
+        typeof outcome.result === "string" && outcome.result.trim()
+          ? outcome.result.slice(0, 2000)
+          : "Scheduled run completed.";
+      return {
+        status: "scheduled",
+        nextRunAt,
+        result: outcome.result,
+        state: {
+          ...task.state,
+          failures: 0,
+          notice: {
+            title: schedule.title,
+            body: summary,
+            key: `schedule-run:${schedule.id}:${runs}`,
+          },
+        },
+      };
+    }
+    // waiting_input / waiting_approval: surface through the normal flows. The next
+    // run is recomputed from the cron expression when the resumed run completes.
+    return {
+      ...outcome,
+      state: { ...task.state, ...outcome.state, failures: 0, notice: null },
+    };
   }
   private async document(
     owner: string,

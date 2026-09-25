@@ -62,13 +62,11 @@ From the repository root:
 
 ```sh
 pnpm install --frozen-lockfile
-npx copilotkit@latest login
-npx copilotkit@latest project select
 pnpm --dir apps/worker exec playwright install chromium
 pnpm dev:demo
 ```
 
-This starts AI Mock, the normal OpenMuse API on port **8788**, and a separate real browser worker on **8791**. Demo files and profiles stay in ignored `artifacts/demo/`. The runner reads only the Intelligence key from the project's private `.env` and passes it to its isolated API process; it does not pass provider or Google credentials. The Linux computer is disabled for this focused browser recording.
+This starts AI Mock, the normal OpenMuse API on port **8788**, and a separate real browser worker on **8791**. Demo files and profiles stay in ignored `artifacts/demo/`. The runner supplies an explicit local environment and does not load the project's private `.env` or provider credentials. The Linux computer is disabled for this focused browser recording.
 
 Start the app in another terminal:
 
@@ -79,7 +77,7 @@ EXPO_PUBLIC_API_URL=http://127.0.0.1:8788 pnpm dev:web
 For the iPhone development build:
 
 ```sh
-EXPO_PUBLIC_API_URL=http://127.0.0.1:8788 pnpm --dir apps/mobile exec expo start --dev-client --port 8081
+EXPO_PUBLIC_API_URL=http://127.0.0.1:8788 pnpm --dir apps/mobile exec expo start --dev-client --port 8090
 ```
 
 Use the [native setup](../apps/mobile/README.md) if the development build is not installed. Fully reload the app after changing its API URL. Android emulators use `http://10.0.2.2:8788` for the host API.
@@ -107,9 +105,9 @@ Start the demo runner, then export and serve the web app to avoid development re
 
 ```sh
 EXPO_PUBLIC_API_URL=http://127.0.0.1:8788 pnpm --dir apps/mobile exec expo export --platform web --clear --output-dir dist/web
-python3 -m http.server 8081 --bind 127.0.0.1 --directory apps/mobile/dist/web
+python3 -m http.server 8090 --bind 127.0.0.1 --directory apps/mobile/dist/web
 ```
 
-Use port 8081 when the development server is stopped. `--clear` ensures the export uses the requested API URL. Open the page in a clean desktop browser and record the two prompts and takeover flow at 1440 × 810 or larger. Describe the model setup in the accompanying recording notes. Scroll to keep the browser card and resulting text readable.
+Use port 8090 when the development server is stopped. `--clear` ensures the export uses the requested API URL. Open the page in a clean desktop browser and record the two prompts and takeover flow at 1440 × 810 or larger. Describe the model setup in the accompanying recording notes. Scroll to keep the browser card and resulting text readable.
 
 The original [75-second alpha walkthrough](https://github.com/jerelvelarde/openmuse/releases/download/v0.1.0-alpha/openmuse-demo.mp4) remains available as a historical release archive. OpenMuse's [capybara artwork and provenance](../apps/mobile/assets/README.md) are included under the repository's MIT license.

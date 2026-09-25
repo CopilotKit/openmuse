@@ -1,0 +1,40 @@
+{
+  "activation": "eager",
+  "catalog": {
+    "blurb": "Store LLM provider API keys and pick which model the agent runs on — switched live, no restart.",
+    "tags": ["llm", "model", "api-key", "provider", "openai", "anthropic", "gemini", "ollama"],
+    "title": "LLM providers"
+  },
+  "categories": ["models"],
+  "cliCommands": [],
+  "configGroups": [],
+  "configSchema": { "additionalProperties": false, "properties": {}, "type": "object" },
+  "contracts": {
+    "channels": [],
+    "routes": {
+      "mountPath": "/api/provider-keys",
+      "paths": ["/", "/catalog", "/selection", "/:id", "/:id/select", "/:id/test"]
+    },
+    "tools": [],
+    "webSearchProviders": []
+  },
+  "dashboard": {
+    "actionVerbs": [],
+    "dataBindings": [
+      {
+        "description": "Number of configured LLM provider keys (metadata only).",
+        "name": "provider_count",
+        "paramShape": { "additionalProperties": false, "properties": {}, "type": "object" }
+      }
+    ]
+  },
+  "description": "LLM provider API keys with vault encryption, a provider picker, and hot model switching. Keys are write-only; the test probe makes a minimal authenticated non-generative call (GET {baseUrl}/models) with sanitised diagnostics.",
+  "doctorContract": { "configRepair": { "dropUnknownKeys": true }, "stateMigrations": [] },
+  "enabledByDefault": true,
+  "id": "provider-keys",
+  "name": "LLM provider keys",
+  "skills": [],
+  "toolMetadata": {},
+  "version": "1.0.0",
+  "writeOnly": []
+}

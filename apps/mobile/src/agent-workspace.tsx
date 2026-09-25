@@ -13,6 +13,7 @@ import type {
   AgentWorkspace,
   CreateTaskInput,
 } from "../../../packages/domain/src/agent";
+import { setMascotSource } from "./mascot-state";
 import { useWorkspace } from "./workspace";
 
 interface AgentContextValue {
@@ -80,10 +81,44 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [api, refresh],
   );
+  // Mascot: reflect genuine agent activity — a delegation in flight, a task
+  // running on the server (the team is dispatched), or a task waiting on the
+  // user's approval. Single writer for the "agent" source.
+  const pendingDelegations = useRef(0);
+  const reportAgentActivity = useCallback(() => {
+    if (pendingDelegations.current > 0) {
+      setMascotSource("agent", "delegating");
+      return;
+    }
+    const tasks = data?.tasks ?? [];
+    if (tasks.some((task) => task.status === "waiting_approval")) {
+      setMascotSource("agent", "awaiting_approval");
+      return;
+    }
+    if (tasks.some((task) => task.status === "running")) {
+      setMascotSource("agent", "dispatching");
+      return;
+    }
+    setMascotSource("agent", "idle");
+  }, [data]);
   const delegate = useCallback(
-    (input: CreateTaskInput) => mutate<AgentTask>("/tasks", input),
-    [mutate],
+    async (input: CreateTaskInput) => {
+      // Real work: the task is being handed to the server right now.
+      pendingDelegations.current += 1;
+      setMascotSource("agent", "delegating");
+      try {
+        return await mutate<AgentTask>("/tasks", input);
+      } finally {
+        pendingDelegations.current -= 1;
+        reportAgentActivity();
+      }
+    },
+    [mutate, reportAgentActivity],
   );
+  useEffect(() => {
+    reportAgentActivity();
+    return () => setMascotSource("agent", "idle");
+  }, [reportAgentActivity]);
   return (
     <AgentContext.Provider value={{ data, error, refresh, mutate, delegate }}>
       {children}

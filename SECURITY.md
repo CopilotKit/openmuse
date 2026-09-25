@@ -28,4 +28,4 @@ Docker shares its host kernel and does not provide a full VM or a hostile-tenant
 
 A proposal is bound to the account, reviewed content, and applicable provider version. The server requires a recorded approval before dispatching a send or calendar change. An uncertain network outcome is retained for reconciliation. Cancellation stops later task steps; a provider request already in flight may still finish.
 
-A server-only CopilotKit Intelligence project key is needed for the sample walkthrough. CI uses synthetic keys and mocked Intelligence boundaries. No provider keys, personal data, or third-party logins are needed for CI. CopilotKit Intelligence and any configured model/provider operate under their own terms and data policies.
+No provider keys, personal data, or third-party logins are needed for the sample walkthrough or CI. CopilotKit Intelligence and any configured model/provider operate under their own terms and data policies.

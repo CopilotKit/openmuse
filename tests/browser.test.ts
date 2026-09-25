@@ -102,6 +102,58 @@ test("server reopens the same worker UUID regardless of stale local session stat
   assert.equal(calls.length, 4);
 });
 
+test('dashboard typing action "type" is translated to the worker\'s "text" action', async (t) => {
+  const calls: { path: string; body: Record<string, unknown> }[] = [];
+  const updated = { ...savedSession, title: "Typed page", url: "https://example.org/" };
+  const { db, service } = await browserFixture(t, (path, body) => {
+    calls.push({ path, body });
+    return { data: updated };
+  });
+  await db.put("owner", "browsers", savedSession);
+  // This is exactly what the dashboard agent's browser_input tool sends.
+  const result = await service.input("owner", sessionId, { type: "type", text: "Work User" });
+  assert.equal(result.title, updated.title);
+  assert.deepEqual(calls.at(-1), {
+    path: `/sessions/${sessionId}/input`,
+    body: { type: "text", text: "Work User" },
+  });
+});
+
+test("select input forwards the dropdown option to the worker unchanged", async (t) => {
+  const calls: { path: string; body: Record<string, unknown> }[] = [];
+  const { db, service } = await browserFixture(t, (path, body) => {
+    calls.push({ path, body });
+    return { data: savedSession };
+  });
+  await db.put("owner", "browsers", savedSession);
+  await service.input("owner", sessionId, { type: "select", x: 100, y: 200, option: "Express" });
+  assert.deepEqual(calls.at(-1), {
+    path: `/sessions/${sessionId}/input`,
+    body: { type: "select", x: 100, y: 200, option: "Express" },
+  });
+});
+
+test("read returns the worker's current page text", async (t) => {
+  const observed = {
+    url: "https://example.org/article/final",
+    title: "An observed article",
+    text: "Actual article contents from the browser.",
+    truncated: false,
+  };
+  const { db, service } = await browserFixture(t, () => ({ data: observed }));
+  await db.put("owner", "browsers", savedSession);
+  assert.deepEqual(await service.read("owner", sessionId), observed);
+  await assert.rejects(service.read("stranger", sessionId), { status: 404 });
+});
+
+test("screenshot returns the worker's PNG bytes", async (t) => {
+  const { db, service } = await browserFixture(t, () => ({ data: { ok: true } }));
+  await db.put("owner", "browsers", savedSession);
+  const bytes = await service.screenshot("owner", sessionId);
+  assert.ok(bytes instanceof Uint8Array);
+  assert.ok(bytes.length > 0);
+});
+
 test("console input persists the worker's current page title and URL", async (t) => {
   const updated = { ...savedSession, title: "New page", url: "https://example.org/" };
   const { db, service } = await browserFixture(t, () => ({ data: updated }));
@@ -529,4 +581,141 @@ test("egress proxy blocks HTTP and CONNECT traffic to local network destinations
   } finally {
     await proxy.close();
   }
+});
+
+test("listSessions merges live worker status over saved records, newest first", async (t) => {
+  const live = [
+    {
+      id: "00000000-0000-4000-8000-0000000000a1",
+      title: "Live title",
+      url: "https://example.org/live",
+      status: "active",
+      updatedAt: "2026-09-20T00:00:00.000Z",
+    },
+  ];
+  const { db, service } = await browserFixture(t, (path) =>
+    path === "/sessions" ? { data: live } : { data: savedSession },
+  );
+  await db.put("owner", "browsers", {
+    ...savedSession,
+    id: "00000000-0000-4000-8000-0000000000a1",
+    title: "Stale title",
+    status: "closed",
+    updatedAt: "2026-09-10T00:00:00.000Z",
+  });
+  await db.put("owner", "browsers", {
+    ...savedSession,
+    id: "00000000-0000-4000-8000-0000000000a2",
+    title: "Stored only",
+    status: "closed",
+    updatedAt: "2026-09-22T00:00:00.000Z",
+  });
+  const sessions = await service.listSessions("owner");
+  assert.equal(sessions.length, 2);
+  assert.equal(sessions[0]?.id, "00000000-0000-4000-8000-0000000000a2");
+  assert.equal(
+    sessions[0]?.title,
+    "Stored only",
+    "sessions missing from the worker keep stored data",
+  );
+  assert.equal(sessions[1]?.id, "00000000-0000-4000-8000-0000000000a1");
+  assert.equal(sessions[1]?.title, "Live title", "live worker state wins over the stored record");
+  assert.equal(sessions[1]?.status, "active");
+});
+
+test("listSessions falls back to stored records when the worker is unreachable", async (t) => {
+  const { db, service } = await browserFixture(t, () => ({
+    status: 500,
+    data: { error: { code: "WORKER_FAILURE", message: "boom" } },
+  }));
+  await db.put("owner", "browsers", savedSession);
+  const sessions = await service.listSessions("owner");
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0]?.title, "Saved page");
+});
+
+test("POST /api/browsers/restart closes every session and clears browser and terminal history", async (t) => {
+  const closed: string[] = [];
+  const { db, config } = await browserFixture(t, (path) => {
+    const match = /^\/sessions\/([^/]+)\/close$/.exec(path);
+    if (match) {
+      closed.push(match[1]);
+      return { data: { ...savedSession, id: match[1], status: "closed" } };
+    }
+    return { data: [] };
+  });
+  const { app, auth, agent } = await createApp(db, config);
+  t.after(() => agent.stop());
+  const { token } = await auth.session();
+  const headers = { Authorization: `Bearer ${token}` };
+  const idA = "00000000-0000-4000-8000-0000000000a1";
+  const idB = "00000000-0000-4000-8000-0000000000a2";
+  await db.put("local-user", "browsers", { ...savedSession, id: idA, status: "active" });
+  await db.put("local-user", "browsers", { ...savedSession, id: idB, status: "closed" });
+  await db.put("local-user", "chat-browsers", { id: "thread-1", sessionId: idA });
+  await db.put("local-user", "computer-commands", {
+    id: "cmd-1",
+    command: "echo hi",
+    status: "succeeded",
+    startedAt: "2026-09-22T00:00:00.000Z",
+  });
+  await db.put("someone-else", "browsers", { ...savedSession, id: "other-owner-session" });
+  const response = await app.request("/api/browsers/restart", { method: "POST", headers });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    closedSessions: 2,
+    clearedSessions: 2,
+    clearedCommands: 1,
+  });
+  assert.deepEqual(closed.sort(), [idA, idB].sort());
+  assert.equal((await db.list("local-user", "browsers")).length, 0);
+  assert.equal((await db.list("local-user", "chat-browsers")).length, 0);
+  assert.equal((await db.list("local-user", "computer-commands")).length, 0);
+  assert.equal((await db.list("someone-else", "browsers")).length, 1, "other owners are untouched");
+});
+
+test("restart still clears saved records when the worker is unreachable", async (t) => {
+  const { db, service } = await browserFixture(t, () => ({
+    status: 500,
+    data: { error: { code: "WORKER_FAILURE", message: "boom" } },
+  }));
+  await db.put("owner", "browsers", savedSession);
+  const result = await service.restart("owner");
+  assert.deepEqual(result, { closedSessions: 0, clearedSessions: 1 });
+  assert.equal((await db.list("owner", "browsers")).length, 0);
+});
+
+test("browser snapshot fetches the worker element list for an owned session", async (t) => {
+  const calls: string[] = [];
+  const elements = [{ tag: "input", type: "text", label: "Name", x: 120, y: 240 }];
+  const { db, service } = await browserFixture(t, (path) => {
+    calls.push(path);
+    return { data: { url: "https://example.org/", title: "Page", elements } };
+  });
+  await db.put("owner", "browsers", savedSession);
+  const snapshot = await service.snapshot("owner", sessionId);
+  assert.deepEqual(calls, [`/sessions/${sessionId}/snapshot`]);
+  assert.deepEqual(snapshot.elements, elements);
+});
+
+test("browser input posts the input action to the owned worker session", async (t) => {
+  const calls: { path: string; body: Record<string, unknown> }[] = [];
+  const { db, service } = await browserFixture(t, (path, body) => {
+    calls.push({ path, body });
+    return { data: { ...savedSession, title: "After click" } };
+  });
+  await db.put("owner", "browsers", savedSession);
+  await service.input("owner", sessionId, { type: "click", x: 100, y: 200 });
+  assert.deepEqual(calls, [
+    { path: `/sessions/${sessionId}/input`, body: { type: "click", x: 100, y: 200 } },
+  ]);
+});
+
+test("browser snapshot and input reject sessions owned by someone else", async (t) => {
+  const { db, service } = await browserFixture(t, () => ({ data: {} }));
+  await db.put("owner", "browsers", savedSession);
+  await assert.rejects(() => service.snapshot("someone-else", sessionId));
+  await assert.rejects(() =>
+    service.input("someone-else", sessionId, { type: "scroll", deltaY: 10 }),
+  );
 });

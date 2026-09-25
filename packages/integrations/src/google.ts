@@ -606,20 +606,45 @@ export class GoogleClient {
     }
   }
 
+  /**
+   * One page of matching messages, newest first. Returns the messages plus
+   * Google's token for the next page, when more results remain. The page
+   * token is opaque — callers pass it back verbatim.
+   */
+  async listMailPage(
+    query = "in:inbox",
+    options: { pageToken?: string; maxResults?: number } = {},
+  ): Promise<{ messages: Mail[]; nextPageToken?: string }> {
+    const maxResults = Math.min(Math.max(options.maxResults ?? 30, 1), 50);
+    const params = new URLSearchParams({ maxResults: String(maxResults), q: query });
+    if (options.pageToken) params.set("pageToken", options.pageToken);
+    const list = z
+      .object({
+        messages: z.array(z.object({ id: z.string() })).default([]),
+        nextPageToken: z.string().optional(),
+      })
+      .parse(await this.request(`${GMAIL}/messages?${params}`));
+    const messages = await Promise.all(list.messages.map(async ({ id }) => this.getMessage(id)));
+    return { messages, nextPageToken: list.nextPageToken };
+  }
+
   /** The latest 30 matching messages. Permission/read failures propagate visibly. */
   async listMail(query = "in:inbox"): Promise<Mail[]> {
-    const params = new URLSearchParams({ maxResults: "30", q: query });
-    const list = z
-      .object({ messages: z.array(z.object({ id: z.string() })).default([]) })
-      .parse(await this.request(`${GMAIL}/messages?${params}`));
-    return Promise.all(
-      list.messages
-        .slice(0, 30)
-        .map(async ({ id }) =>
-          this.mapMessage(
-            messageSchema.parse(await this.request(`${GMAIL}/messages/${idPath(id)}?format=full`)),
-          ),
-        ),
+    return (await this.listMailPage(query)).messages;
+  }
+
+  /** One message by id, full format. Permission/read failures propagate visibly. */
+  async getMessage(id: string): Promise<Mail> {
+    return this.mapMessage(
+      messageSchema.parse(await this.request(`${GMAIL}/messages/${idPath(id)}?format=full`)),
+    );
+  }
+
+  /** One calendar event by id. Permission/read failures propagate visibly. */
+  async getEvent(calendarId: string, eventId: string): Promise<CalendarEvent> {
+    return mapEvent(
+      await this.request(`${calendarPath(calendarId)}/events/${idPath(eventId)}`),
+      calendarId,
     );
   }
 

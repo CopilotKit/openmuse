@@ -16,21 +16,31 @@ import {
   ScrollView,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { z } from "zod";
 import { ArtifactCard } from "./agent-ui";
 import { useAgentWorkspace } from "./agent-workspace";
-import { AssistantResponse } from "./assistant-response";
 import { BackgroundUpdates } from "./background-updates";
 import { BrowserRunContext, BrowserToolCard } from "./browser-tool-card";
 import { BrowserThreadCard } from "./computer";
 import { ConversationQueue, type QueuedMessage } from "./conversation-queue";
 import { runConversationTurn } from "./conversation-run";
+import {
+  EMPTY_CHAT_HEADING,
+  EMPTY_CHAT_NO_SHORTCUTS_HINT,
+  EMPTY_CHAT_SUBTITLE,
+  emptyChatButtons,
+} from "./empty-chat";
 import { MailToolCard } from "./mail-tool-card";
+import { flashMascot, setMascotSource, useActivityMascot } from "./mascot-state";
+import { ensureShortcutsLoaded, getShortcutsSnapshot, subscribeShortcuts } from "./shortcuts";
+import { SubagentsLivePanel } from "./subagent-live";
 import { FileThreadCard, TaskThreadCard } from "./thread-artifacts";
 import { type Selection, useMuseThread } from "./threads";
 import { Button, Card, CheckRow, colors, ErrorNotice, s } from "./ui";
+import { VoiceNoteButton } from "./voice-notes";
 import { useWorkspace } from "./workspace";
 
 const displayParameters = z.record(z.string(), z.unknown());
@@ -173,18 +183,57 @@ export function ChatScreen({
   thread?: Selection;
   active?: boolean;
 }) {
-  const { api, workspace: w, refresh, navigate } = useWorkspace();
+  const { api, workspace: w, refresh } = useWorkspace();
+  const { width: windowWidth } = useWindowDimensions();
+  // Keep user bubbles at a readable line length even in the wide shared
+  // container; assistant messages and tool cards may use most of the width.
+  const desktopChat = windowWidth >= 900;
+  const userBubbleMaxWidth = desktopChat
+    ? Math.min(windowWidth * 0.94, 1500) * 0.62
+    : windowWidth * 0.82;
   const { data: agentWorkspace, refresh: refreshAgent } = useAgentWorkspace();
   const { enabled: richThreads, mainId, claimPrompt } = useMuseThread();
-  const selection = thread || { id: "local", existing: false };
-  const threadId = richThreads ? selection.id : "local-main";
+  const selection = thread || { id: "main", existing: false };
+  const threadId = selection.id;
   const agentId = `openmuse-${threadId}`;
   const { agent, isReady } = useAgent({ agentId, runtimeAgentId: "default", threadId });
   const { copilotkit } = useCopilotKit();
+
+  // A successful chat_clear_history tool call clears the server-side history
+  // mid-run. Drop the local messages too, so the run-final saveHistory()
+  // writes the fresh state instead of rewriting the old thread from memory.
+  // The agent's confirmation reply then becomes the first message of the
+  // fresh chat.
+  const historyClearHandled = useRef<string | null>(null);
+  useEffect(() => {
+    const subscription = agent.subscribe({
+      onMessagesChanged: ({ messages }) => {
+        for (const message of messages) {
+          if (message.role !== "tool" || historyClearHandled.current === message.id) continue;
+          let result: unknown = null;
+          try {
+            result = JSON.parse(message.content);
+          } catch {
+            continue;
+          }
+          if (
+            typeof result === "object" &&
+            result !== null &&
+            (result as { cleared?: unknown }).cleared === true
+          ) {
+            historyClearHandled.current = message.id;
+            agent.setMessages([]);
+            break;
+          }
+        }
+      },
+    });
+    return () => subscription.unsubscribe();
+  }, [agent]);
   const renderToolCall = useRenderToolCall();
   const [draft, setDraft] = useState("");
   const [focused, setFocused] = useState(false);
-  const [inputHeight, setInputHeight] = useState(44);
+  const [inputHeight, setInputHeight] = useState(48);
   const [showResults, setShowResults] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -200,6 +249,11 @@ export function ChatScreen({
   const [saveError, setSaveError] = useState("");
   const [historyError, setHistoryError] = useState("");
   const [historyAttempt, setHistoryAttempt] = useState(0);
+  // User-configurable chat shortcuts shown on the empty chat screen.
+  const shortcuts = useSyncExternalStore(subscribeShortcuts, getShortcutsSnapshot);
+  useEffect(() => {
+    void ensureShortcutsLoaded();
+  }, []);
   useEffect(() => {
     if (!isReady) return;
     let active = true;
@@ -220,8 +274,18 @@ export function ChatScreen({
               (onError) => copilotkit.subscribe({ onError }),
             );
         } else {
-          const { messages } = await api.request<{ messages: Message[] }>("/api/conversation");
-          if (active) agent.setMessages(messages);
+          // For new side chats (not main, not existing), start with empty history
+          const isMainThread = threadId === "main" || threadId === mainId;
+          if (!isMainThread && !selection.existing) {
+            // Fresh side chat - clear any stale messages and start blank
+            agent.setMessages([]);
+          } else {
+            const qs = isMainThread ? "" : `?threadId=${encodeURIComponent(threadId)}`;
+            const { messages } = await api.request<{ messages: Message[] }>(
+              `/api/conversation${qs}`,
+            );
+            if (active) agent.setMessages(messages);
+          }
         }
         if (active) setLoaded(true);
       } catch (e) {
@@ -241,9 +305,16 @@ export function ChatScreen({
     };
   }, [agent, agentId, api, copilotkit, isReady, historyAttempt, richThreads, selection.existing]);
   const saveHistory = useCallback(async () => {
-    if (!richThreads) await api.request("/api/conversation", { messages: agent.messages }, "PUT");
+    if (!richThreads) {
+      const isMain = threadId === "main" || threadId === mainId;
+      await api.request(
+        "/api/conversation",
+        { messages: agent.messages, ...(isMain ? {} : { threadId }) },
+        "PUT",
+      );
+    }
     setSaveError("");
-  }, [agent, api, richThreads]);
+  }, [agent, api, richThreads, threadId, mainId]);
   const run = useCallback(
     async (message?: QueuedMessage) => {
       if (runLock.current || agent.isRunning || !isReady || !loaded)
@@ -259,6 +330,7 @@ export function ChatScreen({
           (onError) => copilotkit.subscribe({ onError }),
         );
         await Promise.all([refresh(), refreshAgent()]);
+        flashMascot("success");
       } finally {
         try {
           await saveHistory();
@@ -277,7 +349,10 @@ export function ChatScreen({
   );
   const flush = useCallback(() => {
     if (!loaded || !isReady || runLock.current || agent.isRunning) return;
-    void queue.flush(run).catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    void queue.flush(run).catch((e) => {
+      flashMascot("error");
+      setError(e instanceof Error ? e.message : String(e));
+    });
   }, [agent, isReady, loaded, queue, run]);
   const enqueue = useCallback(
     (text: string) => {
@@ -328,7 +403,7 @@ export function ChatScreen({
           : ""),
     );
     setDraft("");
-    setInputHeight(44);
+    setInputHeight(48);
     setAttachments([]);
     setPicking(false);
   }
@@ -339,12 +414,21 @@ export function ChatScreen({
   );
   const visible = messages.filter((m) => m.role === "user" || m.role === "assistant");
   const replying = busy || agent.isRunning;
+  useEffect(() => {
+    setMascotSource("chat", replying ? "thinking" : "idle");
+    return () => setMascotSource("chat", "idle");
+  }, [replying]);
+  // Server-projected activity drives the "agent" mascot source: a failed
+  // background task surfaces as an error even while chatting.
+  useActivityMascot(w.activity);
   return (
     <View style={{ flex: 1 }}>
       <ScrollView
         ref={list}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ gap: 13, paddingTop: 15, paddingBottom: 20, flexGrow: 1 }}
+        // Web shows the native scrollbar; native keeps its thin auto-hiding indicator.
+        showsVerticalScrollIndicator={Platform.OS === "web"}
+        persistentScrollbar={false}
+        contentContainerStyle={{ gap: 12, paddingTop: 10, paddingBottom: 20, flexGrow: 1 }}
         onScroll={({ nativeEvent: { contentOffset, contentSize, layoutMeasurement } }) => {
           const nearEnd = contentSize.height - contentOffset.y - layoutMeasurement.height < 100;
           followLatest.current = nearEnd;
@@ -372,42 +456,43 @@ export function ChatScreen({
               flexShrink: 0,
               justifyContent: "center",
               alignItems: "center",
-              paddingVertical: 34,
-              gap: 15,
+              paddingVertical: 28,
+              gap: 12,
             }}
           >
             <Text
               style={{
-                fontSize: 28,
-                letterSpacing: -1,
+                fontSize: 24,
+                letterSpacing: -0.8,
                 color: colors.text,
                 textAlign: "center",
-                maxWidth: 350,
+                maxWidth: 460,
               }}
             >
-              A little help. A lot more room for life.
+              {EMPTY_CHAT_HEADING}
             </Text>
-            <Text style={[s.muted, { maxWidth: 320, textAlign: "center", lineHeight: 23 }]}>
-              Tell me what’s on your mind. I can make a plan, work with your apps, and use my
-              computer to help.
+            <Text style={[s.muted, { maxWidth: 420, textAlign: "center" }]}>
+              {EMPTY_CHAT_SUBTITLE}
             </Text>
-            <View style={{ width: "100%", maxWidth: 360, marginTop: 14, gap: 8 }}>
-              {[
-                {
-                  text: "Find cool things on Hacker News",
-                  action: () => enqueue("Check out Hacker News for cool stuff"),
-                },
-                {
-                  text: "Summarize copilotkit.ai",
-                  action: () => enqueue("Summarize copilotkit.ai"),
-                },
-                { text: "Keep an eye on a website", action: () => navigate("goals") },
-              ].map((item) => (
-                <Button key={item.text} onPress={item.action}>
-                  {item.text}
-                </Button>
-              ))}
-            </View>
+            {shortcuts.length ? (
+              <View style={{ width: "100%", maxWidth: 520, marginTop: 14, gap: 14 }}>
+                {emptyChatButtons(shortcuts).map((item) => (
+                  <View key={item.key} style={{ gap: 5 }}>
+                    <Button onPress={() => enqueue(item.instruction)}>{item.label}</Button>
+                    <Text
+                      style={[s.small, { textAlign: "center", paddingHorizontal: 12 }]}
+                      numberOfLines={3}
+                    >
+                      {item.instruction}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={[s.muted, { marginTop: 14, textAlign: "center" }]}>
+                {EMPTY_CHAT_NO_SHORTCUTS_HINT}
+              </Text>
+            )}
           </View>
         ) : (
           visible.map((message) => {
@@ -419,29 +504,33 @@ export function ChatScreen({
                 key={message.id}
                 style={{
                   alignSelf: user ? "flex-end" : "flex-start",
-                  maxWidth: user ? "85%" : "95%",
-                  width: toolCalls.length ? "95%" : undefined,
+                  maxWidth: user ? userBubbleMaxWidth : "100%",
+                  width: toolCalls.length ? "100%" : undefined,
                   gap: 8,
                 }}
               >
                 {!!text && (
                   <View
                     style={{
-                      paddingHorizontal: 16,
-                      paddingVertical: 13,
-                      borderRadius: 22,
-                      borderBottomRightRadius: user ? 7 : 22,
-                      borderBottomLeftRadius: user ? 22 : 7,
-                      backgroundColor: user ? colors.blue : "#EEEEF0",
+                      paddingHorizontal: 14,
+                      paddingVertical: 11,
+                      borderRadius: 20,
+                      borderBottomRightRadius: user ? 7 : 20,
+                      borderBottomLeftRadius: user ? 20 : 7,
+                      backgroundColor: user ? colors.blueDark : "#FFFFFF",
+                      borderWidth: user ? 0 : 1,
+                      borderColor: colors.line,
                     }}
                   >
-                    {user ? (
-                      <Text selectable style={[s.text, { fontSize: 16, lineHeight: 24 }]}>
-                        {text}
-                      </Text>
-                    ) : (
-                      <AssistantResponse content={text} />
-                    )}
+                    <Text
+                      selectable
+                      style={[
+                        s.text,
+                        { fontSize: 15, lineHeight: 23, color: user ? "#FFFFFF" : colors.text },
+                      ]}
+                    >
+                      {text}
+                    </Text>
                   </View>
                 )}
                 <BrowserRunContext
@@ -509,7 +598,12 @@ export function ChatScreen({
             )}
           </>
         )}
-        {(!richThreads || selection.id === mainId) && <BackgroundUpdates />}
+        {(threadId === "main" || threadId === mainId) && (
+          <>
+            <SubagentsLivePanel />
+            <BackgroundUpdates />
+          </>
+        )}
         {(busy || agent.isRunning) && (
           <View
             accessibilityLabel="Agent is working"
@@ -520,7 +614,9 @@ export function ChatScreen({
                 gap: 7,
                 paddingHorizontal: 19,
                 paddingVertical: 18,
-                backgroundColor: "#EEEEF0",
+                backgroundColor: "#FFFFFF",
+                borderWidth: 1,
+                borderColor: colors.line,
                 borderRadius: 28,
               },
             ]}
@@ -622,7 +718,11 @@ export function ChatScreen({
         {picking && (
           <Card style={{ marginBottom: 12, padding: 15 }}>
             <Text style={s.heading}>Add a document</Text>
-            <ScrollView style={{ maxHeight: 230 }} keyboardShouldPersistTaps="handled">
+            <ScrollView
+              style={{ maxHeight: 230 }}
+              keyboardShouldPersistTaps="handled"
+              persistentScrollbar={false}
+            >
               {w.files.length ? (
                 w.files.map((f) => (
                   <CheckRow
@@ -656,7 +756,7 @@ export function ChatScreen({
             backgroundColor: "#FFF",
             borderRadius: 32,
             borderWidth: 1,
-            borderColor: focused ? "#C7E4F9" : "#EEF0F2",
+            borderColor: focused ? "#C7E4F9" : colors.line,
             padding: 8,
             shadowColor: "#18384B",
             shadowOpacity: focused ? 0.1 : 0.06,
@@ -700,6 +800,11 @@ export function ChatScreen({
             </View>
           )}
           <View style={[s.row, { gap: 7, alignItems: "flex-end" }]}>
+            <VoiceNoteButton
+              api={api}
+              onTranscript={(t) => enqueue(t)}
+              disabled={!loaded || !isReady}
+            />
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Attach a document"
@@ -723,7 +828,7 @@ export function ChatScreen({
               value={draft}
               onChangeText={setDraft}
               onContentSizeChange={(event) =>
-                setInputHeight(Math.max(44, Math.min(140, event.nativeEvent.contentSize.height)))
+                setInputHeight(Math.max(48, Math.min(140, event.nativeEvent.contentSize.height)))
               }
               placeholder={
                 !isReady
@@ -734,7 +839,7 @@ export function ChatScreen({
                       : "Loading conversation…"
                     : "Message…"
               }
-              placeholderTextColor="#949B9F"
+              placeholderTextColor="#7E868B"
               selectionColor={colors.blueDark}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
@@ -742,9 +847,9 @@ export function ChatScreen({
                 flex: 1,
                 color: colors.text,
                 height: inputHeight,
-                minHeight: 44,
+                minHeight: 48,
                 maxHeight: 140,
-                fontSize: 17,
+                fontSize: 16,
                 lineHeight: 24,
                 paddingHorizontal: 2,
                 paddingTop: 10,

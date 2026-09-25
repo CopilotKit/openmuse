@@ -211,3 +211,117 @@ test("chat mail tools report disconnected mail and refuse another owner's thread
   call = { name: "read_mail_thread", arguments: { threadId: "trip-thread" } };
   assert.match(await toolError(), /not found/);
 });
+
+test("chat agent lists and closes browser sessions with dedicated tools", async (t) => {
+  const listedId = "00000000-0000-4000-8000-0000000000b1";
+  const browserCalls: string[] = [];
+  const fixture = await browserFixture(t, (path) => {
+    browserCalls.push(path);
+    const closeMatch = /^\/sessions\/([^/]+)\/close$/.exec(path);
+    if (closeMatch)
+      return {
+        data: {
+          id: closeMatch[1],
+          title: "Closed page",
+          url: "https://example.org/",
+          status: "closed",
+          updatedAt: "2026-09-22T00:00:00.000Z",
+        },
+      };
+    if (path === "/sessions")
+      return {
+        data: [
+          {
+            id: listedId,
+            title: "Live page",
+            url: "https://example.org/",
+            status: "active",
+            updatedAt: "2026-09-22T00:00:00.000Z",
+          },
+        ],
+      };
+    return { data: observed };
+  });
+  await fixture.db.put("local-user", "browsers", {
+    ...observed,
+    id: listedId,
+    title: "Stale page",
+    status: "closed",
+    updatedAt: "2026-09-10T00:00:00.000Z",
+  });
+  const config = { ...fixture.config, agentBackend: "model", model: "openai/fixture" } as const;
+  const server = await createApp(fixture.db, config);
+  t.after(() => server.agent.stop());
+  const { requests } = await modelFixture(t, (index) =>
+    index === 0
+      ? { name: "browser_list_sessions", arguments: {} }
+      : index === 1
+        ? { name: "browser_close_session", arguments: { sessionId: listedId } }
+        : undefined,
+  );
+  const conversation = new ConversationAgent(config, server.agent, "local-user");
+  const events = (await lastValueFrom(conversation.run(runInput()).pipe(toArray()))).map((event) =>
+    EventSchemas.parse(event),
+  );
+  const results = events.filter((event) => event.type === EventType.TOOL_CALL_RESULT);
+  assert.equal(results.length, 2);
+  const listed = results[0];
+  assert.ok(listed && listed.type === EventType.TOOL_CALL_RESULT);
+  assert.deepEqual(JSON.parse(listed.content), {
+    sessions: [
+      {
+        id: listedId,
+        title: "Live page",
+        url: "https://example.org/",
+        status: "active",
+        updatedAt: "2026-09-22T00:00:00.000Z",
+      },
+    ],
+  });
+  const closed = results[1];
+  assert.ok(closed && closed.type === EventType.TOOL_CALL_RESULT);
+  assert.deepEqual(JSON.parse(closed.content), { closed: listedId, status: "closed" });
+  assert.deepEqual(browserCalls, ["/sessions", `/sessions/${listedId}/close`]);
+  assert.ok(requests[0].body.includes('"name":"browser_list_sessions"'));
+  assert.ok(requests[0].body.includes('"name":"browser_close_session"'));
+  assert.equal(events.at(-1)?.type, EventType.RUN_FINISHED);
+});
+
+test("chat browser_snapshot exposes the worker element list to the model", async (t) => {
+  const elements = [{ tag: "input", type: "text", label: "Name", x: 120, y: 240 }];
+  const browserCalls: string[] = [];
+  const fixture = await browserFixture(t, (path) => {
+    browserCalls.push(path);
+    return { data: { url: "https://example.org/", title: "Page", elements } };
+  });
+  const snapshotId = "snap-session-1";
+  await fixture.db.put("local-user", "browsers", {
+    id: snapshotId,
+    title: "Page",
+    url: "https://example.org/",
+    status: "active",
+    updatedAt: "2026-09-22T00:00:00.000Z",
+  });
+  const config = { ...fixture.config, agentBackend: "model", model: "openai/fixture" } as const;
+  const server = await createApp(fixture.db, config);
+  t.after(() => server.agent.stop());
+  const { requests } = await modelFixture(t, (index) =>
+    index === 0 ? { name: "browser_snapshot", arguments: { sessionId: snapshotId } } : undefined,
+  );
+  const conversation = new ConversationAgent(config, server.agent, "local-user");
+  const events = (await lastValueFrom(conversation.run(runInput()).pipe(toArray()))).map((event) =>
+    EventSchemas.parse(event),
+  );
+  const results = events.filter((event) => event.type === EventType.TOOL_CALL_RESULT);
+  assert.equal(results.length, 1);
+  const first = results[0];
+  assert.ok(first && first.type === EventType.TOOL_CALL_RESULT);
+  assert.deepEqual(JSON.parse(first.content), {
+    url: "https://example.org/",
+    title: "Page",
+    elements,
+  });
+  assert.deepEqual(browserCalls, [`/sessions/${snapshotId}/snapshot`]);
+  assert.ok(requests[0].body.includes('"name":"browser_snapshot"'));
+  assert.equal(events.at(-1)?.type, EventType.RUN_FINISHED);
+});

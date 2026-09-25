@@ -3,12 +3,10 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { intelligenceKeyRequiredMessage, required } from "../config.ts";
 import { createStore } from "../db.ts";
 import { createDemoModel, demoModel } from "./model.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
-const intelligenceApiKey = required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage);
 const dataDir = join(root, "artifacts", "demo", "api");
 const runtimeDir = join(root, "artifacts", "demo", "runtime");
 const port = Number(process.env.DEMO_API_PORT ?? "8788");
@@ -83,10 +81,9 @@ const api = spawn(
       TASK_WORKER_ENABLED: "true",
       COMPUTER_ENABLED: "false",
       ALLOWED_ORIGINS:
-        process.env.DEMO_ALLOWED_ORIGINS ?? "http://localhost:8081,http://127.0.0.1:8081",
+        process.env.DEMO_ALLOWED_ORIGINS ?? "http://localhost:8090,http://127.0.0.1:8090",
       DO_NOT_TRACK: "1",
       COPILOTKIT_TELEMETRY_DISABLED: "true",
-      CPK_INTELLIGENCE_API_KEY: intelligenceApiKey,
     },
   },
 );

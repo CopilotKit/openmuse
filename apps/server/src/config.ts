@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 process.env.DO_NOT_TRACK ??= "1";
@@ -24,32 +25,50 @@ export interface Config {
   googleRedirectUri: string;
   workerUrl?: string;
   workerToken?: string;
+  /**
+   * WhatsApp sidecar (Baileys) admin base URL and bearer token. The sidecar
+   * is a separate localhost-only process (whatsapp-entry.ts); the API server
+   * reaches it only over this URL. Both come from WHATSAPP_SIDECAR_URL /
+   * WHATSAPP_SIDECAR_TOKEN. Absent = the WhatsApp connector's live operations
+   * (pairing, send) are unavailable; metadata and rules still work.
+   */
+  whatsappSidecarUrl?: string;
+  whatsappSidecarToken?: string;
   taskWorkerEnabled?: boolean;
   computerEnabled?: boolean;
   computerImage?: string;
   computerDeploymentId?: string;
   allowedOrigins: string[];
+  /** Extra plugin discovery roots (operator-configured; see plugins/discovery.ts). */
+  pluginRoots?: string[];
+  /** AgentSkills root (SKILLS_ROOT; default ~/workspace/skills). */
+  skillsRoot?: string;
+  /**
+   * AgentSkills allow-list (SKILLS_ALLOW, comma-separated). When non-empty,
+   * only these skill names are indexed — deny-by-default for production.
+   */
+  skillsAllow?: string[];
+  /**
+   * Voice-note transcription (local whisper.cpp CLI). Both must be set for
+   * POST /api/voice-notes to work; otherwise it answers 503. No network, no
+   * API keys, no ports — transcription runs as a short-lived child process.
+   */
+  voiceTranscriberBin?: string;
+  voiceTranscriberModel?: string;
+  /** Max voice-note upload in bytes (default 10 MB). */
+  voiceNoteMaxBytes?: number;
 }
 
-export const intelligenceKeyRequiredMessage =
-  "OpenMuse requires CPK_INTELLIGENCE_API_KEY. " +
-  "Run `npx copilotkit@latest login` and `npx copilotkit@latest project select`, " +
-  "then set the generated server-only key. " +
-  "See https://docs.copilotkit.ai/intelligence/connect-your-runtime";
-
-export function required(name: string, message: string, value = process.env[name]): string {
-  if (!value?.trim()) throw new Error(message);
-  return value.trim();
-}
-
-export function assertApiDeploymentConfig(
-  config: Config,
-): asserts config is Config & { intelligenceApiKey: string } {
-  required(
-    "CPK_INTELLIGENCE_API_KEY",
-    intelligenceKeyRequiredMessage,
-    config.intelligenceApiKey ?? "",
-  );
+export function assertApiDeploymentConfig(config: Config): void {
+  if (config.mode === "live" && !config.intelligenceApiKey?.trim()) {
+    // The Intelligence key is a CopilotKit cloud add-on (durable Rich Threads),
+    // not a security requirement. Live mode runs fine without it.
+    console.warn(
+      "[openmuse] CPK_INTELLIGENCE_API_KEY is not set; running without CopilotKit " +
+        "cloud intelligence. Rich Threads are disabled; core agent features are unaffected. " +
+        "Set the key to enable durable Rich Threads.",
+    );
+  }
 }
 
 export function readConfig(): Config {
@@ -76,19 +95,35 @@ export function readConfig(): Config {
     agentBackend: backend,
     agentUrl: process.env.AGENT_URL,
     agentToken: process.env.AGENT_TOKEN,
-    intelligenceApiKey: required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage),
+    intelligenceApiKey: process.env.CPK_INTELLIGENCE_API_KEY,
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
     googleRedirectUri: `${publicUrl}/api/google/callback`,
     workerUrl: process.env.BROWSER_WORKER_URL,
     workerToken: process.env.WORKER_TOKEN,
+    whatsappSidecarUrl: process.env.WHATSAPP_SIDECAR_URL,
+    whatsappSidecarToken: process.env.WHATSAPP_SIDECAR_TOKEN,
     taskWorkerEnabled: process.env.TASK_WORKER_ENABLED !== "false",
     computerEnabled: process.env.COMPUTER_ENABLED === "true",
     computerImage: process.env.COMPUTER_IMAGE ?? "openmuse-computer:local",
     computerDeploymentId: process.env.COMPUTER_DEPLOYMENT_ID,
     allowedOrigins: (
-      process.env.ALLOWED_ORIGINS ?? "http://localhost:8081,http://127.0.0.1:8081"
+      process.env.ALLOWED_ORIGINS ?? "http://localhost:8090,http://127.0.0.1:8090"
     ).split(","),
+    pluginRoots: (process.env.PLUGIN_ROOTS ?? "")
+      .split(",")
+      .map((root) => root.trim())
+      .filter(Boolean),
+    skillsRoot: process.env.SKILLS_ROOT?.trim() || join(homedir(), "workspace", "skills"),
+    skillsAllow: (process.env.SKILLS_ALLOW ?? "")
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean),
+    voiceTranscriberBin: process.env.VOICE_TRANSCRIBER_BIN?.trim() || undefined,
+    voiceTranscriberModel: process.env.VOICE_TRANSCRIBER_MODEL?.trim() || undefined,
+    voiceNoteMaxBytes: process.env.VOICE_NOTE_MAX_BYTES
+      ? Number(process.env.VOICE_NOTE_MAX_BYTES)
+      : undefined,
   };
   if (
     mode === "live" &&

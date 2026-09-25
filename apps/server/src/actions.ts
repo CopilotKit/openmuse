@@ -26,6 +26,21 @@ interface Options {
   }>;
   connected: (owner: string) => Promise<boolean>;
   connection?: (owner: string) => Promise<{ id: string; account: string } | null>;
+  /**
+   * Email-specific connection used for email.send proposals. Defaults to the
+   * Google connection; when provided, IMAP/SMTP accounts can approve and
+   * execute sends too.
+   */
+  emailConnected?: (owner: string) => Promise<boolean>;
+  emailConnection?: (owner: string) => Promise<{ id: string; account: string } | null>;
+  /**
+   * WhatsApp-specific connection used for whatsapp.send proposals. Unlike
+   * email/Google, the "connection" is the paired Baileys socket: the send
+   * is gated on it being connected at both proposal and execution time, and
+   * execution additionally requires the recipient to be on the allow-list.
+   */
+  whatsappConnected?: (owner: string) => Promise<boolean>;
+  whatsappConnection?: (owner: string) => Promise<{ id: string; account: string } | null>;
   now?: () => number;
 }
 export class ActionService {
@@ -51,17 +66,44 @@ export class ActionService {
       if (existing) return existing;
     }
     const parsed = proposalSchema.parse(raw);
-    const connection = await this.options.connection?.(owner);
-    if (this.options.connection && !connection)
-      throw new AppError("Connect Google before preparing an action", 409);
+    const forEmail = parsed.kind === "email.send";
+    const forWhatsApp = parsed.kind === "whatsapp.send";
+    const forCalendar =
+      parsed.kind === "calendar.create" ||
+      parsed.kind === "calendar.update" ||
+      parsed.kind === "calendar.delete";
+    // A workboard dispatch needs no account connection: it only spends task
+    // worker runs, which the owner's approval authorizes.
+    const connectionFor =
+      parsed.kind === "workboard.dispatch"
+        ? undefined
+        : forWhatsApp
+          ? (this.options.whatsappConnection ?? this.options.connection)
+          : forEmail
+            ? (this.options.emailConnection ?? this.options.connection)
+            : this.options.connection;
+    const connection = await connectionFor?.(owner);
+    if (connectionFor && !connection && !forCalendar)
+      throw new AppError(
+        forWhatsApp
+          ? "Pair WhatsApp before preparing an action"
+          : "Connect an email account before preparing an action",
+        409,
+      );
     const prepared = await this.options.prepare?.(owner, parsed, connection?.id);
     const input = proposalSchema.parse(prepared?.input ?? parsed);
     const title =
       input.kind === "email.send"
         ? `Send “${input.data.subject}”`
-        : input.kind === "calendar.delete"
-          ? `Delete ${input.data.title}`
-          : `${input.kind === "calendar.create" ? "Create" : "Update"} ${input.data.title}`;
+        : input.kind === "whatsapp.send"
+          ? `Send WhatsApp to ${input.data.toJid}`
+          : input.kind === "workboard.dispatch"
+            ? input.data.mode === "fanout"
+              ? `Fan out ${input.data.subagents?.length ?? "?"} subagents for “${input.data.cardTitle}”`
+              : `Dispatch “${input.data.cardTitle}” as a task`
+            : input.kind === "calendar.delete"
+              ? `Delete ${input.data.title}`
+              : `${input.kind === "calendar.create" ? "Create" : "Update"} ${input.data.title}`;
     const createdAt = new Date(this.now()).toISOString();
     const proposal: ActionProposal = {
       id,
@@ -133,17 +175,48 @@ export class ActionService {
       }
       throw new AppError("This review expired. Create a fresh proposal.", 409);
     }
-    if (decision === "approve" && !(await this.options.connected(owner)))
-      throw new AppError("Google is disconnected. Reconnect before approving this action.", 409);
-    if (decision === "approve" && this.options.connection) {
-      const connection = await this.options.connection(owner);
+    if (decision === "approve") {
+      const forEmail = proposal.kind === "email.send";
+      const forWhatsApp = proposal.kind === "whatsapp.send";
+      const forCalendar =
+        proposal.kind === "calendar.create" ||
+        proposal.kind === "calendar.update" ||
+        proposal.kind === "calendar.delete";
+      const connected =
+        proposal.kind === "workboard.dispatch"
+          ? undefined
+          : forWhatsApp
+            ? (this.options.whatsappConnected ?? this.options.connected)
+            : forEmail
+              ? (this.options.emailConnected ?? this.options.connected)
+              : this.options.connected;
+      if (connected && !(await connected(owner)) && !forCalendar)
+        throw new AppError(
+          forWhatsApp
+            ? "WhatsApp is disconnected. Re-pair before approving this action."
+            : forEmail
+              ? "The email account is disconnected. Reconnect before approving this action."
+              : "Google is disconnected. Reconnect before approving this action.",
+          409,
+        );
+      const connectionFor =
+        proposal.kind === "workboard.dispatch"
+          ? undefined
+          : forEmail
+            ? (this.options.emailConnection ?? this.options.connection)
+            : this.options.connection;
+      const connection = await connectionFor?.(owner);
       if (
-        !connection ||
-        connection.id !== proposal.connectionId ||
-        connection.account !== proposal.account
+        connectionFor &&
+        !forCalendar &&
+        (!connection ||
+          connection.id !== proposal.connectionId ||
+          connection.account !== proposal.account)
       )
         throw new AppError(
-          "Google account or connection changed. Prepare a new action for the connected account.",
+          forEmail
+            ? "Email account or connection changed. Prepare a new action for the connected account."
+            : "Google account or connection changed. Prepare a new action for the connected account.",
           409,
         );
     }

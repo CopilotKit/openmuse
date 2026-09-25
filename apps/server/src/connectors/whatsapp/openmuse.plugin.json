@@ -1,0 +1,63 @@
+{
+  "activation": "eager",
+  "catalog": {
+    "blurb": "Pair your own WhatsApp via QR so the agent can read and reply in your personal chats. Unofficial client — Meta may ban the number; use a secondary number.",
+    "tags": ["whatsapp", "baileys", "messaging"],
+    "title": "WhatsApp (personal)"
+  },
+  "categories": ["communication"],
+  "cliCommands": [],
+  "configGroups": [],
+  "configSchema": { "additionalProperties": false, "properties": {}, "type": "object" },
+  "contracts": {
+    "channels": [],
+    "routes": {
+      "mountPath": "/api/whatsapp",
+      "paths": [
+        "/",
+        "/consent",
+        "/pair/start",
+        "/pair/qr",
+        "/pair/stop",
+        "/logout",
+        "/rules",
+        "/rules/:id",
+        "/recent"
+      ]
+    },
+    "tools": ["whatsapp_send", "whatsapp_search_recent"],
+    "webSearchProviders": []
+  },
+  "dashboard": {
+    "actionVerbs": [],
+    "dataBindings": [
+      {
+        "description": "Pairing status for this owner (metadata only, never secrets).",
+        "name": "pairing_status",
+        "paramShape": { "additionalProperties": false, "properties": {}, "type": "object" }
+      }
+    ]
+  },
+  "description": "Agent presence in the user's own WhatsApp chats via a Baileys sidecar + QR pairing. Inbound is default-deny; outbound only through the reviewed action flow (whatsapp.send). Unofficial client: account-ban risk, explicit opt-in required.",
+  "doctorContract": { "configRepair": { "dropUnknownKeys": true }, "stateMigrations": [] },
+  "enabledByDefault": false,
+  "id": "whatsapp",
+  "name": "WhatsApp (personal)",
+  "skills": [],
+  "toolMetadata": {
+    "whatsapp_search_recent": {
+      "description": "Search recent inbound WhatsApp messages (stripped metadata only). Read-only.",
+      "kind": "both",
+      "providedBy": "direct",
+      "requiresApproval": false
+    },
+    "whatsapp_send": {
+      "description": "Propose a WhatsApp message for owner review. Never sends directly: creates a whatsapp.send reviewed action, and execution additionally requires the recipient to be on the allow-list.",
+      "kind": "both",
+      "providedBy": "direct",
+      "requiresApproval": true
+    }
+  },
+  "version": "1.0.0",
+  "writeOnly": []
+}

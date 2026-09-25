@@ -43,7 +43,6 @@ test("CopilotKit model worker executes server tools and persists the confirmed o
       publicUrl: "http://localhost:8787",
       dataDir: directory,
       agentBackend: "model",
-      intelligenceApiKey: "test-project-key-never-sent",
       model: "openai/fixture",
       googleRedirectUri: "http://localhost:8787/api/google/callback",
       allowedOrigins: [],
@@ -70,10 +69,21 @@ test("CopilotKit model worker executes server tools and persists the confirmed o
     assert.ok(requests[0].body.includes('"name":"run_computer_command"'));
     assert.ok(
       requests.some(
-        (request) => request.body.includes("succeeded") && request.body.includes("hello"),
+        (request) =>
+          request.body.includes("run_computer_command") &&
+          request.body.includes("requires owner approval"),
       ),
     );
-    assert.equal((await server.computer.snapshot("owner")).commands[0]?.status, "succeeded");
+    // The policy chain gates run_computer_command: without an owner approval
+    // the tool returns an approval error and the command never executes.
+    assert.ok(
+      requests.some(
+        (request) =>
+          request.body.includes("run_computer_command") &&
+          request.body.includes("requires owner approval"),
+      ),
+    );
+    assert.equal((await server.computer.snapshot("owner")).commands.length, 0);
     assert.ok(!requests[0].body.includes('"name":"approve"'));
     requests.length = 0;
     calls.splice(0, calls.length, {
