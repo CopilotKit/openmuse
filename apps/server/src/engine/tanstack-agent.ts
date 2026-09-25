@@ -47,10 +47,22 @@ function adapter(spec: string) {
         },
       });
     default:
-      throw new Error(
-        `Unknown provider "${provider}" in "${spec}". Supported: openai, anthropic, google (gemini).`,
-      );
+      throw unknownProvider(provider, spec);
   }
+}
+
+/** With OPENAI_BASE_URL set, a gateway model ID most likely needs the openai/ prefix. */
+export function unknownProvider(
+  provider: string,
+  spec: string,
+  baseUrl = process.env.OPENAI_BASE_URL,
+) {
+  const hint = baseUrl?.trim()
+    ? ` For a model on your OPENAI_BASE_URL gateway, use "openai/${spec.trim()}".`
+    : "";
+  return new Error(
+    `Unknown provider "${provider}" in "${spec}". Supported: openai, anthropic, google (gemini).${hint}`,
+  );
 }
 
 // The classic BuiltInAgent always offers these two state tools. The converter turns their
