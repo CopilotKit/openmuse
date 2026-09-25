@@ -76,3 +76,58 @@ for (const [name, payload] of [
     await assert.rejects(searchPayload(t, payload), /invalid search result/);
   });
 }
+
+test("search retains valid sources when the advertised output schema rejects a neighboring entry", async (t) => {
+  await searchFixture(t, (rpc) => {
+    if (rpc.method === "tools/list")
+      return {
+        result: {
+          tools: [
+            {
+              name: "web_search",
+              inputSchema: { type: "object" },
+              outputSchema: {
+                type: "object",
+                properties: {
+                  results: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["url", "excerpts"],
+                      properties: {
+                        url: { type: "string" },
+                        excerpts: { type: "array", items: { type: "string" } },
+                      },
+                    },
+                  },
+                },
+                required: ["results"],
+              },
+            },
+          ],
+        },
+      };
+    return rpc.method === "tools/call"
+      ? {
+          result: {
+            content: [],
+            structuredContent: {
+              results: [
+                searchSource,
+                { title: "Missing URL" },
+                { ...searchSource, excerpts: [123] },
+              ],
+            },
+          },
+        }
+      : {};
+  });
+  const db = await createStore();
+  t.after(() => db.close());
+  assert.deepEqual(await new SearchService(db).search("owner", "chat:advertised-schema", input), {
+    provider: "parallel",
+    results: [searchSource],
+    warnings: ["Dropped 2 invalid search result entries"],
+    truncated: true,
+  });
+});

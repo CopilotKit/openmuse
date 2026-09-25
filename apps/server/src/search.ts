@@ -106,12 +106,15 @@ export class SearchService {
         cursor = page.nextCursor;
       } while (!found && cursor);
       if (!found) throw new Error("Parallel did not advertise the web_search tool");
-      const result = CallToolResultSchema.parse(
-        await client.callTool(
-          { name: "web_search", arguments: { ...args, session_id: session.sessionId } },
-          undefined,
-          options,
-        ),
+      // Validate the envelope here and sources individually below. callTool would
+      // enforce the advertised output schema and discard valid sources with one bad entry.
+      const result = await client.request(
+        {
+          method: "tools/call",
+          params: { name: "web_search", arguments: { ...args, session_id: session.sessionId } },
+        },
+        CallToolResultSchema,
+        options,
       );
       if (result.isError) {
         const text = result.content.find((block) => block.type === "text");
