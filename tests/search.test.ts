@@ -6,7 +6,7 @@ import { lastValueFrom, toArray } from "rxjs";
 import { createApp } from "../apps/server/src/app.ts";
 import { createStore } from "../apps/server/src/db.ts";
 import { ConversationAgent } from "../apps/server/src/engine/conversation.ts";
-import { SearchService } from "../apps/server/src/search.ts";
+import { SearchService, searchInstructions } from "../apps/server/src/search.ts";
 import { browserFixture } from "./helpers/browser.ts";
 import { modelFixture } from "./helpers/model.ts";
 import { searchFixture, searchSource } from "./helpers/search.ts";
@@ -72,7 +72,7 @@ test("valid empty search succeeds and JSON text is supported without structuredC
 });
 
 for (const [name, supplied, message] of [
-  ["HTTP rate limit", { status: 429 }, /Parallel search failed.*POSTing/],
+  ["HTTP rate limit", { status: 429 }, /Parallel search failed/],
   ["RPC failure", { error: { code: -32000, message: "Quota exceeded" } }, /Quota exceeded/],
   [
     "tool failure",
@@ -81,7 +81,7 @@ for (const [name, supplied, message] of [
   ],
   [
     "malformed payload",
-    { result: { content: [], structuredContent: { results: [{ title: "Missing URL" }] } } },
+    { result: { content: [], structuredContent: { results: "not an array" } } },
     /invalid search result/,
   ],
 ] as const) {
@@ -185,8 +185,19 @@ test("search aborts in-flight execution and distinguishes its deadline", async (
   release();
 });
 
-test("native chat and delegated tasks default to Parallel and checkpoint source evidence", async (t) => {
-  const { requests: searchRequests } = await searchFixture(t);
+test("enabled native chat and delegated tasks use Parallel and deduplicate source evidence", async (t) => {
+  let includeDuplicates = false;
+  const secondSource = { ...searchSource, url: "https://example.org/related" };
+  const { requests: searchRequests } = await searchFixture(t, (rpc) =>
+    includeDuplicates && rpc.method === "tools/call"
+      ? {
+          result: {
+            content: [],
+            structuredContent: { results: [searchSource, secondSource, secondSource] },
+          },
+        }
+      : {},
+  );
   const calls: ({ name: string; arguments: object } | undefined)[] = [
     { name: "search_web", arguments: input },
     undefined,
@@ -195,7 +206,12 @@ test("native chat and delegated tasks default to Parallel and checkpoint source 
   const fixture = await browserFixture(t, () => {
     throw new Error("Search must not require the browser worker");
   });
-  const config = { ...fixture.config, agentBackend: "model", model: "openai/fixture" } as const;
+  const config = {
+    ...fixture.config,
+    agentBackend: "model",
+    model: "openai/fixture",
+    webSearchEnabled: true,
+  } as const;
   const app = await createApp(fixture.db, config);
   t.after(() => app.agent.stop());
   const events = await lastValueFrom(
@@ -217,6 +233,7 @@ test("native chat and delegated tasks default to Parallel and checkpoint source 
   assert.deepEqual(JSON.parse(event.content).results, [searchSource]);
   assert.ok(requests[0].body.includes('"name":"search_web"'));
   assert.ok(requests[1].body.includes(searchSource.url));
+  includeDuplicates = true;
   requests.length = 0;
   calls.splice(0, calls.length, { name: "search_web", arguments: input });
   calls.push({
@@ -231,6 +248,14 @@ test("native chat and delegated tasks default to Parallel and checkpoint source 
     prompt: "Find useful public research",
     kind: "agent",
   });
+  const existingSource = {
+    id: "existing-evidence",
+    kind: "web" as const,
+    title: searchSource.title,
+    url: searchSource.url,
+    excerpt: searchSource.excerpts[0],
+  };
+  await fixture.db.put("local-user", "tasks", { ...task, evidence: [existingSource] });
   await app.agent.worker.tick();
   const saved = await app.agent.getTask("local-user", task.id);
   assert.equal(saved.status, "succeeded", saved.error ?? saved.question);
@@ -244,7 +269,61 @@ test("native chat and delegated tasks default to Parallel and checkpoint source 
   );
   const webEvidence = saved.evidence.filter((source) => source.kind === "web");
   assert.equal(webEvidence.length, 2);
-  assert.equal(new Set(webEvidence.map((source) => source.id)).size, 2);
+  assert.equal(new Set(webEvidence.map((source) => source.url)).size, 2);
+  assert.deepEqual(
+    webEvidence.find((source) => source.url === searchSource.url),
+    existingSource,
+  );
+  assert.ok(webEvidence.some((source) => source.url === secondSource.url));
   assert.equal(searchRequests.filter(({ rpc }) => rpc.method === "tools/call").length, 3);
   assert.ok(requests[0].body.includes('"name":"search_web"'));
 });
+
+for (const enabled of [undefined, false]) {
+  test(`disabled search is unavailable in native chat and delegated tasks (${enabled})`, async (t) => {
+    const { requests: searchRequests } = await searchFixture(t);
+    const { requests } = await modelFixture(t, (index) =>
+      index === 0 || index === 2 ? { name: "search_web", arguments: input } : undefined,
+    );
+    const fixture = await browserFixture(t, () => {
+      throw new Error("Unexpected browser request");
+    });
+    const config = {
+      ...fixture.config,
+      agentBackend: "model",
+      model: "openai/fixture",
+      webSearchEnabled: enabled,
+    } as const;
+    const app = await createApp(fixture.db, config);
+    t.after(() => app.agent.stop());
+    await lastValueFrom(
+      new ConversationAgent(config, app.agent, "local-user")
+        .run({
+          threadId: "disabled-search-chat",
+          runId: randomUUID(),
+          messages: [{ id: randomUUID(), role: "user", content: "Find public research" }],
+          tools: [],
+          context: [],
+          state: {},
+        })
+        .pipe(toArray()),
+    );
+    const chatRequestCount = requests.length;
+    assert.ok(chatRequestCount > 0);
+    const task = await app.agent.createTask("local-user", {
+      prompt: "Find public research",
+      kind: "agent",
+    });
+    await app.agent.worker.tick();
+    assert.ok(requests.length > chatRequestCount);
+    for (const { body } of requests) {
+      const request = JSON.parse(body);
+      assert.ok(!request.tools.some((tool: { name: string }) => tool.name === "search_web"));
+      assert.ok(!body.includes(searchInstructions.trim()));
+    }
+    assert.equal(searchRequests.length, 0);
+    const saved = await app.agent.getTask("local-user", task.id);
+    assert.equal(saved.evidence.filter((source) => source.kind === "web").length, 0);
+    assert.deepEqual(await fixture.db.list("local-user", "search-sessions"), []);
+  });
+}

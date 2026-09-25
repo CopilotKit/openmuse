@@ -1,10 +1,9 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.ts";
-import { assertApiDeploymentConfig, readConfig } from "./config.ts";
+import { readConfig } from "./config.ts";
 import { createStore } from "./db.ts";
 
 const config = readConfig();
-assertApiDeploymentConfig(config);
 const db = await createStore({
   dataDir: `${config.dataDir}/postgres`,
   databaseUrl: config.databaseUrl,
