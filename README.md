@@ -83,6 +83,13 @@ for the file-by-file diff.
 | Personalization | SOUL.md personality, shortcuts, voice notes, and background updates. |
 | Safety | Tool policy, reviewed external writes, owner scoping, and secret redaction. |
 
+## Settings and integrations
+
+![Beli settings and integration controls](assets/beli/settings.png)
+
+Settings brings models, connectors, Telegram, agent identity, memory, security,
+automations, and service health into one place.
+
 ## Configuration
 
 The example environment file contains commented settings. Start with the local
