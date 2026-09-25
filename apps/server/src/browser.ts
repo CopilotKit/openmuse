@@ -112,6 +112,7 @@ export class BrowserService {
           ? payload.error.message
           : "Browser request failed",
         502,
+        typeof payload?.error?.code === "string" ? payload.error.code : undefined,
       );
     }
     return response;
@@ -238,8 +239,9 @@ export class BrowserService {
     await this.get(owner, association.sessionId);
     return association.sessionId;
   }
-  async elementsForThread(owner: string, threadId: string, signal?: AbortSignal) {
-    const id = await this.threadSession(owner, threadId);
+  /** Numbered links, buttons and fields of an owned session's page. */
+  async elements(owner: string, id: string, signal?: AbortSignal) {
+    await this.get(owner, id);
     return this.serial(id, async () => ({
       sessionId: id,
       ...elementsSchema.parse(
@@ -247,15 +249,23 @@ export class BrowserService {
       ),
     }));
   }
-  async actForThread(owner: string, threadId: string, action: unknown, signal?: AbortSignal) {
+  /** One validated step on an owned session's page; the worker enforces the safety rules. */
+  async act(owner: string, id: string, action: unknown, signal?: AbortSignal) {
     const input = pageActionSchema.parse(action);
-    const id = await this.threadSession(owner, threadId);
+    await this.get(owner, id);
     return this.serial(id, async () => {
       const payload = await (await this.request(`/sessions/${id}/act`, input, signal)).json();
       const session = await this.save(owner, payload, id);
       const target = z.string().max(200).optional().catch(undefined).parse(payload?.target);
       return { sessionId: id, title: session.title, url: session.url, target };
     });
+  }
+  async elementsForThread(owner: string, threadId: string, signal?: AbortSignal) {
+    return this.elements(owner, await this.threadSession(owner, threadId), signal);
+  }
+  async actForThread(owner: string, threadId: string, action: unknown, signal?: AbortSignal) {
+    const input = pageActionSchema.parse(action);
+    return this.act(owner, await this.threadSession(owner, threadId), input, signal);
   }
   async importsForThread(owner: string, threadId: string) {
     return this.imports(owner, await this.threadSession(owner, threadId));
