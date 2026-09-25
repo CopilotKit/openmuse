@@ -34,6 +34,13 @@ import { backgroundFailure } from "../log.ts";
 import type { WorkspaceService } from "../workspace.ts";
 import { analyzeSpending } from "./finance.ts";
 import { executeModelTask } from "./model.ts";
+import {
+  countPageDiff,
+  describePageDiff,
+  diffPage,
+  meaningfulPageDiff,
+  pageLines,
+} from "./page-diff.ts";
 import { LostLeaseError, type TaskContext, TaskWorker } from "./worker.ts";
 
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -933,7 +940,18 @@ export class AgentService {
           ? text.toLowerCase().includes(monitor.value.toLowerCase())
           : this.matchesPrice(text, Number(monitor.value));
     const previouslyMatched = Boolean(task.state.matched);
-    const shouldNotify = matched && (monitor.condition === "change" || !previouslyMatched);
+    // For change watches, compare the page line by line with the previous check.
+    const lines = monitor.condition === "change" ? pageLines(observation.text) : [];
+    const previousPage =
+      matched && monitor.condition === "change"
+        ? await this.db.get<{ lines: string[] }>(owner, "monitor-pages", monitor.id)
+        : null;
+    const diff = previousPage ? diffPage(previousPage.lines, lines) : undefined;
+    // Only numbers or relative times changed ("3 minutes ago"): keep watching quietly.
+    const quiet = Boolean(diff && !meaningfulPageDiff(diff));
+    const shouldNotify =
+      matched && !quiet && (monitor.condition === "change" || !previouslyMatched);
+    const changes = diff && shouldNotify ? describePageDiff(diff) : "";
     const nextCheckAt = new Date(Date.now() + monitor.intervalMinutes * 60000).toISOString();
     await ctx.guard();
     // Worker lease is checked before each publication; monitor control also invalidates that lease.
@@ -952,6 +970,8 @@ export class AgentService {
       },
     );
     if (!savedMonitor) throw new LostLeaseError();
+    if (monitor.condition === "change")
+      await this.db.put(owner, "monitor-pages", { id: monitor.id, lines });
     await ctx.event(
       "observation",
       previousHash ? "Checked for changes" : "Saved the first observation",
@@ -959,13 +979,16 @@ export class AgentService {
     );
     if (shouldNotify) {
       await ctx.guard();
-      await ctx.event("result", "A meaningful change was found", text.slice(0, 500));
+      await ctx.event("result", "A meaningful change was found", changes || text.slice(0, 500));
     }
+    const count = diff ? countPageDiff(diff) : "";
     return {
       status: "scheduled",
       nextRunAt: nextCheckAt,
       result: shouldNotify
-        ? "Change found. A notification is ready."
+        ? count
+          ? `Change found: ${count}. A notification is ready.`
+          : "Change found. A notification is ready."
         : "Watching. I'll check again on schedule.",
       state: {
         ...task.state,
@@ -975,7 +998,9 @@ export class AgentService {
         notice: shouldNotify
           ? {
               title: monitor.title,
-              body: `Condition met at ${observation.url}: ${text.slice(0, 240)}`,
+              body: changes
+                ? `Changed at ${observation.url}\n${changes}`
+                : `Condition met at ${observation.url}: ${text.slice(0, 240)}`,
               key: `monitor:${monitor.id}:${currentHash}`,
             }
           : null,
