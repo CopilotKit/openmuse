@@ -754,6 +754,8 @@ export class AgentService {
         if (error instanceof LostLeaseError || context.signal.aborted) throw error;
         await context.guard();
         const failures = Number(task.state.failures ?? 0) + 1;
+        // Each streak of failures (after a success or a resume) gets its own alerts.
+        const failureStreak = Number(task.state.failureStreak ?? 0) + (failures === 1 ? 1 : 0);
         const detail = error instanceof Error ? error.message : "Page check failed";
         const nextCheckAt = new Date(
           Date.now() + Math.min(60, 2 ** failures) * 60000,
@@ -778,10 +780,11 @@ export class AgentService {
             ...task.state,
             failures,
             resumingMonitor: false,
+            failureStreak,
             notice: {
               title: "Watch needs attention",
               body: detail,
-              key: `watch-error:${task.id}:${failures >= 5 ? "paused" : "retry"}`,
+              key: `watch-error:${task.id}:${failureStreak}:${failures >= 5 ? "paused" : "retry"}`,
             },
           },
         };
