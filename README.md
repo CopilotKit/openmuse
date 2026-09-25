@@ -85,7 +85,7 @@ for the file-by-file diff.
 
 ## Settings and integrations
 
-![Beli settings and integration controls](assets/beli/settings.png)
+![Animated Beli cat above the settings and integration controls](assets/beli/settings-cat.gif)
 
 Settings brings models, connectors, Telegram, agent identity, memory, security,
 automations, and service health into one place.
