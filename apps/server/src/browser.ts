@@ -32,12 +32,28 @@ type ChatBrowser = { id: string; sessionId: string };
 
 export class BrowserService {
   private readonly queues = new Map<string, Promise<unknown>>();
+  private health?: { checkedAt: number; reachable: Promise<boolean> };
   constructor(
     private readonly db: Store,
     private readonly config: Config,
     private readonly auth: Auth,
     private readonly files: Files,
+    private readonly now: () => number = Date.now,
   ) {}
+  /** Whether the configured worker answers its health check, cached briefly for snapshots. */
+  reachable(): Promise<boolean> {
+    if (!this.config.workerUrl || !this.config.workerToken) return Promise.resolve(false);
+    const now = this.now();
+    if (this.health && now - this.health.checkedAt < 15_000) return this.health.reachable;
+    const reachable = fetch(`${this.config.workerUrl}/health`, {
+      signal: AbortSignal.timeout(2000),
+    }).then(
+      (response) => response.ok,
+      () => false,
+    );
+    this.health = { checkedAt: now, reachable };
+    return reachable;
+  }
   private async serial<T>(id: string, operation: () => Promise<T>): Promise<T> {
     const next = (this.queues.get(id) ?? Promise.resolve()).catch(() => {}).then(operation);
     this.queues.set(id, next);
