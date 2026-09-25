@@ -26,7 +26,7 @@ The model responses use [CopilotKit AI Mock](https://github.com/CopilotKit/aimoc
 - Highlights extracted from the page the browser just read.
 - A second request to summarize CopilotKit, using the same persistent browser session.
 - **Take control**, which opens that session's live browser console.
-- The open-source repository at [CopilotKit/OpenMuse](https://github.com/CopilotKit/OpenMuse).
+- The open-source Beli fork at [onlinegill/beli](https://github.com/onlinegill/beli).
 
 Captures are trimmed and paced for readability, including brief slowdowns of the browser card and faster transitions into takeover. This is a reproducible demonstration of the app and tool flow; it is not an evaluation of a live model's reasoning. Site content changes, so your highlights can differ. Personal workspace information is fictional. Live Google, provider quality, Intelligence persistence/replay, and OpenBot require separately configured acceptance runs; see [verification](VERIFICATION.md).
 

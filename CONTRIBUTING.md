@@ -1,10 +1,10 @@
-# Contributing to OpenMuse
+# Contributing to Beli
 
-OpenMuse is an MIT-licensed alpha. Contributions should make delegated work reliable and visible, with honest connector status and useful native interactions.
+Beli is an MIT-licensed OpenMuse fork. Contributions should make delegated work reliable and visible, with honest connector status and useful native interactions.
 
 ## Local development
 
-1. Fork and clone the repository. Use Node 24 LTS and pnpm 11.19.0.
+1. Fork and clone [onlinegill/beli](https://github.com/onlinegill/beli). Use Node 24 LTS and pnpm 11.19.0.
 2. Run `pnpm install --frozen-lockfile` and copy `.env.example` to `.env`.
 3. Run `pnpm dev` and, in another terminal, `pnpm dev:web`.
 4. Use the fictional sample workspace for development and recordings. See [native setup](apps/mobile/README.md) for simulator/emulator builds.
