@@ -344,3 +344,69 @@ test("live mode rejects sample sources and hides the fixture mutation endpoint",
     await live.agent.stop();
   }
 });
+
+test("a change watch alert lists the new and updated lines of the page", async () => {
+  await read("/sample-page", {
+    text: "AI jobs in Munich\nSiemens · Werkstudent AI · posted 1 day ago\nBCG · Intern",
+  });
+  const monitor = await read<Monitor>(
+    "/monitors",
+    {
+      title: "Munich AI jobs",
+      url: "sample://availability",
+      condition: "change",
+      intervalMinutes: 1,
+    },
+    201,
+  );
+  await server.agent.worker.tick();
+  await read("/sample-page", {
+    text: "AI jobs in Munich\nSAP · Working Student AI Engineer\nSiemens · Werkstudent AI · posted 2 days ago\nBCG · Intern",
+  });
+  await read(`/monitors/${monitor.id}/control`, { action: "check" });
+  await server.agent.worker.tick();
+  const [alert] = (await read<AgentNotification[]>("/notifications")).filter(
+    (item) => item.taskId === monitor.taskId,
+  );
+  assert.equal(
+    alert?.body,
+    "Changed at sample://availability\nNew:\n• SAP · Working Student AI Engineer\nUpdated:\n• Siemens · Werkstudent AI · posted 2 days ago",
+  );
+  const { task } = await read<{ task: AgentTask }>(`/tasks/${monitor.taskId}`);
+  assert.equal(
+    task.result,
+    "Change found: 2 lines changed (1 new, 1 updated). A notification is ready.",
+  );
+  await read(`/monitors/${monitor.id}/control`, { action: "stop" });
+});
+
+test("a change watch stays quiet when only numbers and relative times change", async () => {
+  await read("/sample-page", { text: "Jobs\nSiemens · Werkstudent AI · 3 minutes ago" });
+  const monitor = await read<Monitor>(
+    "/monitors",
+    { title: "Quiet jobs", url: "sample://availability", condition: "change", intervalMinutes: 1 },
+    201,
+  );
+  const alerts = async () =>
+    (await read<AgentNotification[]>("/notifications")).filter(
+      (item) => item.taskId === monitor.taskId,
+    );
+  await server.agent.worker.tick();
+  for (const text of [
+    "Jobs\nSiemens · Werkstudent AI · 58 minutes ago",
+    "Jobs\nSiemens · Werkstudent AI · 1 hour ago",
+  ]) {
+    await read("/sample-page", { text });
+    await read(`/monitors/${monitor.id}/control`, { action: "check" });
+    await server.agent.worker.tick();
+  }
+  assert.equal((await alerts()).length, 0, "ticking timestamps are not news");
+  await read("/sample-page", {
+    text: "Jobs\nSAP · Working Student AI\nSiemens · Werkstudent AI · 2 hours ago",
+  });
+  await read(`/monitors/${monitor.id}/control`, { action: "check" });
+  await server.agent.worker.tick();
+  const [alert] = await alerts();
+  assert.match(alert?.body ?? "", /New:\n• SAP · Working Student AI/);
+  await read(`/monitors/${monitor.id}/control`, { action: "stop" });
+});
