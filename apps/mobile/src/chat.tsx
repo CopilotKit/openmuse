@@ -200,7 +200,8 @@ export function ChatScreen({
   const [saveError, setSaveError] = useState("");
   const [historyError, setHistoryError] = useState("");
   const [historyAttempt, setHistoryAttempt] = useState(0);
-  const replaying = useRef(false);
+  // Loads still replaying history. A count, so an old load finishing does not end a newer one.
+  const replaying = useRef(0);
   useEffect(() => {
     if (!isReady) return;
     let active = true;
@@ -216,7 +217,7 @@ export function ChatScreen({
         if (richThreads) {
           if (selection.existing) {
             // Replaying history re-emits past RUN_ERROR events; only connection failures block loading.
-            replaying.current = true;
+            replaying.current += 1;
             try {
               await runConversationTurn(
                 agentId,
@@ -225,7 +226,7 @@ export function ChatScreen({
                 [replayedRunError],
               );
             } finally {
-              replaying.current = false;
+              replaying.current -= 1;
             }
           }
         } else {
@@ -309,7 +310,7 @@ export function ChatScreen({
       onError: (event) => {
         if (event.context?.agentId && event.context.agentId !== agentId) return;
         // A failed turn saved in history is already over; it is not a failure of this session.
-        if (replaying.current && event.code === replayedRunError) return;
+        if (replaying.current > 0 && event.code === replayedRunError) return;
         const failure = event.error instanceof Error ? event.error : new Error(String(event.error));
         setError(failure.message);
       },
