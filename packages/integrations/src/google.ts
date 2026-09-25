@@ -14,6 +14,13 @@ const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
 const CALENDAR = "https://www.googleapis.com/calendar/v3";
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const MAX_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+export const MAX_READ_RETRIES = 2;
+export const DEFAULT_RETRY_DELAY_MS = 500;
+export const RETRYABLE_READ_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+
+export function isRetryableReadStatus(status: number): boolean {
+  return RETRYABLE_READ_STATUS_CODES.has(status);
+}
 const MAX_JSON_BYTES = Math.ceil((MAX_ATTACHMENT_BYTES * 4) / 3) + 1024 * 1024;
 
 export class OutcomeUnknownError extends Error {
@@ -289,7 +296,7 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
       const charset =
         headers(part)
           .get("content-type")
-          ?.match(/charset=["']?([^;"'\s]+)/i)?.[1] ?? "utf-8";
+          ?.match(/charset=['"]?([^;"'\s]+)/i)?.[1] ?? "utf-8";
       const text = new TextDecoder(charset).decode(decodeBase64url(part.body.data, 1024 * 1024));
       if (part.mimeType === "text/plain") plain.push(text);
       else html.push(htmlToPlainText(text));
@@ -401,6 +408,20 @@ function validateAttachments(attachments: MailAttachment[]): void {
     throw new Error("Total attachment size exceeds the 20 MiB limit");
 }
 
+function parseRetryAfter(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(Math.round(seconds * 1000), 30_000);
+  }
+  const date = Date.parse(header);
+  if (Number.isFinite(date)) {
+    const delay = date - Date.now();
+    return delay > 0 ? Math.min(delay, 30_000) : 0;
+  }
+  return undefined;
+}
+
 async function readJson(response: Response): Promise<unknown> {
   if (Number(response.headers.get("content-length")) > MAX_JSON_BYTES) {
     await response.body?.cancel();
@@ -430,9 +451,15 @@ async function readJson(response: Response): Promise<unknown> {
 export class GoogleClient {
   private readonly fetcher: typeof fetch;
   private readonly getAccessToken: () => Promise<string>;
-  constructor(options: { getAccessToken: () => Promise<string>; fetch?: typeof fetch }) {
+  private readonly sleep: (ms: number) => Promise<void>;
+  constructor(options: {
+    getAccessToken: () => Promise<string>;
+    fetch?: typeof fetch;
+    sleep?: (ms: number) => Promise<void>;
+  }) {
     this.fetcher = options.fetch ?? fetch;
     this.getAccessToken = options.getAccessToken;
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   private async mapMessage(message: z.infer<typeof messageSchema>): Promise<Mail> {
@@ -559,50 +586,75 @@ export class GoogleClient {
     const token = await this.getAccessToken();
     if (!token || /[\r\n]/.test(token))
       throw new Error("Google access token is missing or invalid; reconnect Google");
-    let response: Response;
-    try {
-      response = await this.fetcher(url, {
-        method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/json",
-          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-          ...conditionalHeaders,
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(30000),
-        redirect: "error",
-      });
-    } catch {
-      if (write) throw new OutcomeUnknownError();
-      throw new Error("Could not reach Google; check the connection and try again");
-    }
-    if (write && (response.status >= 500 || response.status === 408)) {
+
+    const maxAttempts = write ? 1 : 1 + MAX_READ_RETRIES;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      let response: Response;
       try {
-        await response.body?.cancel();
+        response = await this.fetcher(url, {
+          method,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+            ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+            ...conditionalHeaders,
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal: AbortSignal.timeout(30000),
+          redirect: "error",
+        });
       } catch {
+        if (write) throw new OutcomeUnknownError();
+        if (attempt + 1 < maxAttempts) {
+          const delay = DEFAULT_RETRY_DELAY_MS * 2 ** attempt;
+          await this.sleep(delay);
+          continue;
+        }
+        throw new Error("Could not reach Google; check the connection and try again");
+      }
+      if (write && (response.status >= 500 || response.status === 408)) {
+        try {
+          await response.body?.cancel();
+        } catch {
+          throw new OutcomeUnknownError();
+        }
         throw new OutcomeUnknownError();
       }
-      throw new OutcomeUnknownError();
-    }
-    if (!response.ok) {
-      let detail = response.statusText || "Request failed";
-      try {
-        const result = z
-          .object({ error: z.object({ message: z.string() }) })
-          .safeParse(await readJson(response));
-        if (result.success) detail = result.data.error.message.slice(0, 500);
-      } catch {
-        /* Preserve the definite HTTP rejection even if its body is not JSON. */
+      if (!response.ok) {
+        if (!write && isRetryableReadStatus(response.status) && attempt + 1 < maxAttempts) {
+          try {
+            await response.body?.cancel();
+          } catch {
+            /* ignore cancel errors on retry */
+          }
+          const retryAfter = parseRetryAfter(response.headers.get("retry-after"));
+          const delay = retryAfter ?? DEFAULT_RETRY_DELAY_MS * 2 ** attempt;
+          await this.sleep(delay);
+          continue;
+        }
+        let detail = response.statusText || "Request failed";
+        try {
+          const result = z
+            .object({ error: z.object({ message: z.string() }) })
+            .safeParse(await readJson(response));
+          if (result.success) detail = result.data.error.message.slice(0, 500);
+        } catch {
+          /* Preserve the definite HTTP rejection even if its body is not JSON. */
+        }
+        throw new GoogleApiError(response.status, detail);
       }
-      throw new GoogleApiError(response.status, detail);
-    }
-    if (method === "DELETE" && response.status === 204) return undefined;
-    try {
-      return await readJson(response);
-    } catch {
-      if (write) throw new OutcomeUnknownError();
-      throw new Error("Google returned an invalid or oversized response");
+      if (method === "DELETE" && response.status === 204) return undefined;
+      try {
+        return await readJson(response);
+      } catch {
+        if (write) throw new OutcomeUnknownError();
+        if (attempt + 1 < maxAttempts) {
+          const delay = DEFAULT_RETRY_DELAY_MS * 2 ** attempt;
+          await this.sleep(delay);
+          continue;
+        }
+        throw new Error("Google returned an invalid or oversized response");
+      }
     }
   }
 
