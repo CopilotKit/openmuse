@@ -32,15 +32,101 @@ function siteLabel(url: unknown) {
   }
 }
 
+/** A short description of a browser_act step; typed text is never shown. */
+export function browserActionLabel(args: Record<string, unknown>, result: unknown) {
+  const value = resultValue(result);
+  const name = z.object({ target: z.string().min(1) }).safeParse(value);
+  const target = name.success ? `“${name.data.target}”` : "an element";
+  switch (args.action) {
+    case "click":
+      return `Clicked ${target}`;
+    case "type":
+      return `Typed into ${target}`;
+    case "select":
+      return typeof args.option === "string" ? `Chose “${args.option}”` : "Chose an option";
+    case "check":
+      return args.checked === false ? `Unchecked ${target}` : `Checked ${target}`;
+    case "press":
+      return typeof args.key === "string" ? `Pressed ${args.key}` : "Pressed a key";
+    case "scroll":
+      return args.direction === "up" ? "Scrolled up" : "Scrolled down";
+    default:
+      return "Used the page";
+  }
+}
+
+/** A one-line note for browser steps that do not change the page. */
+export function BrowserStepNote({
+  text,
+  error,
+  loading,
+}: {
+  text: string;
+  error?: string;
+  loading: boolean;
+}) {
+  return (
+    <View style={[s.row, { gap: 8, paddingHorizontal: 4 }]}>
+      {loading ? (
+        <ActivityIndicator size="small" color={colors.blueDark} />
+      ) : (
+        <Globe2 size={15} color={error ? colors.danger : colors.muted} />
+      )}
+      <Text
+        style={[s.small, { fontSize: 12, flex: 1, color: error ? colors.danger : colors.muted }]}
+      >
+        {error || text}
+      </Text>
+    </View>
+  );
+}
+
+export function browserElementsNote(result: unknown) {
+  const value = resultValue(result);
+  const error = z.object({ error: z.string() }).safeParse(value);
+  if (error.success) return { text: "", error: error.data.error };
+  const list = z.object({ elements: z.array(z.unknown()) }).safeParse(value);
+  return {
+    text: list.success
+      ? `Looked at ${list.data.elements.length} links, buttons and fields`
+      : "Looking at the page’s links, buttons and fields…",
+  };
+}
+
+export function browserDownloadsNote(result: unknown) {
+  const value = resultValue(result);
+  const error = z.object({ error: z.string() }).safeParse(value);
+  if (error.success) return { text: "", error: error.data.error };
+  const outcome = z
+    .object({
+      saved: z.array(z.object({ name: z.string() })),
+      failed: z.array(z.object({ name: z.string() })),
+    })
+    .safeParse(value);
+  if (!outcome.success) return { text: "Saving downloads to Files…" };
+  const saved = outcome.data.saved.map((file) => file.name);
+  const failed = outcome.data.failed.length
+    ? ` · ${outcome.data.failed.length} could not be saved`
+    : "";
+  return {
+    text: saved.length
+      ? `Saved to Files: ${saved.join(", ")}${failed}`
+      : `No PDF downloads to save${failed}`,
+  };
+}
+
 /** A server tool result stays with the request that produced it, including on replay. */
 export function BrowserToolCard({
   url,
   result,
   loading,
+  action,
 }: {
   url: unknown;
   result: unknown;
   loading: boolean;
+  /** Set for browser_act steps; describes what was done on the page. */
+  action?: string;
 }) {
   const { api, workspace, open } = useWorkspace();
   const { running, active } = useContext(BrowserRunContext);
@@ -103,12 +189,18 @@ export function BrowserToolCard({
           <Text style={[s.text, { fontWeight: "600" }]}>Browser</Text>
           <Text numberOfLines={1} style={[s.small, { fontSize: 12 }]}>
             {working
-              ? "Reading the page…"
+              ? action
+                ? "Working on the page…"
+                : "Reading the page…"
               : loading
                 ? "Browsing paused"
                 : failure
-                  ? "Couldn’t read the page"
-                  : siteLabel(visited?.url)}
+                  ? action
+                    ? "Couldn’t do that on the page"
+                    : "Couldn’t read the page"
+                  : action
+                    ? `${action} · ${siteLabel(visited?.url)}`
+                    : siteLabel(visited?.url)}
           </Text>
         </View>
         {working ? (

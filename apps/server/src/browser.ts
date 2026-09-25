@@ -21,6 +21,40 @@ const readSchema = z.object({
   text: z.string().max(100_000),
   truncated: z.boolean(),
 });
+const elementsSchema = z.object({
+  url: z.string(),
+  title: z.string().max(300),
+  elements: z
+    .array(
+      z.object({
+        ref: z.number().int(),
+        role: z.string().max(40),
+        name: z.string().max(200),
+        value: z.string().max(200).optional(),
+        checked: z.boolean().optional(),
+        disabled: z.boolean().optional(),
+        sensitive: z.boolean().optional(),
+        needsConfirmation: z.boolean().optional(),
+        href: z.string().max(400).optional(),
+        options: z.array(z.string().max(200)).max(25).optional(),
+        inView: z.boolean(),
+      }),
+    )
+    .max(250),
+  truncated: z.boolean(),
+  scroll: z.object({ y: z.number(), height: z.number(), viewport: z.number() }),
+});
+export const pageActionSchema = z.object({
+  action: z.enum(["click", "type", "select", "check", "press", "scroll"]),
+  ref: z.number().int().positive().max(10_000).optional(),
+  text: z.string().max(10_000).optional(),
+  submit: z.boolean().optional(),
+  option: z.string().max(500).optional(),
+  checked: z.boolean().optional(),
+  key: z.string().max(40).optional(),
+  direction: z.enum(["up", "down"]).optional(),
+  confirmed: z.boolean().optional(),
+});
 const failureSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -195,6 +229,36 @@ export class BrowserService {
         truncated: page.truncated || page.text.length > 30_000,
       };
     });
+  }
+  /** The browser session a chat thread opened with browse_web. */
+  private async threadSession(owner: string, threadId: string) {
+    const association = await this.db.get<ChatBrowser>(owner, "chat-browsers", threadId);
+    if (!association)
+      throw new AppError("No page is open in this chat yet. Open one with browse_web first.", 409);
+    await this.get(owner, association.sessionId);
+    return association.sessionId;
+  }
+  async elementsForThread(owner: string, threadId: string, signal?: AbortSignal) {
+    const id = await this.threadSession(owner, threadId);
+    return this.serial(id, async () => ({
+      sessionId: id,
+      ...elementsSchema.parse(
+        await (await this.request(`/sessions/${id}/elements`, undefined, signal)).json(),
+      ),
+    }));
+  }
+  async actForThread(owner: string, threadId: string, action: unknown, signal?: AbortSignal) {
+    const input = pageActionSchema.parse(action);
+    const id = await this.threadSession(owner, threadId);
+    return this.serial(id, async () => {
+      const payload = await (await this.request(`/sessions/${id}/act`, input, signal)).json();
+      const session = await this.save(owner, payload, id);
+      const target = z.string().max(200).optional().catch(undefined).parse(payload?.target);
+      return { sessionId: id, title: session.title, url: session.url, target };
+    });
+  }
+  async importsForThread(owner: string, threadId: string) {
+    return this.imports(owner, await this.threadSession(owner, threadId));
   }
   async close(owner: string, id: string) {
     return this.serial(id, async () => {

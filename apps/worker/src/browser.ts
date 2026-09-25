@@ -9,6 +9,7 @@ import {
 } from "./downloads.ts";
 import { WorkerError } from "./errors.ts";
 import { validatePublicUrl } from "./network.ts";
+import { listElements, parseAction, performAction } from "./page-actions.ts";
 import { startEgressProxy } from "./proxy.ts";
 
 export interface Session {
@@ -357,6 +358,26 @@ export async function createBrowserManager(options: {
           await page.mouse.wheel(0, deltaY);
         else throw new WorkerError("INVALID_INPUT", "Unsupported browser input or coordinates.");
         return refresh(id);
+      }),
+    /** Numbered links, buttons and fields for the agent; values of sensitive fields are omitted. */
+    elements: (id: string) =>
+      serial(id, async () => {
+        const { page } = active(id);
+        await validatePublicUrl(page.url());
+        const result = await listElements(page);
+        await validatePublicUrl(result.url);
+        return result;
+      }),
+    act: (id: string, input: Record<string, unknown>) =>
+      serial(id, async () => {
+        const action = parseAction(input);
+        const { page } = active(id);
+        await validatePublicUrl(page.url());
+        const target = await performAction(page, action);
+        // Let a navigation or client-side update settle before reporting the new page.
+        await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {});
+        await page.waitForTimeout(400);
+        return { ...(await refresh(id)), target };
       }),
     downloads: async (id: string) => {
       const saved = await downloads(id);

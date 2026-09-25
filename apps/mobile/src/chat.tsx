@@ -23,7 +23,14 @@ import { ArtifactCard } from "./agent-ui";
 import { useAgentWorkspace } from "./agent-workspace";
 import { AssistantResponse } from "./assistant-response";
 import { BackgroundUpdates } from "./background-updates";
-import { BrowserRunContext, BrowserToolCard } from "./browser-tool-card";
+import {
+  BrowserRunContext,
+  BrowserStepNote,
+  BrowserToolCard,
+  browserActionLabel,
+  browserDownloadsNote,
+  browserElementsNote,
+} from "./browser-tool-card";
 import { BrowserThreadCard } from "./computer";
 import { ConversationQueue, type QueuedMessage } from "./conversation-queue";
 import { runConversationTurn } from "./conversation-run";
@@ -63,6 +70,35 @@ export function WorkspaceTools() {
     parameters: displayParameters,
     render: ({ args, result, status }) => (
       <BrowserToolCard url={args.url} result={result} loading={status !== "complete"} />
+    ),
+  });
+  useRenderTool({
+    name: "browser_act",
+    description: "Follow the agent as it operates a webpage",
+    parameters: displayParameters,
+    render: ({ args, result, status }) => (
+      <BrowserToolCard
+        url={undefined}
+        result={result}
+        loading={status !== "complete"}
+        action={browserActionLabel(args, result)}
+      />
+    ),
+  });
+  useRenderTool({
+    name: "browser_elements",
+    description: "Show that the agent looked at the page's controls",
+    parameters: displayParameters,
+    render: ({ result, status }) => (
+      <BrowserStepNote {...browserElementsNote(result)} loading={status !== "complete"} />
+    ),
+  });
+  useRenderTool({
+    name: "save_browser_downloads",
+    description: "Show downloads the agent saved to Files",
+    parameters: displayParameters,
+    render: ({ result, status }) => (
+      <BrowserStepNote {...browserDownloadsNote(result)} loading={status !== "complete"} />
     ),
   });
   useRenderTool({

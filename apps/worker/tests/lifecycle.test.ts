@@ -68,3 +68,61 @@ test("real Chromium cleans failed profiles and restores a saved UUID after worke
     await rm(dataDir, { recursive: true, force: true });
   }
 });
+
+test("real Chromium lists page controls and performs only safe or confirmed actions", {
+  timeout: 90_000,
+}, async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "openmuse-browser-actions-"));
+  const browser = await createBrowserManager({ dataDir });
+  const id = randomUUID();
+  const byName = async (name: RegExp) => {
+    const found = (await browser.elements(id)).elements.find((element) => name.test(element.name));
+    assert(found, `element ${name} is listed`);
+    return found;
+  };
+  try {
+    await browser.create(id, "https://httpbin.org/forms/post");
+    const customer = await byName(/Customer name/);
+    assert.equal(customer.role, "textbox");
+    const submit = await byName(/Submit order/);
+    assert.equal(submit.needsConfirmation, true);
+    const typed = await browser.act(id, { action: "type", ref: customer.ref, text: "Test Person" });
+    assert.equal(typed.target, "Customer name:");
+    assert.equal((await byName(/Customer name/)).value, "Test Person");
+    const bacon = await byName(/^Bacon$/);
+    await browser.act(id, { action: "check", ref: bacon.ref, checked: true });
+    assert.equal((await byName(/^Bacon$/)).checked, true);
+    await assert.rejects(
+      browser.act(id, { action: "type", ref: customer.ref, text: "Again", submit: true }),
+      { code: "CONFIRMATION_REQUIRED" },
+      "Enter in a form with a consequential button waits for confirmation",
+    );
+    await assert.rejects(
+      browser.act(id, { action: "click", ref: (await byName(/Submit order/)).ref }),
+      { code: "CONFIRMATION_REQUIRED" },
+    );
+    assert.equal((await browser.read(id)).url, "https://httpbin.org/forms/post");
+    const sent = await browser.act(id, {
+      action: "click",
+      ref: (await byName(/Submit order/)).ref,
+      confirmed: true,
+    });
+    assert.equal(sent.url, "https://httpbin.org/post");
+    assert.match((await browser.read(id)).text, /Test Person/);
+
+    await browser.navigate(id, "https://github.com/login");
+    const password = (await browser.elements(id)).elements.find((element) => element.sensitive);
+    assert(password, "the password field is marked sensitive");
+    assert.equal(password.value, undefined, "sensitive values are never returned");
+    await assert.rejects(
+      browser.act(id, { action: "type", ref: password.ref, text: "not-a-password" }),
+      { code: "SENSITIVE_FIELD" },
+    );
+    await assert.rejects(browser.act(id, { action: "click", ref: 9999 }), {
+      code: "ELEMENT_NOT_FOUND",
+    });
+  } finally {
+    await browser.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});

@@ -68,7 +68,7 @@ export async function createWorkerServer(options: {
         return;
       }
       const match =
-        /^\/sessions\/([^/]+)\/(navigate|close|screenshot|read|input|downloads)(?:\/([^/]+))?$/.exec(
+        /^\/sessions\/([^/]+)\/(navigate|close|screenshot|read|input|elements|act|downloads)(?:\/([^/]+))?$/.exec(
           pathname,
         );
       if (!match) throw new WorkerError("NOT_FOUND", "Worker endpoint not found.", 404);
@@ -83,6 +83,10 @@ export async function createWorkerServer(options: {
         json(200, await browser.input(id, await readBody(request)));
       else if (action === "read" && !downloadId && request.method === "GET")
         json(200, await browser.read(id));
+      else if (action === "elements" && !downloadId && request.method === "GET")
+        json(200, await browser.elements(id));
+      else if (action === "act" && !downloadId && request.method === "POST")
+        json(200, await browser.act(id, await readBody(request)));
       else if (action === "screenshot" && !downloadId && request.method === "GET") {
         const bytes = await browser.screenshot(id);
         response.writeHead(200, { "content-type": "image/png", "content-length": bytes.length });

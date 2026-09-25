@@ -12,6 +12,7 @@ import { BrowserService } from "../apps/server/src/browser.ts";
 import { Files } from "../apps/server/src/files.ts";
 import { capturePdfDownload, readDownloadFailures } from "../apps/worker/src/downloads.ts";
 import { isPublicIp, validatePublicUrl } from "../apps/worker/src/network.ts";
+import { CONSEQUENTIAL, parseAction } from "../apps/worker/src/page-actions.ts";
 import { startEgressProxy } from "../apps/worker/src/proxy.ts";
 import { createWorkerServer } from "../apps/worker/src/server.ts";
 import type { BrowserSession } from "../packages/domain/src/index.ts";
@@ -529,4 +530,144 @@ test("egress proxy blocks HTTP and CONNECT traffic to local network destinations
   } finally {
     await proxy.close();
   }
+});
+
+test("chat page actions use the thread's own browser and reject other owners", async (t) => {
+  const calls: { path: string; body: Record<string, unknown> }[] = [];
+  const { service } = await browserFixture(t, (path, body) => {
+    calls.push({ path, body });
+    const id = path.split("/")[2];
+    if (path.endsWith("/read"))
+      return { data: { url: savedSession.url, title: "Shop", text: "Page", truncated: false } };
+    if (path.endsWith("/elements"))
+      return {
+        data: {
+          url: savedSession.url,
+          title: "Shop",
+          elements: [
+            { ref: 1, role: "textbox", name: "Search", inView: true },
+            { ref: 2, role: "button", name: "Buy now", needsConfirmation: true, inView: true },
+            { ref: 3, role: "textbox", name: "Password", sensitive: true, inView: true },
+          ],
+          truncated: false,
+          scroll: { y: 0, height: 2000, viewport: 800 },
+        },
+      };
+    if (path.endsWith("/act"))
+      return { data: { ...savedSession, id, title: "Results", target: "Search" } };
+    return { data: { ...savedSession, id: body.id, url: String(body.url) } };
+  });
+  await assert.rejects(service.elementsForThread("owner", "chat-thread"), {
+    status: 409,
+    message: /Open one with browse_web first/,
+  });
+  const page = await service.observeForThread("owner", "chat-thread", savedSession.url);
+  const listed = await service.elementsForThread("owner", "chat-thread");
+  assert.equal(listed.sessionId, page.sessionId);
+  assert.deepEqual(
+    listed.elements.map((element) => [element.ref, element.name]),
+    [
+      [1, "Search"],
+      [2, "Buy now"],
+      [3, "Password"],
+    ],
+  );
+  const acted = await service.actForThread("owner", "chat-thread", {
+    action: "type",
+    ref: 1,
+    text: "running shoes",
+    submit: true,
+    confirmed: false,
+  });
+  assert.deepEqual(acted, {
+    sessionId: page.sessionId,
+    title: "Results",
+    url: savedSession.url,
+    target: "Search",
+  });
+  const act = calls.find((call) => call.path.endsWith("/act"));
+  assert.equal(act?.path, `/sessions/${page.sessionId}/act`);
+  assert.deepEqual(act?.body, {
+    action: "type",
+    ref: 1,
+    text: "running shoes",
+    submit: true,
+    confirmed: false,
+  });
+  await assert.rejects(service.actForThread("owner", "chat-thread", { action: "run-script" }));
+  assert.equal(calls.filter((call) => call.path.endsWith("/act")).length, 1);
+  await assert.rejects(service.elementsForThread("stranger", "chat-thread"), { status: 409 });
+  await assert.rejects(service.actForThread("stranger", "chat-thread", { action: "scroll" }), {
+    status: 409,
+  });
+});
+
+test("worker refusals of a page action reach the agent as their message", async (t) => {
+  const { service } = await browserFixture(t, (path, body) => {
+    if (path.endsWith("/read"))
+      return { data: { url: savedSession.url, title: "Shop", text: "Page", truncated: false } };
+    if (path.endsWith("/act"))
+      return {
+        status: 409,
+        data: {
+          error: {
+            code: "CONFIRMATION_REQUIRED",
+            message: "Clicking “Buy now” may buy, send, submit, delete, book or sign up.",
+          },
+        },
+      };
+    return { data: { ...savedSession, id: body.id, url: String(body.url) } };
+  });
+  await service.observeForThread("owner", "chat-thread", savedSession.url);
+  await assert.rejects(service.actForThread("owner", "chat-thread", { action: "click", ref: 2 }), {
+    message: /Clicking “Buy now” may buy/,
+  });
+});
+
+test("page actions accept only validated steps and flag consequential controls", () => {
+  assert.deepEqual(parseAction({ action: "click", ref: 4 }), {
+    action: "click",
+    ref: 4,
+    confirmed: false,
+  });
+  assert.deepEqual(parseAction({ action: "type", ref: 2, text: "hi", submit: true }), {
+    action: "type",
+    ref: 2,
+    text: "hi",
+    submit: true,
+    confirmed: false,
+  });
+  assert.deepEqual(parseAction({ action: "scroll", direction: "down" }), {
+    action: "scroll",
+    direction: "down",
+  });
+  for (const bad of [
+    { action: "click" },
+    { action: "click", ref: 0 },
+    { action: "click", ref: 1.5 },
+    { action: "type", ref: 1 },
+    { action: "press", key: "Control+w" },
+    { action: "press", key: "a" },
+    { action: "scroll", direction: "left" },
+    { action: "evaluate", ref: 1 },
+  ])
+    assert.throws(() => parseAction(bad), { code: "INVALID_INPUT" });
+  for (const name of [
+    "Buy now",
+    "Place order",
+    "Pay €12.00",
+    "Send message",
+    "Delete account",
+    "Book this room",
+    "Sign up",
+    "Accept all cookies",
+    "Apply now",
+    "Jetzt kaufen",
+    "Zahlungspflichtig bestellen",
+    "Löschen",
+    "Bewerbung absenden",
+  ])
+    assert.ok(CONSEQUENTIAL.test(name), `${name} needs confirmation`);
+  for (const name of ["Search", "Next", "Sign in", "Apply filters", "Download PDF", "Show more"])
+    assert.ok(!CONSEQUENTIAL.test(name), `${name} does not need confirmation`);
 });
