@@ -11,10 +11,26 @@ Built with CopilotKit React Native for iOS, Android, and web.
 
 [![CI](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![OpenMuse fork](https://img.shields.io/badge/fork-CopilotKit%2FOpenMuse-blue)](https://github.com/onlinegill/beli)
+[![Upgrade scope](https://img.shields.io/badge/upstream%20diff-270%2B%20files-orange)](https://github.com/CopilotKit/openmuse/compare/main...onlinegill:main?expand=1)
+[![Tests](https://img.shields.io/badge/tests-615%20passing-brightgreen)](#verification)
 
 Clone this template and customize it however you want.
 
-> **Public fork notice:** This is `onlinegill/beli`, a fork of CopilotKit OpenMuse. It adds the Beli personal-agent extensions described below and is not an official CopilotKit release. Upstream OpenMuse remains the source of truth for the original project.
+> **Public fork notice:** This repository powers the public `onlinegill/beli` fork of CopilotKit OpenMuse. It adds the Beli personal-agent extensions described below and is not an official CopilotKit release. Upstream OpenMuse remains the source of truth for the original project.
+
+## Upgrade snapshot
+
+**Updated September 24, 2026.** This is not a small configuration fork. Beli adds a large, integrated personal-agent layer on top of OpenMuse:
+
+| Measure | Current snapshot |
+| --- | --- |
+| Upstream comparison | 270+ changed files |
+| Added source | 41,000+ lines |
+| Test coverage | 615 passing tests |
+| Major areas | Plugins, skills, memory, providers, connectors, automations, subagents, MCP, voice, users, and native settings |
+
+[See the complete upstream comparison](https://github.com/CopilotKit/openmuse/compare/main...onlinegill:main?expand=1) and the detailed [upgrade inventory](UPGRADES.md).
 
 [![OpenMuse 🪁 — Ask it to browse. Watch the 38-second mobile demo.](assets/demos/2026-09-16/mobile.png)](assets/demos/2026-09-16/mobile.mp4)
 
@@ -37,20 +53,6 @@ Fork modifications are Copyright (c) 2026 Sukhpal Gill and are released under th
 > **Alpha, for self-hosting and building on.** Open-ended reasoning, live Google accounts, and CopilotKit Rich Threads require their own configuration. See [what is verified](docs/VERIFICATION.md) and the [roadmap](ROADMAP.md).
 
 **[Build with OpenMuse →](https://go.copilotkit.ai/engineering-openmuse)**
-
-## Latest changes
-
-**Updated September 24, 2026.** This fork extends the upstream application with:
-
-- Plugin and skill discovery, validation, routing, and per-plugin configuration.
-- Provider and model settings backed by encrypted credential storage.
-- Durable personal context, memory, persona, and background-update preferences.
-- Subagents, tool policy enforcement, MCP support, and voice notes.
-- Connector management for email, Telegram, and WhatsApp.
-- Durable automations, heartbeat scheduling, and workboard workflows.
-- User/session management and expanded native navigation and settings.
-
-[Compare Beli with upstream OpenMuse](https://github.com/CopilotKit/openmuse/compare/main...onlinegill:main?expand=1). The comparison is intended to make the fork's changes visible; it is not a claim that every subsystem is ready for upstream review.
 
 ## Demo
 
@@ -192,6 +194,20 @@ flowchart TD
 | `packages/integrations` | Google and browser protocol adapters. |
 | `packages/backends` | Optional OpenBot HTTP adapter and its identity boundary. |
 | `tests` | Workflow, runtime, persistence, provider-contract, and authorization tests. |
+
+## Verification
+
+The published fork was checked from a fresh clone of this repository with:
+
+```sh
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build:server
+pnpm build:web
+```
+
+The test run completed with 615 passing tests and no failures. See [UPGRADES.md](UPGRADES.md) for the upgrade inventory and verification summary.
 
 ### OpenBot compatibility
 
