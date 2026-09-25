@@ -10,7 +10,7 @@ import { chat, maxIterations, type SchemaInput, toolDefinition } from "@tanstack
 import { type AnthropicChatModel, anthropicText } from "@tanstack/ai-anthropic";
 import { type GeminiTextModel, geminiText } from "@tanstack/ai-gemini";
 import { type OpenAIChatModel, openaiText } from "@tanstack/ai-openai";
-import { map, type Observable } from "rxjs";
+import { map, mergeMap, type Observable } from "rxjs";
 import { z } from "zod";
 
 // Same "provider/model" strings, env vars and base URL formats as the AI SDK resolver in
@@ -89,6 +89,8 @@ export function tanstackAgent(options: {
   maxSteps: number;
   tools: ToolDefinition[];
   prompt: string;
+  /** Said when the step limit, not the model, ends a run; otherwise the reply just stops. */
+  stepLimitNote?: string;
 }) {
   const agent = new BuiltInAgent({
     type: "tanstack",
@@ -126,8 +128,43 @@ export function tanstackAgent(options: {
     },
   });
   const run = agent.run.bind(agent);
-  agent.run = (input: RunAgentInput) => splitTextAtToolCalls(run(input));
+  agent.run = (input: RunAgentInput) => {
+    const events = splitTextAtToolCalls(run(input));
+    return options.stepLimitNote
+      ? reportStepLimit(events, options.maxSteps, options.stepLimitNote)
+      : events;
+  };
   return agent;
+}
+
+/**
+ * maxIterations ends the loop after the last allowed tool step without a final model reply.
+ * When a run ends that way, add a short assistant message so it does not stop silently.
+ */
+export function reportStepLimit(events: Observable<BaseEvent>, maxSteps: number, note: string) {
+  let steps = 0;
+  let phase: "text" | "calling" | "results" = "text";
+  return events.pipe(
+    mergeMap((event): BaseEvent[] => {
+      if (event.type === EventType.TOOL_CALL_START) {
+        // Parallel calls of one model step arrive together; results end the step.
+        if (phase !== "calling") steps++;
+        phase = "calling";
+      } else if (event.type === EventType.TOOL_CALL_RESULT) phase = "results";
+      else if (event.type === EventType.TEXT_MESSAGE_CHUNK) phase = "text";
+      else if (event.type === EventType.RUN_FINISHED && phase === "results" && steps >= maxSteps)
+        return [
+          {
+            type: EventType.TEXT_MESSAGE_CHUNK,
+            messageId: randomUUID(),
+            role: "assistant",
+            delta: note,
+          } as BaseEvent,
+          event,
+        ];
+      return [event];
+    }),
+  );
 }
 
 // ponytail: the TanStack converter in @copilotkit/runtime 1.70.1 uses one message ID for the
