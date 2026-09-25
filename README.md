@@ -1,203 +1,157 @@
-  <div align="center">
-
 # Beli
 
-**Beli means "friend". A personal agent with a browser, terminal, files, and work that keeps going. Compatible with any agent harness.**
+Beli is a personal AI agent built on top of OpenMuse. It combines a native
+mobile and web interface, durable server-side work, a persistent browser, an
+optional Linux workspace, and a plugin system for personal integrations.
 
-Ask for an outcome. Follow the plan, review actions, and come back to the result.
-Built with CopilotKit React Native for iOS, Android, and web.
+This repository is the Beli fork. Clone this repository, not the upstream
+OpenMuse repository, when you want the features documented here.
 
-[Quick start](#quick-start) · [Demo](#demo) · [Features](#features) · [Architecture](#architecture) · [Docs](docs/README.md) · [Contributing](CONTRIBUTING.md)
-
-[![CI](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml)
-[![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![OpenMuse fork](https://img.shields.io/badge/fork-CopilotKit%2FOpenMuse-blue)](https://github.com/onlinegill/beli)
+[![Fork of OpenMuse](https://img.shields.io/badge/fork-CopilotKit%2FOpenMuse-blue)](https://github.com/CopilotKit/OpenMuse)
 [![Upgrade scope](https://img.shields.io/badge/upstream%20diff-270%2B%20files-orange)](https://github.com/CopilotKit/openmuse/compare/main...onlinegill:main?expand=1)
 [![Tests](https://img.shields.io/badge/tests-615%20passing-brightgreen)](#verification)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Clone this template and customize it however you want.
+## Install
 
-> **Public fork notice:** This repository powers the public `onlinegill/beli` fork of CopilotKit OpenMuse. It adds the Beli personal-agent extensions described below and is not an official CopilotKit release. Upstream OpenMuse remains the source of truth for the original project.
+Requirements:
 
-## Upgrade snapshot
+- Node.js 24 LTS
+- pnpm 11.19.0
+- Docker only for the optional Linux computer
 
-**Updated September 24, 2026.** This is not a small configuration fork. Beli adds a large, integrated personal-agent layer on top of OpenMuse:
-
-| Measure | Current snapshot |
-| --- | --- |
-| Upstream comparison | 270+ changed files |
-| Added source | 41,000+ lines |
-| Test coverage | 615 passing tests |
-| Major areas | Plugins, skills, memory, providers, connectors, automations, subagents, MCP, voice, users, and native settings |
-
-[See the complete upstream comparison](https://github.com/CopilotKit/openmuse/compare/main...onlinegill:main?expand=1) and the detailed [upgrade inventory](UPGRADES.md).
-
-[![OpenMuse 🪁 — Ask it to browse. Watch the 38-second mobile demo.](assets/demos/2026-09-16/mobile.png)](assets/demos/2026-09-16/mobile.mp4)
-
-**[Watch the mobile demo · 38 seconds](assets/demos/2026-09-16/mobile.mp4)**
-
-[![OpenMuse 🪁 on the web — Watch the 42-second desktop demo.](assets/demos/2026-09-16/web.png)](assets/demos/2026-09-16/web.mp4)
-
-**[Watch the web demo · 42 seconds](assets/demos/2026-09-16/web.mp4)**
-
-</div>
-
-## Credits
-
-This project is based on and inspired by OpenMuse, originally developed by CopilotKit.
-OpenMuse: https://github.com/CopilotKit/OpenMuse
-Thank you to the CopilotKit team and OpenMuse contributors for making their work open source.
-
-Fork modifications are Copyright (c) 2026 Sukhpal Gill and are released under the MIT License.
-
-> **Alpha, for self-hosting and building on.** Open-ended reasoning, live Google accounts, and CopilotKit Rich Threads require their own configuration. See [what is verified](docs/VERIFICATION.md) and the [roadmap](ROADMAP.md).
-
-**[Build with OpenMuse →](https://go.copilotkit.ai/engineering-openmuse)**
-
-## Demo
-
-On iPhone, ask OpenMuse to find interesting stories on Hacker News and summarize CopilotKit. On desktop, ask it to check the school-trip email, open the message, and research exhibits at Monterey Bay Aquarium. The agent shows email and browser results inline. **Take control** opens that same browser session when you need it.
-
-The 38-second iPhone and 42-second desktop web demos show the current interface, framed in 16:9. The send arrow becomes a stop square inside the input pill while the agent replies, then switches back. Stopping keeps your draft intact. See the [recording notes](docs/DEMO.md) for the model setup and reproduction steps.
-
-[Mobile MP4](assets/demos/2026-09-16/mobile.mp4) · [Web MP4](assets/demos/2026-09-16/web.mp4) · [Recording details and reproduction](docs/DEMO.md)
-
-## What it is
-
-OpenMuse is a personal-agent application with an agent computer, visible work, and rich results. It runs its own server, task worker, and browser worker. You can inspect and change the source under the MIT license.
-
-The computer combines **persistent Chromium and an optional Linux workspace**. The agent can browse public pages, run commands in its own container, work with files, and move PDFs between the computer and the app. You can open its browser or terminal and continue the work. Graphical desktops and autonomous checkout remain future work.
-
-## Features
-
-| Surface | What runs in this alpha |
-| --- | --- |
-| **Chat** | CopilotKit headless chat with streamed AG-UI events, mailbox search and reading, send/stop in one input pill, a visible follow-up queue, retained drafts, delegated tasks, and inline email, browser, PDF, plan, and finance cards. |
-| **Agent computer** | Persistent browser profiles and takeover console; optional isolated Linux terminal, saved command receipts, editable workspace files, and PDF transfer. |
-| **Activity** | Durable task plans, progress, input requests, pause/resume/cancel/retry, approvals, and saved receipts. SQL leases recover interrupted work. |
-| **Ideas** | Suggestions with source evidence; edit, accept, or dismiss. Sent replies and completed matching work are excluded. |
-| **Goals & Tracking** | Goals and milestones; recurring public-page checks for changes, text availability, or USD price thresholds, with deduplicated alerts and failure backoff. |
-| **Documents** | Email attachment → PDF → requested form values → filled copy → reviewed reply → receipt. Native/web PDF viewing, paging, zoom, supported fields, and sharing. |
-| **Finance** | Import transaction CSV to create a spending summary with categories, transactions, and a savings-goal action. |
-| **Gmail & Calendar** | Google OAuth adapters, complete mail threads, drafts/attachments, calendar discovery, and reviewed event creation/update/deletion. Live credentials required. |
-| **Personal context** | Editable name, tone, avatar, and memories. Background-update preferences and durable in-app notifications. |
-| **Rich Threads** | CopilotKit Intelligence persistence for live deployments, with a stable main conversation, side chats, renaming, archiving, restoring, and replay. A server-only project key is required in live mode; sample mode uses local history. |
-
-The [feature inventory](docs/FEATURES.md) describes implemented capabilities and planned extensions. Health/bank/social connectors, device push, voice, generated executable tools, and automatic reservations/payments are on the [roadmap](ROADMAP.md).
-
-## Quick start
-
-**Requirements:** Node 24 LTS and pnpm 11.19.0. The local sample app needs no model, Google account, Docker, or Intelligence subscription.
+Clone and start the local application:
 
 ```sh
-git clone https://github.com/CopilotKit/OpenMuse.git openmuse
-cd openmuse
+git clone https://github.com/onlinegill/beli.git
+cd beli
 pnpm install --frozen-lockfile
 cp .env.example .env
 pnpm dev
 ```
 
-In another terminal:
+In another terminal, start the web client:
 
 ```sh
 pnpm dev:web
 ```
 
-Open [localhost:8090](http://localhost:8090). The API runs at [localhost:8787/api/health](http://localhost:8787/api/health).
+Open:
 
-### Try it
+- Web application: http://localhost:8090
+- API health check: http://localhost:8787/api/health
 
-1. In Chat, send **“Complete the permission slip”**. Open the task, supply fictional form values, inspect the saved PDF, and review the prepared reply. This writes only to the local mailbox.
-2. In **Goals → Track**, create a built-in availability watch, then change the built-in test page to trigger an alert.
-3. In **Menu → Delegate task → Finance**, use **Try example transactions** to create an interactive spending tracker.
-4. Start the [browser worker](#browser-worker) and configure a model, then ask **“Check out Hacker News for cool stuff”** or **“Summarize copilotkit.ai”**. Follow the browser inline and use **Take control** to open its session. For a key-free version of this flow, follow the [AI Mock demo setup](docs/DEMO.md#run-the-agent-browser-demo).
+The sample workspace runs without a model key, Google account, Docker, or
+CopilotKit Intelligence subscription.
 
-For iOS or Android, use `pnpm --dir apps/mobile ios` or `pnpm --dir apps/mobile android`. Xcode or Android tooling is required. The PDF reader needs an Expo development build; use [native setup](apps/mobile/README.md).
+## What Beli adds
 
-## Configure the agent and Google
+Beli is a substantial extension of OpenMuse, not a cosmetic rename. The public
+fork currently differs from upstream in more than 270 files and adds roughly
+41,000 source lines.
 
-Copy the commented settings in [.env.example](.env.example) into your private `.env`:
+Major additions include:
 
-1. Set `AGENT_BACKEND=model`, `MODEL=provider/model-id`, and the matching provider key. CopilotKit supports the configured OpenAI, Anthropic or Google provider. Fictional data can still be used with a real model. Provider keys stay on the server.
-2. Create or select a CopilotKit Intelligence project with `npx copilotkit@latest login` and `npx copilotkit@latest project select`. Keep the generated `CPK_INTELLIGENCE_API_KEY` on the server.
-3. For personal mail/calendar, set `WORKSPACE_MODE=live`, the generated `CPK_INTELLIGENCE_API_KEY`, a random `OPENMUSE_ACCESS_KEY` of at least 24 characters, and `TOKEN_ENCRYPTION_KEY` containing 32 random bytes encoded as base64. Restart the API.
-4. Configure a Google OAuth web client with Gmail and Calendar APIs enabled. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; register `${PUBLIC_API_URL}/api/google/callback` as its redirect URI. Configure consent/test-user access in your Google project.
-5. Open **Apps → Gmail** (or **Google Calendar**), connect read access, and grant write access when needed. Every send or calendar change still requires its own stored review. Changing/disconnecting the account invalidates pending connection-bound work.
+- Plugin and skill discovery, validation, routing, and configuration.
+- Provider and model settings with encrypted credential storage.
+- Provider fallback, local Ollama support, and model selection.
+- Durable personal context, memory candidates, recall, and persona.
+- Subagents with depth and parallelism limits.
+- Centralized tool policy, approval tokens, and owner scoping.
+- Email, Telegram, WhatsApp, browser-login, and credential connectors.
+- Automations, heartbeat scheduling, and workboard workflows.
+- MCP client support and voice-note transcription.
+- Users, roles, sessions, password hashing, and admin protections.
+- Expanded native navigation, settings, inspection, and activity surfaces.
 
-Google credentials are encrypted at rest. File URLs and browser consoles use short-lived signatures. This deployment uses one owner protected by a shared access key; it is not a multi-tenant authentication system. Use HTTPS and restricted network access for a remote host. Keep the default local-data mode on loopback.
+See [UPGRADES.md](UPGRADES.md) for the detailed inventory and the
+[complete comparison](https://github.com/CopilotKit/openmuse/compare/main...onlinegill:main?expand=1)
+for the file-by-file diff.
+
+## Core features
+
+| Area | Capability |
+| --- | --- |
+| Chat | Native and web chat with streamed agent events, tool cards, follow-up work, and retained drafts. |
+| Agent computer | Persistent browser sessions, an optional Linux workspace, files, terminal commands, and PDF transfer. |
+| Tasks | Durable plans, pause/resume/stop controls, approvals, retries, and restart recovery. |
+| Memory | Reviewed memory candidates, recall, personal context, and editable identity. |
+| Providers | OpenAI-compatible, Anthropic, Google, DeepSeek, and local Ollama providers. |
+| Connectors | Encrypted credentials, browser login, email, Telegram, and WhatsApp. |
+| Automation | Heartbeat jobs, scheduled work, notifications, and a workboard. |
+| Subagents | Delegated tasks, collection, cancellation, and result isolation. |
+| Personalization | SOUL.md personality, shortcuts, voice notes, and background updates. |
+| Safety | Tool policy, reviewed external writes, owner scoping, and secret redaction. |
+
+## Configuration
+
+The example environment file contains commented settings. Start with the local
+sample configuration, then add only the providers and connectors you use.
+
+Common settings:
+
+| Variable | Purpose |
+| --- | --- |
+| `WORKSPACE_MODE` | Use `demo` for local sample data or `live` for configured providers. |
+| `AGENT_BACKEND` | Select the model-backed agent or the sample agent. |
+| `MODEL` | Provider and model identifier. |
+| `OPENAI_API_KEY` | API key for an OpenAI-compatible provider. |
+| `OPENAI_BASE_URL` | Base URL for OpenAI-compatible or local provider APIs. |
+| `OPENMUSE_ACCESS_KEY` | Access key for the dashboard in live mode. |
+| `TOKEN_ENCRYPTION_KEY` | Base64-encoded 32-byte key for encrypted connector credentials. |
+| `DATABASE_URL` | Optional PostgreSQL connection. PGlite is used locally when unset. |
+| `BROWSER_WORKER_URL` | Browser worker endpoint. |
+| `WORKER_TOKEN` | Shared browser-worker authentication token. |
+
+Never commit `.env`, `.openmuse`, browser profiles, credentials, personal
+documents, or production data.
 
 ## Browser worker
 
-Set `BROWSER_WORKER_URL=http://127.0.0.1:8790` and a random `WORKER_TOKEN` of at least 32 characters in `.env`.
+Install Chromium and start the worker:
 
 ```sh
 pnpm --dir apps/worker exec playwright install chromium
 pnpm dev:browser
 ```
 
-Or use `docker compose --env-file .env -f infra/compose.yaml up --build -d`. The same token must reach the API and worker. Sessions have persistent Chromium profiles; the app can open a live screenshot console and import PDF downloads. Agent tools can read public pages and hand interactive work to the person. [Worker setup and boundaries](apps/worker/README.md).
+Set `BROWSER_WORKER_URL` and a random `WORKER_TOKEN` in `.env`. The API and
+worker must use the same token.
 
-## Persistence and operation
+## Optional Linux computer
 
-### Linux terminal and workspace
-
-Build the computer image, enable it on the API, then open **Computer → Terminal → Start computer**:
+Build the isolated computer image:
 
 ```sh
 docker build -t openmuse-computer:local apps/computer
-COMPUTER_ENABLED=true pnpm dev
 ```
 
-The API needs access to the Docker CLI and engine. Commands run in a nonroot container with no host-directory mounts or credentials. A named `/workspace` volume retains files when stopped. Terminal networking is disabled; public web access uses the browser worker. Commands have a 30-second limit and saved output/exit receipts. **Files** supports folders, text editing, and PDF transfer to/from Documents. This is a Linux container, not a full operating-system VM. [Setup, Colima option, and boundaries](docs/COMPUTER.md).
+Then enable it in `.env`:
 
-### Application storage
-
-By default, embedded PGlite, documents and the signing key live in `.openmuse/`; browser profiles live in `.openmuse/browser-profiles/`. Keep that directory private and back it up. The API hosts the task worker. The host must remain running for background work.
-
-For a separate task worker, configure the same `DATABASE_URL`, secrets and shared `DATA_DIR` for both processes, then set `TASK_WORKER_ENABLED=false` on the API and run `pnpm dev:worker`. PGlite cannot be opened by separate processes. Production commands are `pnpm build:server`, `pnpm start` and `pnpm start:worker`. Run one API instance; task workers coordinate through SQL leases.
-
-No hidden retry occurs after an uncertain external write. Review its provider outcome before creating a replacement. Pausing/cancelling prevents subsequent task steps; an already approved in-flight provider request may finish.
-
-## CopilotKit Rich Threads
-
-Live deployments require `CPK_INTELLIGENCE_API_KEY` on the API server for CopilotKit Intelligence conversation persistence and replay. Create or select a project with `npx copilotkit@latest login` and `npx copilotkit@latest project select`, set the generated server-only key, and restart the API. The native menu uses `useThreads`; rich tool results link back to saved tasks, documents, and browser sessions.
-
-Sample mode can leave the key unset and keeps one conversation in the local database. Intelligence is a separate service and is not included in this repository's MIT license. No project key is shipped. [Configuration and validation boundaries](docs/RICH-THREADS.md).
-
-## Architecture
-
-```mermaid
-flowchart TD
-  Client[Expo / React Native / Web] -->|AG-UI and authenticated API| API[Hono + CopilotKit runtime]
-  API --> Tasks[Durable task worker]
-  API --> Threads[CopilotKit Intelligence required in live mode]
-  API --> Store[(PGlite or PostgreSQL)]
-  Tasks --> Store
-  Tasks --> Review[Stored action review]
-  Review --> Google[Gmail / Calendar adapters]
-  Tasks --> Browser[Chromium worker + persistent profiles]
-  API --> Browser
-  API --> Computer[Optional Docker Linux computer]
-  Tasks --> Computer
-  Computer --> Volume[(Persistent workspace volume)]
-  Tasks --> Files[PDF files + structured artifacts]
-  API -. future adapter .-> OpenBot[OpenBot]
+```sh
+COMPUTER_ENABLED=true
+COMPUTER_IMAGE=openmuse-computer:local
 ```
+
+Commands run in a non-root container with a persistent `/workspace` volume and
+no host-directory mounts. See [docs/COMPUTER.md](docs/COMPUTER.md).
+
+## Project layout
 
 | Directory | Purpose |
 | --- | --- |
-| `apps/mobile` | Shared iOS, Android, and web UI with CopilotKit headless hooks. |
-| `apps/server` | API, CopilotKit runtime, identity boundary, task engine, reviews, files, and persistence. |
-| `apps/worker` | Token-protected Playwright browser service with persistent profiles. |
-| `apps/computer` | Nonroot Linux image, bounded filesystem helper, and real container verification. |
-| `packages/domain` | Shared types and request validation. |
-| `packages/integrations` | Google and browser protocol adapters. |
-| `packages/backends` | Optional OpenBot HTTP adapter and its identity boundary. |
-| `tests` | Workflow, runtime, persistence, provider-contract, and authorization tests. |
+| `apps/mobile` | Expo and React Native client for iOS, Android, and web. |
+| `apps/server` | API, agent engine, persistence, plugins, connectors, memory, and automation. |
+| `apps/worker` | Playwright browser worker and persistent profiles. |
+| `apps/computer` | Optional isolated Linux computer. |
+| `packages/domain` | Shared domain types and validation. |
+| `packages/integrations` | Provider and integration adapters. |
+| `packages/backends` | Agent backend adapters. |
+| `tests` | Server, workflow, browser, connector, policy, and persistence tests. |
 
 ## Verification
 
-The published fork was checked from a fresh clone of this repository with:
+The published fork was checked with:
 
 ```sh
 pnpm lint
@@ -207,31 +161,54 @@ pnpm build:server
 pnpm build:web
 ```
 
-The test run completed with 615 passing tests and no failures. See [UPGRADES.md](UPGRADES.md) for the upgrade inventory and verification summary.
+Result:
 
-### OpenBot compatibility
+- Lint passed.
+- Typecheck passed.
+- Tests: 615 passed, 0 failed.
+- Server build passed.
+- Web build passed.
 
-OpenMuse's native client and personal-agent workflows are independent of OpenBot. The disabled OpenBot adapter is pinned and contract-tested against upstream interfaces. Live user/session bridging, routine mapping, and computer backend wiring remain future work. OpenBot's Intelligence runtime is not a raw AG-UI endpoint. [Integration contract](docs/OPENBOT-INTEGRATION.md).
+The browser-worker Docker suite and native store builds require their platform
+tools and are not part of the default local verification command.
 
 ## Development
 
+Useful commands:
+
 ```sh
-pnpm lint
-pnpm typecheck
+pnpm dev
+pnpm dev:web
+pnpm dev:browser
+pnpm dev:worker
+pnpm dev:whatsapp
 pnpm test
+pnpm test:browser
+pnpm test:computer
 pnpm build:server
 pnpm build:web
 pnpm build:ios
 pnpm build:android
-pnpm --dir apps/worker typecheck
-pnpm test:browser
-pnpm test:computer
 ```
 
-Platform build scripts export JavaScript/Hermes bundles; they do not produce signed app binaries. Browser checks require installed Chromium and public fixture access. CI also exercises the browser and Linux computer containers. See [contribution guidance](CONTRIBUTING.md) and [verification results](docs/VERIFICATION.md).
+Run `pnpm lint` and `pnpm typecheck` before submitting changes. Never include
+real credentials, personal email data, browser sessions, or production data in
+tests, recordings, commits, or issue reports.
 
-## Contributing and license
+## Status
 
-Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), [ROADMAP.md](ROADMAP.md), and the [security policy](SECURITY.md).
+Beli is an alpha fork for self-hosting and continued development. Some
+integrations require external accounts, provider keys, or platform tooling.
+The repository includes fictional sample data for local development and
+demonstrations.
 
-MIT licensed. OpenMuse is not an official CopilotKit product. Its original interface and fictional assets are included. Website, email, and document content supplies evidence, not permission to act.
+The fork intentionally retains upstream OpenMuse attribution and license
+notices:
+
+- Upstream project: https://github.com/CopilotKit/OpenMuse
+- Full comparison: https://github.com/CopilotKit/openmuse/compare/main...onlinegill:main?expand=1
+- Upgrade inventory: [UPGRADES.md](UPGRADES.md)
+- Public release: https://github.com/onlinegill/beli/releases/tag/v0.1.0-beli
+
+Fork modifications are Copyright (c) 2026 Sukhpal Gill and are released under
+the MIT License.
