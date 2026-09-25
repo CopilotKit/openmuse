@@ -1018,9 +1018,18 @@ export class AgentService {
         ? Boolean(previousHash && previousHash !== currentHash)
         : monitor.condition === "contains"
           ? text.toLowerCase().includes(monitor.value.toLowerCase())
-          : this.matchesPrice(text, Number(monitor.value));
+          : monitor.condition === "price_above"
+            ? this.matchesPrice(text, Number(monitor.value), "above")
+            : this.matchesPrice(text, Number(monitor.value), "below");
     const previouslyMatched = Boolean(task.state.matched);
     const shouldNotify = matched && (monitor.condition === "change" || !previouslyMatched);
+    // The notice key identifies the alert, and re-publishing a settled notice has to resolve to the
+    // notification it already raised. A state condition (contains, price_above, price_below) alerts
+    // once per matching episode, so the episode identifies it: a watch that falls back below the
+    // threshold and rises again alerts a second time even when the page renders the text the first
+    // alert was about. A `change` watch alerts on each newly seen revision instead, so the observed
+    // content identifies it.
+    const episodes = Number(task.state.episodes ?? 0) + (matched && !previouslyMatched ? 1 : 0);
     const nextCheckAt = new Date(Date.now() + monitor.intervalMinutes * 60000).toISOString();
     await ctx.guard();
     // Worker lease is checked before each publication; monitor control also invalidates that lease.
@@ -1060,12 +1069,16 @@ export class AgentService {
         lastHash: currentHash,
         resumingMonitor: false,
         matched,
+        episodes,
         failures: 0,
         notice: shouldNotify
           ? {
               title: monitor.title,
               body: `Condition met at ${observation.url}: ${text.slice(0, 240)}`,
-              key: `monitor:${monitor.id}:${currentHash}`,
+              key:
+                monitor.condition === "change"
+                  ? `monitor:${monitor.id}:${currentHash}`
+                  : `monitor:${monitor.id}:${episodes}`,
             }
           : null,
       },
@@ -1082,8 +1095,11 @@ export class AgentService {
       plan: task.plan.map((s) => ({ ...s, status: "succeeded" })),
     };
   }
-  private matchesPrice(text: string, threshold: number) {
+  private matchesPrice(text: string, threshold: number, direction: "above" | "below" = "below") {
     const matches = [...text.matchAll(/(?:\$|USD\s*)(\d+(?:,\d{3})*(?:\.\d{1,2})?)/g)];
-    return matches.some((m) => Number(m[1].replace(/,/g, "")) < threshold);
+    return matches.some((m) => {
+      const price = Number(m[1].replace(/,/g, ""));
+      return direction === "above" ? price > threshold : price < threshold;
+    });
   }
 }
