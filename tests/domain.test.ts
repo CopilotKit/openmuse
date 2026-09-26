@@ -102,7 +102,14 @@ test("events reject nonexistent dates instead of normalizing them into the next 
 });
 
 test("events accept valid leap days, month ends, and explicit offsets", () => {
-  for (const suffix of ["", "T10:00:00Z", "T10:00:00.123+08:00", "T10:00:00-07:00"]) {
+  for (const suffix of [
+    "",
+    "T10:00Z",
+    "T10:00+05:30",
+    "T10:00:00Z",
+    "T10:00:00.123+08:00",
+    "T10:00:00-07:00",
+  ]) {
     for (const [start, end] of [
       ["2000-02-29", "2000-03-01"],
       ["2024-02-29", "2024-03-01"],
