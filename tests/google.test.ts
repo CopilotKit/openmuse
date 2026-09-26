@@ -475,6 +475,26 @@ test("all-day writes use exclusive date-only end and invalid dates never call Go
   assert.equal(requests, 1);
 });
 
+test("calendar creates and updates reject nonexistent dates before contacting Google", async () => {
+  let requests = 0;
+  const client = clientWith(() => {
+    requests++;
+    return json(eventResponse);
+  });
+  for (const allDay of [true, false]) {
+    const suffix = allDay ? "" : "T10:00:00+08:00";
+    const draft = {
+      ...event(),
+      allDay,
+      start: `2026-02-29${suffix}`,
+      end: `2026-03-02${suffix}`,
+    };
+    await assert.rejects(client.createEvent(draft), { name: "ZodError" });
+    await assert.rejects(client.updateEvent("event-1", draft), { name: "ZodError" });
+  }
+  assert.equal(requests, 0);
+});
+
 test("event updates explicitly clear the opposite time representation when switching all-day mode", async () => {
   const client = clientWith(async (request) => {
     if (request.method === "GET") return json(eventResponse);
