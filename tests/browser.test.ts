@@ -158,8 +158,6 @@ test("browser observations reuse an owned profile and reject unowned reads", asy
   assert.equal(fresh.text, read.text);
 });
 
-
-
 test("cancelled task-style browser observations stop before a follow-up read", async (t) => {
   const controller = new AbortController();
   const calls: string[] = [];
