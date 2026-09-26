@@ -5,7 +5,13 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { createApp } from "../apps/server/src/app.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
-import type { AgentNotification, AgentTask, Idea, Monitor } from "../packages/domain/src/agent.ts";
+import type {
+  AgentNotification,
+  AgentTask,
+  Goal,
+  Idea,
+  Monitor,
+} from "../packages/domain/src/agent.ts";
 import type { ActionProposal } from "../packages/domain/src/index.ts";
 
 let db: Store, server: Awaited<ReturnType<typeof createApp>>, directory: string;
@@ -122,6 +128,60 @@ test("ideas ignore sent replies while retaining unfinished incoming requests", a
   assert.ok(sent);
   assert.ok(ideas.some((idea) => idea.input.messageId === incoming.id));
   assert.ok(!ideas.some((idea) => idea.input.messageId === sent.id));
+});
+
+test("accepting a goal idea keeps the task attached to the original goal", async () => {
+  const ideaOwner = "goal-plan-ideas";
+  const goal = await server.agent.createGoal(ideaOwner, {
+    title: "Plan a walking routine",
+    description: "Walk three times each week",
+    category: "Health",
+  });
+  const ideas = await server.agent.refreshIdeas(ideaOwner);
+  const idea = ideas.find((candidate) => candidate.input.goalId === goal.id);
+  assert.ok(idea);
+
+  const accepted = await server.agent.decideIdea(ideaOwner, idea.id, "accept");
+  assert.ok(accepted?.taskId);
+  const task = await server.agent.getTask(ideaOwner, accepted.taskId);
+  assert.equal(task.goalId, goal.id);
+  assert.deepEqual(await db.list<Goal>(ideaOwner, "goals"), [goal]);
+
+  const retried = await server.agent.decideIdea(ideaOwner, idea.id, "accept");
+  assert.equal(retried?.taskId, task.id);
+  assert.equal((await db.list<AgentTask>(ideaOwner, "tasks")).length, 1);
+  assert.deepEqual(await db.list<Goal>(ideaOwner, "goals"), [goal]);
+
+  await server.agent.updateGoal(ideaOwner, goal.id, { status: "paused" });
+  assert.equal((await server.agent.getTask(ideaOwner, task.id)).status, "paused");
+});
+
+test("accepting an idea without a goal still creates one goal and task", async () => {
+  const ideaOwner = "standalone-ideas";
+  const idea: Idea = {
+    id: "standalone-plan",
+    title: "Plan a weekend walk",
+    reason: "Make time to get outdoors",
+    prompt: "Plan a weekend walk",
+    kind: "plan",
+    input: {},
+    evidence: [],
+    status: "new",
+    createdAt: new Date().toISOString(),
+  };
+  await db.put(ideaOwner, "ideas", idea);
+  const accepted = await server.agent.decideIdea(ideaOwner, idea.id, "accept");
+  assert.ok(accepted?.taskId);
+  await server.agent.decideIdea(ideaOwner, idea.id, "accept");
+
+  const goals = await db.list<Goal>(ideaOwner, "goals");
+  assert.equal(goals.length, 1);
+  assert.equal(goals[0].title, idea.title);
+  assert.equal(goals[0].description, idea.reason);
+  const tasks = await db.list<AgentTask>(ideaOwner, "tasks");
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].id, accepted.taskId);
+  assert.equal(tasks[0].goalId, goals[0].id);
 });
 
 test("cancelling a task denies its pending action", async () => {
