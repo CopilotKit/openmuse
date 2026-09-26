@@ -1041,9 +1041,13 @@ export class AgentService {
     const lines = monitor.condition === "change" ? pageLines(observation.text) : [];
     const previousPage =
       matched && monitor.condition === "change"
-        ? await this.db.get<{ lines: string[] }>(owner, "monitor-pages", monitor.id)
+        ? await this.db.get<{ hash?: string; lines: string[] }>(owner, "monitor-pages", monitor.id)
         : null;
-    const diff = previousPage ? diffPage(previousPage.lines, lines) : undefined;
+    // Saved lines can run ahead of a lost task outcome; diff only against the committed baseline.
+    const diff =
+      previousPage && previousPage.hash === previousHash
+        ? diffPage(previousPage.lines, lines)
+        : undefined;
     // Only relative times changed ("3 minutes ago"): keep watching quietly.
     const quiet = Boolean(diff && !meaningfulPageDiff(diff));
     const shouldNotify =
@@ -1068,7 +1072,7 @@ export class AgentService {
     );
     if (!savedMonitor) throw new LostLeaseError();
     if (monitor.condition === "change")
-      await this.db.put(owner, "monitor-pages", { id: monitor.id, lines });
+      await this.db.put(owner, "monitor-pages", { id: monitor.id, hash: currentHash, lines });
     await ctx.event(
       "observation",
       previousHash ? "Checked for changes" : "Saved the first observation",
