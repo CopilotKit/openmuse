@@ -42,7 +42,7 @@ export function ComputerEntry() {
       <Monitor size={13} color={colors.muted} />
       <Text style={{ fontSize: 12, color: colors.muted }}>
         Computer
-        {active ? " · take control" : available ? " · ready" : " · offline"}
+        {!available ? " · offline" : active ? " · take control" : " · ready"}
       </Text>
       <View
         style={{
