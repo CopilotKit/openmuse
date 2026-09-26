@@ -705,6 +705,12 @@ export class AgentService {
         409,
       );
     const proposal = await this.actions.propose(owner, input, `${task.id}:${key}`, task.id);
+    if (proposal.status === "succeeded") return proposal;
+    if (proposal.status !== "awaiting_review" && proposal.status !== "executing")
+      throw new AppError(
+        `Reviewed action ${proposal.status}: ${proposal.error ?? "No further action was taken"}`,
+        409,
+      );
     try {
       await context.checkpoint({ actionId: proposal.id });
     } catch (error) {
@@ -712,11 +718,12 @@ export class AgentService {
         await this.actions.decide(owner, proposal.id, proposal.hash, "deny");
       throw error;
     }
-    await context.event(
-      "approval",
-      proposal.title,
-      `Review prepared for ${proposal.account ?? "the connected account"}`,
-    );
+    if (proposal.status === "awaiting_review")
+      await context.event(
+        "approval",
+        proposal.title,
+        `Review prepared for ${proposal.account ?? "the connected account"}`,
+      );
     return proposal;
   }
   private async execute(
