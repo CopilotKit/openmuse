@@ -11,32 +11,42 @@ export function pageLines(text: string, limit = 2000): string[] {
 
 export type PageDiff = { added: string[]; updated: string[]; removed: string[] };
 
-// Lines that differ only in numbers or relative times ("posted 1 day ago" → "posted 2 days
-// ago", "58 minutes ago" → "1 hour ago", "3 comments") are updates, not news.
+// Relative times ("posted 1 day ago" → "posted 2 days ago", "58 minutes ago" → "1 hour ago")
+// tick on their own, so a line where only they changed is not news and is left out.
 const relativeTime =
   /\b(?:\d+|an?|one)\s+(?:sec(?:ond)?|min(?:ute)?|hour|hr|day|week|month|year)s?\s+ago\b|\bvor\s+(?:\d+|einer?|einem)\s+(?:sekunde|minute|stunde|tag|woche|monat|jahr)(?:e|en|n)?\b/giu;
-const shape = (line: string) =>
-  line
-    .replace(relativeTime, "<time>")
+const timeless = (line: string) => line.replace(relativeTime, "<time>");
+// Any other number change (a price, stock count or version) is news, listed as an update.
+const numberless = (line: string) =>
+  timeless(line)
     .replace(/\d+(?:[.,]\d+)*/g, "#")
     .replace(/(\p{L})s\b/gu, "$1")
     .toLowerCase();
 
-/** Whether anything besides numbers and relative times changed. */
+/** Whether any line was added, updated or removed. */
 export function meaningfulPageDiff(diff: PageDiff) {
-  return diff.added.length > 0 || diff.removed.length > 0;
+  return diff.added.length > 0 || diff.updated.length > 0 || diff.removed.length > 0;
 }
 
 export function diffPage(previous: string[], current: string[]): PageDiff {
   const before = new Set(previous);
   const after = new Set(current);
-  const beforeShapes = new Set(previous.map(shape));
-  const afterShapes = new Set(current.map(shape));
-  const changed = current.filter((line) => !before.has(line));
+  const beforeTimeless = new Set(previous.map(timeless));
+  const afterTimeless = new Set(current.map(timeless));
+  const beforeNumberless = new Set(previous.map(numberless));
+  const afterNumberless = new Set(current.map(numberless));
+  const changed = current.filter(
+    (line) => !before.has(line) && !beforeTimeless.has(timeless(line)),
+  );
   return {
-    added: changed.filter((line) => !beforeShapes.has(shape(line))),
-    updated: changed.filter((line) => beforeShapes.has(shape(line))),
-    removed: previous.filter((line) => !after.has(line) && !afterShapes.has(shape(line))),
+    added: changed.filter((line) => !beforeNumberless.has(numberless(line))),
+    updated: changed.filter((line) => beforeNumberless.has(numberless(line))),
+    removed: previous.filter(
+      (line) =>
+        !after.has(line) &&
+        !afterTimeless.has(timeless(line)) &&
+        !afterNumberless.has(numberless(line)),
+    ),
   };
 }
 

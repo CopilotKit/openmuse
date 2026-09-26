@@ -1044,7 +1044,7 @@ export class AgentService {
         ? await this.db.get<{ lines: string[] }>(owner, "monitor-pages", monitor.id)
         : null;
     const diff = previousPage ? diffPage(previousPage.lines, lines) : undefined;
-    // Only numbers or relative times changed ("3 minutes ago"): keep watching quietly.
+    // Only relative times changed ("3 minutes ago"): keep watching quietly.
     const quiet = Boolean(diff && !meaningfulPageDiff(diff));
     const shouldNotify =
       matched && !quiet && (monitor.condition === "change" || !previouslyMatched);

@@ -14,23 +14,37 @@ test("page lines are trimmed, collapsed, deduplicated and bounded", () => {
   assert.equal(pageLines("x".repeat(500))[0].length, 300);
 });
 
-test("new lines are separated from lines where only a number changed", () => {
+test("new lines are separated from lines where a number changed", () => {
   const before = [
     "AI jobs in Munich",
-    "Siemens · Werkstudent AI · posted 1 day ago",
+    "Siemens · Werkstudent AI · 2 openings · posted 1 day ago",
     "BCG · Intern",
   ];
   const after = [
     "AI jobs in Munich",
     "SAP · Working Student AI Engineer",
-    "Siemens · Werkstudent AI · posted 2 days ago",
+    "Siemens · Werkstudent AI · 3 openings · posted 2 days ago",
   ];
   assert.deepEqual(diffPage(before, after), {
     added: ["SAP · Working Student AI Engineer"],
-    updated: ["Siemens · Werkstudent AI · posted 2 days ago"],
+    updated: ["Siemens · Werkstudent AI · 3 openings · posted 2 days ago"],
     removed: ["BCG · Intern"],
   });
   assert.deepEqual(diffPage(before, before), { added: [], updated: [], removed: [] });
+});
+
+test("price, stock, count and version changes are meaningful updates", () => {
+  for (const [before, after] of [
+    ["Price: $399.99", "Price: $279.99"],
+    ["Only 3 left", "Only 0 left"],
+    ["Tickets available: 12", "Tickets available: 0"],
+    ["Latest release 1.2.3", "Latest release 2.0.0"],
+    ["1 comment", "2 comments"],
+  ]) {
+    const diff = diffPage(["Shop", before], ["Shop", after]);
+    assert.deepEqual(diff, { added: [], updated: [after], removed: [] }, before);
+    assert.equal(meaningfulPageDiff(diff), true, before);
+  }
 });
 
 test("the change summary lists sections, clips long lists, and counts lines", () => {
@@ -49,7 +63,7 @@ test("the change summary lists sections, clips long lists, and counts lines", ()
   assert.equal(countPageDiff({ added: [], updated: [], removed: [] }), "");
 });
 
-test("relative times count as updates, and only new or removed lines are meaningful", () => {
+test("lines where only a relative time changed are left out and are not meaningful", () => {
   const before = [
     "3 points by ada 58 minutes ago | hide",
     "Vor 2 Stunden veröffentlicht",
@@ -61,10 +75,13 @@ test("relative times count as updates, and only new or removed lines are meaning
     "Show HN: A new tool",
   ];
   const timesOnly = diffPage(before, after);
-  assert.deepEqual(timesOnly.added, []);
-  assert.deepEqual(timesOnly.removed, []);
-  assert.equal(timesOnly.updated.length, 2);
+  assert.deepEqual(timesOnly, { added: [], updated: [], removed: [] });
   assert.equal(meaningfulPageDiff(timesOnly), false);
+  assert.deepEqual(diffPage(before, ["4 points by ada 1 hour ago | hide", ...after.slice(1)]), {
+    added: [],
+    updated: ["4 points by ada 1 hour ago | hide"],
+    removed: [],
+  });
   assert.equal(meaningfulPageDiff(diffPage(before, [...after, "Ask HN: Another post"])), true);
   assert.equal(meaningfulPageDiff(diffPage(before, after.slice(0, 2))), true);
 });
