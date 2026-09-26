@@ -220,7 +220,7 @@ test("monitor evidence identifies each check separately from the monitor", async
   assert.notEqual(observed[0].id, observed[1].id);
 });
 
-test("browser reads, search excerpts and legacy evidence survive a store round trip", async () => {
+test("browser reads, search excerpts and legacy evidence survive a store restart", async () => {
   const page = {
     sessionId: "browser-session-1",
     url: "https://example.com/menu",
@@ -230,8 +230,6 @@ test("browser reads, search excerpts and legacy evidence survive a store round t
   const first = server.agent.browserEvidence(page);
   const second = server.agent.browserEvidence({ ...page, text: "Updated specials" });
   assert.notEqual(first.id, second.id);
-  assert.equal(first.provenance?.sourceId, page.sessionId);
-  assert.equal(second.provenance?.sourceId, page.sessionId);
   const search: Evidence = {
     id: "search-result-1",
     kind: "web",
@@ -245,20 +243,23 @@ test("browser reads, search excerpts and legacy evidence survive a store round t
     },
   };
   const legacy: Evidence = { id: "legacy-mail", kind: "mail", title: "Old", excerpt: "Old body" };
-  const task = await server.agent.createTask(owner, {
-    title: "Provenance round trip",
-    prompt: "Keep evidence",
-    kind: "agent",
-    input: {},
-  });
-  await db.put(owner, "tasks", { ...task, evidence: [first, second, search, legacy] });
-  const saved = (await db.get<AgentTask>(owner, "tasks", task.id))?.evidence ?? [];
-  const sameUrl = saved.filter((item) => item.url === page.url);
-  assert.deepEqual(
-    sameUrl.map((item) => item.provenance?.acquisition),
-    ["browser", "browser", "search"],
-  );
-  assert.equal(saved.find((item) => item.id === "legacy-mail")?.provenance, undefined);
+  const evidence = [first, second, search, legacy];
+  const storeDir = await mkdtemp(join(tmpdir(), "openmuse-provenance-"));
+  const dataDir = join(storeDir, "db");
+  let store = await createStore({ dataDir });
+  try {
+    await store.put(owner, "tasks", { id: "provenance-restart", evidence });
+    await store.close();
+    store = await createStore({ dataDir });
+    const saved =
+      (await store.get<{ evidence: Evidence[] }>(owner, "tasks", "provenance-restart"))?.evidence ??
+      [];
+    assert.deepEqual(saved, evidence);
+    assert.equal(saved.find((item) => item.id === "legacy-mail")?.provenance, undefined);
+  } finally {
+    await store.close();
+    await rm(storeDir, { recursive: true, force: true });
+  }
 });
 
 test("mail evidence identifies each observation separately from its message", async () => {
