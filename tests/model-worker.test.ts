@@ -164,3 +164,70 @@ test("the model worker keeps the text a model replies with when it calls no tool
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+test("replaying a completed prepared action returns its receipt without reopening approval", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "openmuse-model-replay-"));
+  const db = await createStore();
+  const draft = {
+    title: "Sample walk",
+    start: "2026-10-10T10:00:00-07:00",
+    end: "2026-10-10T11:00:00-07:00",
+  };
+  let calls: ({ name: string; arguments: object } | undefined)[] = [
+    { name: "prepare_event", arguments: draft },
+  ];
+  const { requests } = await modelFixture(t, (index) => calls[index]);
+  const server = await createApp(db, {
+    mode: "sample",
+    port: 8787,
+    host: "127.0.0.1",
+    publicUrl: "http://localhost:8787",
+    dataDir: directory,
+    agentBackend: "model",
+    intelligenceApiKey: "test-project-key-never-sent",
+    model: "openai/fixture",
+    googleRedirectUri: "http://localhost:8787/api/google/callback",
+    allowedOrigins: [],
+  });
+  try {
+    const task = await server.agent.createTask("replay-owner", {
+      prompt: "Put a sample walk on my calendar",
+    });
+    await server.agent.worker.tick();
+    const pending = await server.agent.getTask("replay-owner", task.id);
+    assert.equal(pending.status, "waiting_approval");
+    assert.ok(pending.actionId);
+    const proposal = await db.get<ActionProposal>("replay-owner", "actions", pending.actionId);
+    assert.ok(proposal);
+    const completed = await server.actions.decide(
+      "replay-owner",
+      proposal.id,
+      proposal.hash,
+      "approve",
+    );
+    assert.equal(completed.status, "succeeded");
+
+    requests.length = 0;
+    calls = [
+      { name: "prepare_event", arguments: draft },
+      { name: "finish_task", arguments: { summary: "The reviewed event is already complete." } },
+    ];
+    await server.agent.worker.tick();
+
+    const finished = await server.agent.getTask("replay-owner", task.id);
+    assert.equal(finished.status, "succeeded", finished.error ?? finished.question);
+    assert.equal(finished.actionId, null);
+    assert.equal(finished.state.approvalResult, completed.result);
+    const actions = (await db.list<ActionProposal>("replay-owner", "actions")).filter(
+      (action) => action.taskId === task.id,
+    );
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0].status, "succeeded");
+    assert.ok(requests.some((request) => request.body.includes(String(completed.result))));
+  } finally {
+    await server.agent.stop();
+    await db.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
