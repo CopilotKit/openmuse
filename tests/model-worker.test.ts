@@ -166,7 +166,6 @@ test("the model worker keeps the text a model replies with when it calls no tool
   }
 });
 
-
 test("browser reads keep observation identity distinct while reusing one session", async (t) => {
   let currentUrl = "https://example.com/one";
   const sessionIds = new Set<string>();
