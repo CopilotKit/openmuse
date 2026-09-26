@@ -7,6 +7,7 @@ import { createApp } from "../apps/server/src/app.ts";
 import { createStore } from "../apps/server/src/db.ts";
 import { createDemoModel, demoModel } from "../apps/server/src/demo/model.ts";
 import type { ActionProposal } from "../packages/domain/src/index.ts";
+import { browserFixture } from "./helpers/browser.ts";
 import { fixture as computerFixture } from "./helpers/computer.ts";
 import { modelFixture } from "./helpers/model.ts";
 
@@ -163,4 +164,64 @@ test("the model worker keeps the text a model replies with when it calls no tool
     await db.close();
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("browser reads keep observation identity distinct while reusing one session", async (t) => {
+  let currentUrl = "https://example.com/one";
+  const sessionIds = new Set<string>();
+  const browser = await browserFixture(t, (path, body) => {
+    if (path === "/sessions") {
+      const id = String(body.id);
+      currentUrl = String(body.url);
+      sessionIds.add(id);
+      return {
+        data: {
+          id,
+          title: currentUrl,
+          url: currentUrl,
+          status: "active",
+          updatedAt: new Date().toISOString(),
+        },
+      };
+    }
+    if (path.endsWith("/read")) {
+      return {
+        data: {
+          url: currentUrl,
+          title: currentUrl.endsWith("/one") ? "Source one" : "Source two",
+          text: `Evidence from ${currentUrl}`,
+          truncated: false,
+        },
+      };
+    }
+    throw new Error(`Unexpected browser path: ${path}`);
+  });
+  const calls: { name: string; arguments: object }[] = [
+    { name: "read_web", arguments: { url: "https://example.com/one" } },
+    { name: "read_web", arguments: { url: "https://example.com/two" } },
+    { name: "finish_task", arguments: { summary: "Compared both public sources." } },
+  ];
+  await modelFixture(t, (index) => calls[index]);
+  const app = await createApp(browser.db, {
+    ...browser.config,
+    agentBackend: "model",
+    model: "openai/fixture",
+  });
+  t.after(() => app.agent.stop());
+
+  const task = await app.agent.createTask("owner", {
+    prompt: "Read both public sources and compare them.",
+  });
+  await app.agent.worker.tick();
+
+  const saved = await app.agent.getTask("owner", task.id);
+  assert.equal(saved.status, "succeeded", saved.error ?? saved.question);
+  const webEvidence = saved.evidence.filter((item) => item.kind === "web");
+  assert.equal(webEvidence.length, 2);
+  assert.deepEqual(
+    webEvidence.map((item) => item.url),
+    ["https://example.com/one", "https://example.com/two"],
+  );
+  assert.equal(sessionIds.size, 1, "both reads should reuse the same browser session");
+  assert.equal(new Set(webEvidence.map((item) => item.id)).size, 2);
 });
