@@ -80,6 +80,48 @@ test("events reject an end at or before the start", () => {
   assert.equal(eventDraftSchema.safeParse({ ...event, end: event.start }).success, false);
 });
 
+test("events reject nonexistent dates instead of normalizing them into the next month", () => {
+  for (const allDay of [true, false]) {
+    const format = (date: string) => (allDay ? date : `${date}T10:00:00+08:00`);
+    for (const date of ["2026-02-29", "2026-02-30", "2026-04-31", "2100-02-29"]) {
+      for (const field of ["start", "end"] as const) {
+        assert.equal(
+          eventDraftSchema.safeParse({
+            ...event,
+            allDay,
+            start: format("2000-01-01"),
+            end: format("2200-01-01"),
+            [field]: format(date),
+          }).success,
+          false,
+          `${field} must reject ${format(date)}`,
+        );
+      }
+    }
+  }
+});
+
+test("events accept valid leap days, month ends, and explicit offsets", () => {
+  for (const suffix of ["", "T10:00:00Z", "T10:00:00.123+08:00", "T10:00:00-07:00"]) {
+    for (const [start, end] of [
+      ["2000-02-29", "2000-03-01"],
+      ["2024-02-29", "2024-03-01"],
+      ["2026-04-30", "2026-05-01"],
+    ]) {
+      assert.equal(
+        eventDraftSchema.safeParse({
+          ...event,
+          allDay: suffix === "",
+          start: start + suffix,
+          end: end + suffix,
+        }).success,
+        true,
+        `${start + suffix} to ${end + suffix} must remain valid`,
+      );
+    }
+  }
+});
+
 test("events default calendarId, location, and description", () => {
   const parsed = eventDraftSchema.parse(event);
   assert.equal(parsed.calendarId, "primary");
