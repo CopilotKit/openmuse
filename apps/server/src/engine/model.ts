@@ -178,7 +178,7 @@ export async function executeModelTask(
           evidence: [
             ...task.evidence,
             {
-              id: page.sessionId,
+              id: randomUUID(),
               kind: "web",
               title: page.title,
               url: page.url,
