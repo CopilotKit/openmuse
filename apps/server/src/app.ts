@@ -179,7 +179,9 @@ export async function createApp(
   });
   app.get("/api/drafts", async (c) => c.json(await db.list(c.get("owner"), "drafts")));
   app.post("/api/drafts", async (c) => {
-    const body = emailDraftSchema.extend({ id: z.string().optional() }).parse(await c.req.json());
+    const body = emailDraftSchema
+      .extend({ id: z.string().uuid().optional() })
+      .parse(await c.req.json());
     const existing = body.id
       ? await db.get<{ createdAt: string }>(c.get("owner"), "drafts", body.id)
       : null;
