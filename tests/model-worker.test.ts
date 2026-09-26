@@ -167,7 +167,6 @@ test("the model worker keeps the text a model replies with when it calls no tool
   }
 });
 
-
 test("aborting delegated read_web stops before page read and requeues the task", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "openmuse-model-browser-abort-"));
   const db = await createStore();
