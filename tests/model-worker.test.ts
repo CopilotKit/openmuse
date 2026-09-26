@@ -165,7 +165,6 @@ test("the model worker keeps the text a model replies with when it calls no tool
   }
 });
 
-
 test("replaying a completed prepared action returns its receipt without reopening approval", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "openmuse-model-replay-"));
   const db = await createStore();
