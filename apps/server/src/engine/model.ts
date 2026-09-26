@@ -172,6 +172,7 @@ export async function executeModelTask(
           owner,
           url,
           typeof task.state.browserId === "string" ? task.state.browserId : undefined,
+          ctx.signal,
         );
         task = await ctx.checkpoint({
           state: { ...task.state, browserId: page.sessionId },
