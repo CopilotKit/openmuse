@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { createApp } from "../apps/server/src/app.ts";
 import { createStore } from "../apps/server/src/db.ts";
 import { createDemoModel, demoModel } from "../apps/server/src/demo/model.ts";
+import type { AgentTask } from "../packages/domain/src/agent.ts";
 import type { ActionProposal } from "../packages/domain/src/index.ts";
 import { fixture as computerFixture } from "./helpers/computer.ts";
 import { modelFixture } from "./helpers/model.ts";
@@ -158,6 +159,123 @@ test("the model worker keeps the text a model replies with when it calls no tool
       ),
       "the reply is recorded in the task timeline",
     );
+  } finally {
+    await server.agent.stop();
+    await db.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("read_web keeps distinct observations of one browser session across a restart", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "openmuse-model-"));
+  const dataDir = join(directory, "db");
+  let db = await createStore({ dataDir });
+  const url = "https://example.com/menu";
+  const calls = [
+    { name: "read_web", arguments: { url } },
+    { name: "read_web", arguments: { url } },
+    { name: "finish_task", arguments: { summary: "Read the menu twice." } },
+  ];
+  await modelFixture(t, (index) => calls[index]);
+  const server = await createApp(db, {
+    mode: "sample",
+    port: 8787,
+    host: "127.0.0.1",
+    publicUrl: "http://localhost:8787",
+    dataDir: directory,
+    agentBackend: "model",
+    intelligenceApiKey: "test-project-key-never-sent",
+    model: "openai/fixture",
+    googleRedirectUri: "http://localhost:8787/api/google/callback",
+    allowedOrigins: [],
+  });
+  const sessions: (string | undefined)[] = [];
+  server.agent.browser.observe = async (_owner, observedUrl, existingId) => {
+    sessions.push(existingId);
+    return {
+      sessionId: existingId ?? "browser-session-1",
+      url: observedUrl,
+      title: "Menu",
+      text: "Tonight's specials",
+      truncated: false,
+    };
+  };
+  try {
+    const task = await server.agent.createTask("owner", { prompt: "Read the menu", kind: "agent" });
+    await server.agent.worker.tick();
+    const finished = await server.agent.getTask("owner", task.id);
+    assert.equal(finished.status, "succeeded", finished.error ?? finished.question);
+    assert.deepEqual(sessions, [undefined, "browser-session-1"]);
+    await db.put("owner", "tasks", {
+      ...finished,
+      evidence: [
+        ...finished.evidence,
+        {
+          id: "search-result-1",
+          kind: "web",
+          title: "Menu",
+          url,
+          excerpt: "Tonight's specials",
+          provenance: {
+            acquisition: "search",
+            observedAt: new Date().toISOString(),
+            provider: "example-search",
+          },
+        },
+      ],
+    });
+    await server.agent.stop();
+    await db.close();
+    db = await createStore({ dataDir });
+    const evidence = (await db.get<AgentTask>("owner", "tasks", task.id))?.evidence ?? [];
+    const reads = evidence.filter((item) => item.provenance?.acquisition === "browser");
+    assert.equal(reads.length, 2);
+    assert.notEqual(reads[0].id, reads[1].id);
+    assert.ok(reads.every((item) => item.provenance?.sourceId === "browser-session-1"));
+    assert.ok(reads.every((item) => item.id !== "browser-session-1"));
+    assert.deepEqual(
+      evidence.filter((item) => item.url === url).map((item) => item.provenance?.acquisition),
+      ["browser", "browser", "search"],
+    );
+  } finally {
+    await server.agent.stop();
+    await db.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("read_mail_thread records each read as its own observation of the message", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "openmuse-model-"));
+  const db = await createStore({ dataDir: join(directory, "db") });
+  const calls = [
+    { name: "read_mail_thread", arguments: { threadId: "trip-thread" } },
+    { name: "read_mail_thread", arguments: { threadId: "trip-thread" } },
+    { name: "finish_task", arguments: { summary: "Read the thread twice." } },
+  ];
+  await modelFixture(t, (index) => calls[index]);
+  const server = await createApp(db, {
+    mode: "sample",
+    port: 8787,
+    host: "127.0.0.1",
+    publicUrl: "http://localhost:8787",
+    dataDir: directory,
+    agentBackend: "model",
+    intelligenceApiKey: "test-project-key-never-sent",
+    model: "openai/fixture",
+    googleRedirectUri: "http://localhost:8787/api/google/callback",
+    allowedOrigins: [],
+  });
+  try {
+    await server.workspace.ensureSample("owner", server.actions);
+    const task = await server.agent.createTask("owner", { prompt: "Read the trip", kind: "agent" });
+    await server.agent.worker.tick();
+    const finished = await server.agent.getTask("owner", task.id);
+    assert.equal(finished.status, "succeeded", finished.error ?? finished.question);
+    const reads = finished.evidence.filter((item) => item.kind === "mail");
+    assert.equal(reads.length, 2);
+    assert.equal(new Set(reads.map((item) => item.id)).size, 2);
+    assert.ok(reads.every((item) => item.provenance?.sourceId === "mail-fieldtrip"));
+    assert.ok(reads.every((item) => item.id !== "mail-fieldtrip"));
   } finally {
     await server.agent.stop();
     await db.close();

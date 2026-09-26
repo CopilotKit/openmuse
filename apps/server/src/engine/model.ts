@@ -175,16 +175,7 @@ export async function executeModelTask(
         );
         task = await ctx.checkpoint({
           state: { ...task.state, browserId: page.sessionId },
-          evidence: [
-            ...task.evidence,
-            {
-              id: page.sessionId,
-              kind: "web",
-              title: page.title,
-              url: page.url,
-              excerpt: page.text.slice(0, 500),
-            },
-          ],
+          evidence: [...task.evidence, service.browserEvidence(page)],
         });
         return { ...page, text: page.text.slice(0, 30000) };
       },
