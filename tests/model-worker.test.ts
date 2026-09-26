@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -160,6 +162,81 @@ test("the model worker keeps the text a model replies with when it calls no tool
     );
   } finally {
     await server.agent.stop();
+    await db.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("aborting delegated read_web stops before page read and requeues the task", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "openmuse-model-browser-abort-"));
+  const db = await createStore();
+  const browserCalls: string[] = [];
+  let resolveNavigation!: () => void;
+  const navigationStarted = new Promise<void>((resolve) => {
+    resolveNavigation = resolve;
+  });
+  const browserWorker = createServer(async (request, response) => {
+    for await (const _chunk of request) {
+      // Drain the request body before holding the navigation response open.
+    }
+    const path = request.url ?? "";
+    browserCalls.push(path);
+    if (path === "/sessions") {
+      resolveNavigation();
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        url: "https://example.org/",
+        title: "Observed",
+        text: "This read must never happen after abort.",
+        truncated: false,
+      }),
+    );
+  });
+  browserWorker.listen(0, "127.0.0.1");
+  await once(browserWorker, "listening");
+  const address = browserWorker.address();
+  assert.ok(address && typeof address !== "string");
+
+  await modelFixture(t, (index) =>
+    index === 0
+      ? { name: "read_web", arguments: { url: "https://example.org/" } }
+      : undefined,
+  );
+  const server = await createApp(db, {
+    mode: "sample",
+    port: 8787,
+    host: "127.0.0.1",
+    publicUrl: "http://localhost:8787",
+    dataDir: directory,
+    agentBackend: "model",
+    intelligenceApiKey: "test-project-key-never-sent",
+    model: "openai/fixture",
+    googleRedirectUri: "http://localhost:8787/api/google/callback",
+    allowedOrigins: [],
+    workerUrl: `http://127.0.0.1:${address.port}`,
+    workerToken: "test-worker-token-at-least-32-characters",
+  });
+
+  try {
+    const task = await server.agent.createTask("owner", {
+      prompt: "Read the example page and summarize it",
+    });
+    const tick = server.agent.worker.tick();
+    await navigationStarted;
+    server.agent.worker.abort(task.id);
+    await tick;
+
+    const settled = await server.agent.getTask("owner", task.id);
+    assert.equal(settled.status, "queued", settled.error ?? settled.result);
+    assert.equal(settled.error, null);
+    assert.deepEqual(browserCalls, ["/sessions"]);
+  } finally {
+    await server.agent.stop();
+    browserWorker.closeAllConnections();
+    await new Promise<void>((resolve) => browserWorker.close(() => resolve()));
     await db.close();
     await rm(directory, { recursive: true, force: true });
   }

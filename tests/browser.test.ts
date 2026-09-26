@@ -158,6 +158,22 @@ test("browser observations reuse an owned profile and reject unowned reads", asy
   assert.equal(fresh.text, read.text);
 });
 
+test("cancelled task-style browser observations stop before a follow-up read", async (t) => {
+  const controller = new AbortController();
+  const calls: string[] = [];
+  const { db, service } = await browserFixture(t, (path, body) => {
+    calls.push(path);
+    controller.abort();
+    return { data: { ...savedSession, id: body.id, url: body.url } };
+  });
+  await assert.rejects(service.observe("owner", savedSession.url, undefined, controller.signal), {
+    name: "AbortError",
+  });
+  assert.deepEqual(calls, ["/sessions"]);
+  const [saved] = await db.list<BrowserSession>("owner", "browsers");
+  assert.equal(saved?.status, "idle", "cancellation must not persist a browser failure");
+});
+
 test("chat browser reads reuse a persisted owned profile across turns and service restarts", async (t) => {
   const calls: { path: string; body: Record<string, unknown> }[] = [];
   let currentUrl = savedSession.url;
