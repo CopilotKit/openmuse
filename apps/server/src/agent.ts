@@ -6,7 +6,7 @@ import {
   CopilotRuntime,
   createCopilotHonoHandler,
 } from "@copilotkit/runtime/v2";
-import type { Auth } from "./auth.ts";
+import type { Auth, DeviceInfo } from "./auth.ts";
 import type { Config } from "./config.ts";
 import { ConversationAgent } from "./engine/conversation.ts";
 import type { AgentService } from "./engine/service.ts";
@@ -52,25 +52,24 @@ export function makeRuntime(
   auth: Auth,
   intelligence: CopilotKitIntelligence,
 ) {
-  const agents: AgentsFactory = async ({ request }) => ({
-    default:
-      config.agentBackend === "sample"
-        ? new ConversationAgent(
-            config,
-            service,
-            await auth.owner(request.headers.get("authorization") ?? undefined),
-          )
-        : config.agentBackend === "agui"
-          ? new HttpAgent({
-              url: config.agentUrl ?? "http://127.0.0.1:1/unconfigured",
-              headers: config.agentToken ? { Authorization: `Bearer ${config.agentToken}` } : {},
-            })
-          : new ConversationAgent(
-              config,
-              service,
-              await auth.owner(request.headers.get("authorization") ?? undefined),
-            ),
-  });
+  const agents: AgentsFactory = async ({ request }) => {
+    if (config.agentBackend === "agui")
+      return {
+        default: new HttpAgent({
+          url: config.agentUrl ?? "http://127.0.0.1:1/unconfigured",
+          headers: config.agentToken ? { Authorization: `Bearer ${config.agentToken}` } : {},
+        }),
+      };
+    const device = await auth.device(request.headers.get("authorization") ?? undefined);
+    return {
+      default: new ConversationAgent(
+        config,
+        service,
+        device.owner,
+        { deviceId: device.deviceId, deviceName: device.deviceName },
+      ),
+    };
+  };
   const runtime = new CopilotRuntime({
     agents,
     intelligence,

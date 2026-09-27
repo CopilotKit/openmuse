@@ -51,6 +51,8 @@ export interface Config {
   agentBackend: "sample" | "model" | "agui";
   agentUrl?: string;
   agentToken?: string;
+  /** OpenAI API format: "responses" (Responses API, default) or "chat-completions" (for local backends like Ollama/llama.cpp). */
+  openaiApiFormat?: "responses" | "chat-completions";
   intelligenceApiKey?: string;
   googleClientId?: string;
   googleClientSecret?: string;
@@ -123,6 +125,7 @@ export function readConfig(): Config {
     agentBackend: backend,
     agentUrl: process.env.AGENT_URL,
     agentToken: process.env.AGENT_TOKEN,
+    openaiApiFormat: (process.env.OPENAI_API_FORMAT as "responses" | "chat-completions") ?? "responses",
     intelligenceApiKey: required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage),
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,

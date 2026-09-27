@@ -5,6 +5,11 @@ import type { Config } from "./config.ts";
 import type { Store } from "./db.ts";
 import { AppError } from "./errors.ts";
 
+export interface DeviceInfo {
+  deviceId?: string | null;
+  deviceName?: string | null;
+}
+
 const digest = (value: string) => createHash("sha256").update(value).digest();
 export class Auth {
   constructor(
@@ -12,7 +17,7 @@ export class Auth {
     private readonly config: Config,
     private readonly signingKey: string,
   ) {}
-  async session(accessKey?: string) {
+  async session(accessKey?: string, device: DeviceInfo = {}) {
     if (
       this.config.mode === "live" &&
       (!accessKey ||
@@ -25,19 +30,27 @@ export class Auth {
       id: digest(token).toString("hex"),
       owner: "local-user",
       expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+      deviceId: device.deviceId ?? null,
+      deviceName: device.deviceName ?? null,
+      createdAt: Date.now(),
     });
     return { token, mode: this.config.mode };
   }
   async owner(authorization?: string) {
+    return (await this.device(authorization)).owner;
+  }
+  /** Resolve the owning device for a bearer token, with device identity. */
+  async device(authorization?: string): Promise<{ owner: string } & DeviceInfo> {
     if (!authorization?.startsWith("Bearer ")) throw new AppError("Sign in to OpenMuse", 401);
-    const session = await this.db.get<{ owner: string; expiresAt: number }>(
-      "system",
-      "sessions",
-      digest(authorization.slice(7)).toString("hex"),
-    );
+    const session = await this.db.get<{
+      owner: string;
+      expiresAt: number;
+      deviceId?: string | null;
+      deviceName?: string | null;
+    }>("system", "sessions", digest(authorization.slice(7)).toString("hex"));
     if (!session || session.expiresAt < Date.now())
       throw new AppError("Session expired. Sign in again.", 401);
-    return session.owner;
+    return { owner: session.owner, deviceId: session.deviceId ?? null, deviceName: session.deviceName ?? null };
   }
   sign(owner: string, path: string) {
     const expires = String(Date.now() + 15 * 60 * 1000);

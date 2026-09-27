@@ -5,7 +5,11 @@ import type {
   AgentIdentity,
   AgentMemory,
   AgentNotification,
+  AgentTask,
+  RunEvent,
 } from "../../../../packages/domain/src/agent.ts";
+import { streamSSE } from "hono/streaming";
+import type { DeviceInfo } from "../auth.ts";
 import { AppError } from "../errors.ts";
 import type { AgentService } from "./service.ts";
 
@@ -25,11 +29,20 @@ const goalPatchSchema = z.object({
     .optional(),
 });
 
-export function agentRoutes(service: AgentService): Hono<{ Variables: { owner: string } }> {
-  const app = new Hono<{ Variables: { owner: string } }>();
+export function agentRoutes(service: AgentService): Hono<{ Variables: { owner: string; device: DeviceInfo } }> {
+  const app = new Hono<{ Variables: { owner: string; device: DeviceInfo } }>();
   app.get("/", async (c) => c.json(await service.snapshot(c.get("owner"))));
   app.post("/tasks", async (c) =>
-    c.json(await service.createTask(c.get("owner"), await c.req.json()), 201),
+    c.json(
+      await service.createTask(
+        c.get("owner"),
+        await c.req.json(),
+        undefined,
+        false,
+        c.get("device"),
+      ),
+      201,
+    ),
   );
   app.get("/tasks/:id", async (c) =>
     c.json(await service.detail(c.get("owner"), c.req.param("id"))),
@@ -52,6 +65,58 @@ export function agentRoutes(service: AgentService): Hono<{ Variables: { owner: s
     return c.json(
       await service.answer(c.get("owner"), c.req.param("id"), body.answer, body.fields),
     );
+  });
+  app.get("/tasks/:id/stream", async (c) => {
+    const owner = c.get("owner");
+    const taskId = c.req.param("id");
+    const task = await service.db.get<AgentTask>(owner, "tasks", taskId);
+    if (!task) throw new AppError("Task not found", 404);
+    const terminal = new Set(["succeeded", "failed", "cancelled", "paused"]);
+    const seen = new Set<string>();
+    return streamSSE(c, async (stream) => {
+      const existing = (await service.db.list<RunEvent>(owner, "run-events")).filter(
+        (e) => e.taskId === taskId,
+      );
+      for (const e of existing) {
+        seen.add(e.id);
+        await stream.writeSSE({ data: JSON.stringify(e), event: "run-event" });
+      }
+      if (terminal.has(task.status)) {
+        await stream.writeSSE({
+          data: JSON.stringify({
+            taskId,
+            status: task.status,
+            result: task.result,
+            error: task.error,
+          }),
+          event: "task-complete",
+        });
+        return;
+      }
+      while (true) {
+        await stream.sleep(2000);
+        const next = (await service.db.list<RunEvent>(owner, "run-events")).filter(
+          (e) => e.taskId === taskId && !seen.has(e.id),
+        );
+        for (const e of next) {
+          seen.add(e.id);
+          await stream.writeSSE({ data: JSON.stringify(e), event: "run-event" });
+        }
+        const live = await service.db.get<AgentTask>(owner, "tasks", taskId);
+        if (live && terminal.has(live.status)) {
+          await stream.writeSSE({
+            data: JSON.stringify({
+              taskId,
+              status: live.status,
+              result: live.result,
+              error: live.error,
+            }),
+            event: "task-complete",
+          });
+          return;
+        }
+      }
+    });
   });
   app.post("/goals", async (c) =>
     c.json(await service.createGoal(c.get("owner"), await c.req.json()), 201),

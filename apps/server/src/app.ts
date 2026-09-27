@@ -8,6 +8,7 @@ import { z } from "zod";
 import { emailDraftSchema, proposalSchema } from "../../../packages/domain/src/index.ts";
 import { ActionService } from "./actions.ts";
 import { agentConfigured, makeRuntime, modelInfo } from "./agent.ts";
+import type { DeviceInfo } from "./auth.ts";
 import { createAuth } from "./auth.ts";
 import { BrowserService } from "./browser.ts";
 import { ComputerService, type DockerRunner } from "./computer.ts";
@@ -43,7 +44,7 @@ export async function createApp(
   const agent = new AgentService(db, config, workspace, files, actions, browser, computer);
   const intelligence = new CopilotKitIntelligence({ apiKey: config.intelligenceApiKey });
   const runtime = makeRuntime(config, agent, auth, intelligence);
-  const app = new Hono<{ Variables: { owner: string } }>();
+  const app = new Hono<{ Variables: { owner: string; device: DeviceInfo } }>();
   const origins = new Set([...config.allowedOrigins, new URL(config.publicUrl).origin]);
   app.use("*", async (c, next) => {
     const origin = c.req.header("origin");
@@ -107,8 +108,17 @@ export async function createApp(
     }
     if (++loginAttempts > 30)
       throw new AppError("Too many sign-in attempts. Try again in a minute.", 429);
-    const body = z.object({ accessKey: z.string().optional() }).parse(await c.req.json());
-    const session = await auth.session(body.accessKey);
+    const body = z
+      .object({
+        accessKey: z.string().optional(),
+        deviceId: z.string().min(1).max(120).optional(),
+        deviceName: z.string().min(1).max(200).optional(),
+      })
+      .parse(await c.req.json());
+    const session = await auth.session(body.accessKey, {
+      deviceId: body.deviceId,
+      deviceName: body.deviceName,
+    });
     await workspace.ensureSample("local-user", actions);
     await agent.ensure("local-user");
     if (config.mode === "sample") await agent.refreshIdeas("local-user");
@@ -130,11 +140,12 @@ export async function createApp(
       /^\/api\/files\/[^/]+\/content$|^\/api\/browsers\/[^/]+\/(?:preview|console)$/.test(
         c.req.path,
       );
-    const owner =
+    const device =
       signedRoute && c.req.query("signature")
-        ? auth.verify(new URL(c.req.url))
-        : await auth.owner(c.req.header("authorization"));
-    c.set("owner", owner);
+        ? { owner: auth.verify(new URL(c.req.url)), deviceId: null, deviceName: null }
+        : await auth.device(c.req.header("authorization"));
+    c.set("owner", device.owner);
+    c.set("device", { deviceId: device.deviceId, deviceName: device.deviceName });
     await next();
   });
   app.get("/api/workspace", async (c) => {

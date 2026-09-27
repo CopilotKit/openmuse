@@ -9,7 +9,7 @@ import {
 import { chat, maxIterations, type SchemaInput, toolDefinition } from "@tanstack/ai";
 import { type AnthropicChatModel, anthropicText } from "@tanstack/ai-anthropic";
 import { type GeminiTextModel, geminiText } from "@tanstack/ai-gemini";
-import { type OpenAIChatModel, openaiText } from "@tanstack/ai-openai";
+import { type OpenAIChatModel, openaiChatCompletions, openaiText } from "@tanstack/ai-openai";
 import { map, mergeMap, type Observable } from "rxjs";
 import { z } from "zod";
 import { MODEL_MAX_RETRIES } from "../config.ts";
@@ -25,10 +25,15 @@ function adapter(spec: string) {
   const id = model.trim();
   switch (provider.toLowerCase()) {
     case "openai":
-      return openaiText(id as OpenAIChatModel, {
-        baseURL: process.env.OPENAI_BASE_URL,
-        maxRetries: MODEL_MAX_RETRIES,
-      });
+      return process.env.OPENAI_API_FORMAT === "chat-completions"
+        ? openaiChatCompletions(id as OpenAIChatModel, {
+            baseURL: process.env.OPENAI_BASE_URL,
+            maxRetries: MODEL_MAX_RETRIES,
+          })
+        : openaiText(id as OpenAIChatModel, {
+            baseURL: process.env.OPENAI_BASE_URL,
+            maxRetries: MODEL_MAX_RETRIES,
+          });
     case "anthropic":
       // The AI SDK base URL ends in /v1; the Anthropic SDK adds /v1 itself.
       return anthropicText(id as AnthropicChatModel, {

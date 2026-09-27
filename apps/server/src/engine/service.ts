@@ -27,6 +27,7 @@ import type { ActionService } from "../actions.ts";
 import type { BrowserService } from "../browser.ts";
 import { ComputerService } from "../computer.ts";
 import type { Config } from "../config.ts";
+import type { DeviceInfo } from "../auth.ts";
 import type { Store } from "../db.ts";
 import { AppError } from "../errors.ts";
 import type { Files } from "../files.ts";
@@ -177,7 +178,13 @@ export class AgentService {
       ),
     };
   }
-  async createTask(owner: string, raw: unknown, idempotencyKey?: string, held = false) {
+  async createTask(
+    owner: string,
+    raw: unknown,
+    idempotencyKey?: string,
+    held = false,
+    device?: DeviceInfo,
+  ) {
     const input = createTaskSchema.parse(raw);
     if (input.goalId && !(await this.db.get(owner, "goals", input.goalId)))
       throw new AppError("Goal not found", 404);
@@ -216,6 +223,9 @@ export class AgentService {
       state: {
         connectionId: (await this.workspace.connection(owner))?.id ?? null,
         ...(held && input.kind === "monitor" ? { initializingMonitor: true } : {}),
+        ...(device?.deviceId || device?.deviceName
+          ? { creatorDevice: { deviceId: device.deviceId ?? null, deviceName: device.deviceName ?? null } }
+          : {}),
       },
       createdAt: date(),
       updatedAt: date(),
