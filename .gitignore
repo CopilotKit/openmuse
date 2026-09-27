@@ -11,3 +11,5 @@ apps/mobile/android/
 .DS_Store
 *.tsbuildinfo
 artifacts/
+.upstream-updates.log
+.upstream-diff-summary.txt
