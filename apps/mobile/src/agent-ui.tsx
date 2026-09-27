@@ -133,12 +133,12 @@ export function TaskCard({
             <Text style={s.heading}>{task.title}</Text>
             <Text style={s.small}>
               {statusLabel(task.status)}
-              {task.plan.length ? ` · ${done}/${task.plan.length} steps` : ""}
+              {task.plan.length > 0 ? ` · ${done}/${task.plan.length} steps` : ""}
             </Text>
           </View>
           <ChevronRight size={17} color={colors.muted} />
         </View>
-        {!!task.plan.length && (
+        {task.plan.length > 0 && (
           <View style={{ height: 4, backgroundColor: colors.line, borderRadius: 4 }}>
             <View
               style={{
@@ -170,7 +170,7 @@ export function ChatWork() {
     .filter(activeTask)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, 2);
-  if (!tasks.length) return null;
+  if (tasks.length === 0) return null;
   return (
     <View style={{ gap: 10 }}>
       {tasks.map((task) => (
@@ -201,7 +201,7 @@ export function AgentActivityScreen() {
       {tasks.map((task) => (
         <TaskCard key={task.id} task={task} />
       ))}
-      {!tasks.length && (
+      {tasks.length === 0 && (
         <Empty
           icon={ListChecks}
           title="A place for the work"
@@ -463,7 +463,7 @@ export function TaskDetail({ taskId }: { taskId: string }) {
                   />
                 ),
               )}
-              {!fieldNames.length && (
+              {fieldNames.length === 0 && (
                 <Field
                   label="Your answer"
                   value={answer}
@@ -472,7 +472,7 @@ export function TaskDetail({ taskId }: { taskId: string }) {
                   placeholder="Add the missing details…"
                 />
               )}
-              {task.kind === "document" && !fieldNames.length && (
+              {task.kind === "document" && fieldNames.length === 0 && (
                 <>
                   <Button small onPress={() => setShowFieldJson(!showFieldJson)}>
                     Form field values
@@ -492,14 +492,14 @@ export function TaskDetail({ taskId }: { taskId: string }) {
               <Button
                 primary
                 busy={busy}
-                disabled={!answer.trim() && !Object.keys(fields).length && !fieldJson.trim()}
+                disabled={!answer.trim() && Object.keys(fields).length === 0 && !fieldJson.trim()}
                 onPress={() => void submitInput()}
               >
                 Continue task
               </Button>
             </Card>
           )}
-          {!!task.plan.length && (
+          {task.plan.length > 0 && (
             <Card style={{ gap: 15 }}>
               <Text style={s.heading}>Plan</Text>
               {task.plan.map((step, index) => (
@@ -582,7 +582,7 @@ export function TaskDetail({ taskId }: { taskId: string }) {
           ).map((artifact) => (
             <ArtifactCard key={artifact.id} artifact={artifact} />
           ))}
-          {!!task.evidence.length && (
+          {task.evidence.length > 0 && (
             <View style={{ gap: 14 }}>
               <Text style={s.heading}>Sources</Text>
               <EvidenceList items={task.evidence} />
@@ -1023,7 +1023,7 @@ export function IdeasScreen() {
       {ideas.map((idea) => (
         <IdeaCard key={idea.id} idea={idea} />
       ))}
-      {!ideas.length && (
+      {ideas.length === 0 && (
         <Empty
           icon={Lightbulb}
           title="Room for a good idea"
@@ -1186,7 +1186,7 @@ export function GoalsScreen() {
             <ChevronRight size={18} color="#A3A6A8" />
           </Pressable>
         ))}
-        {!monitors.length && (
+        {monitors.length === 0 && (
           <Text style={[s.muted, { paddingVertical: 10 }]}>
             Ticket prices, a reservation, a page you’re watching.
           </Text>

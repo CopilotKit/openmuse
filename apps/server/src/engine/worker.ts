@@ -56,14 +56,13 @@ export class TaskWorker {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     for (const controller of this.active.values()) controller.abort();
-    while (this.active.size || this.ticking) await new Promise((r) => setTimeout(r, 10));
+    while (this.active.size > 0 || this.ticking) await new Promise((r) => setTimeout(r, 10));
   }
   abort(taskId: string) {
     this.active.get(taskId)?.abort();
   }
   async tick() {
     // biome-ignore lint/suspicious/noUnnecessaryConditions: mutable instance flag checked across async boundaries
-    // biome-ignore lint/suspicious/noUnnecessaryConditions: mutable instance flag
     if (this.stopping) return;
     if (this.running)
       await this.db.put("system", "worker-status", {

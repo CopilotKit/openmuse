@@ -33,7 +33,7 @@
       },
       "suspicious": {
         "noExplicitAny": "error",
-        "noConsole": "warn",
+        "noConsole": "off",
         "noDoubleEquals": "error",
         "noIrregularWhitespace": "error",
         "noMisleadingCharacterClass": "error",
@@ -68,7 +68,7 @@
         "noNonNullAssertion": "off",
         "useConst": "error",
         "useThrowOnlyError": "error",
-        "useExplicitLengthCheck": "warn",
+        "useExplicitLengthCheck": "error",
         "noUselessElse": "error"
       },
       "complexity": {

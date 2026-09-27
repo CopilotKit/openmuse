@@ -66,7 +66,7 @@ test("Docker Chromium opens public sites, renders, navigates and restores its sa
     let downloads: { id: string; name: string; size: number; mimeType: string }[] = [];
     for (let attempt = 0; attempt < 30; attempt++) {
       downloads = (await (await api(`/sessions/${id}/downloads`)).json()).downloads;
-      if (downloads.length) break;
+      if (downloads.length > 0) break;
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
     assert.equal(downloads.length, 1, "public PDF is captured as a download");
@@ -82,7 +82,7 @@ test("Docker Chromium opens public sites, renders, navigates and restores its sa
     let failures: { code: string; name: string }[] = [];
     for (let attempt = 0; attempt < 30; attempt++) {
       failures = (await (await api(`/sessions/${id}/downloads`)).json()).failures;
-      if (failures.length) break;
+      if (failures.length > 0) break;
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
     assert.equal(failures[0]?.code, "UNSUPPORTED_DOWNLOAD");

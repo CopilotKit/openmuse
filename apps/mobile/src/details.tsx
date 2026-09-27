@@ -511,7 +511,7 @@ function EventEditor({
         multiline
         placeholder="Anything else to keep in mind?"
       />
-      {!!conflicts.length && (
+      {conflicts.length > 0 && (
         <Card style={{ backgroundColor: colors.orange, padding: 16, marginBottom: 16 }}>
           <Text style={s.heading}>This time overlaps</Text>
           {conflicts.map((c) => (
@@ -625,7 +625,7 @@ function ReviewDetail({ initial }: { initial: ActionProposal }) {
             </Text>
             <View style={s.divider} />
             <Text style={s.label}>Attachments</Text>
-            {Array.isArray(d.attachmentIds) && d.attachmentIds.length ? (
+            {Array.isArray(d.attachmentIds) && d.attachmentIds.length > 0 ? (
               d.attachmentIds.map((id) => {
                 const file = w.files.find((f) => f.id === id);
                 return (
@@ -883,13 +883,13 @@ function BrowserDetail({ initial }: { initial: BrowserSession }) {
         failures: { name: string; message: string }[];
       }>(`/api/browsers/${browser.id}/import-downloads`, {});
       await refresh();
-      if (result.failures.length)
+      if (result.failures.length > 0)
         setError(
           result.failures.map((failure) => `${failure.name}: ${failure.message}`).join("\n"),
         );
       const files = result.files;
       notify(
-        files.length
+        files.length > 0
           ? `${files.length} PDF download${files.length === 1 ? "" : "s"} added to Files.`
           : "No new PDF downloads in this session.",
       );

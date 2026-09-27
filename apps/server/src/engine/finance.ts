@@ -13,7 +13,7 @@ export function analyzeSpending(csv: string) {
       if (quoted && csv[i + 1] === '"') {
         cell += '"';
         i++;
-      } else if (!quoted && cell.length) throw new Error("Invalid quoted CSV field");
+      } else if (!quoted && cell.length > 0) throw new Error("Invalid quoted CSV field");
       else quoted = !quoted;
     } else if (!quoted && (c === "," || c === "\n" || c === undefined)) {
       row.push(cell.replace(/\r$/, ""));
@@ -28,7 +28,7 @@ export function analyzeSpending(csv: string) {
   const header = rows.shift()?.map((v) => v.trim().toLowerCase());
   if (!header || !["date", "description", "amount", "category"].every((v) => header.includes(v)))
     throw new Error("CSV needs date,description,amount,category columns");
-  if (!rows.length || rows.length > 5000)
+  if (rows.length === 0 || rows.length > 5000)
     throw new Error("Import between 1 and 5,000 transactions");
   const transactions = rows.map((r, index) => {
     const get = (name: string) => r[header.indexOf(name)]?.trim() ?? "";

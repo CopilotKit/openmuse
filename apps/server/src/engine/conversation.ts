@@ -277,7 +277,7 @@ export class ConversationAgent extends AbstractAgent {
       };
     if (/permission|pdf|form/i.test(prompt)) {
       const w = await this.service.workspace.snapshot(this.owner);
-      const mail = w.mail.find((m) => m.attachments.length && !/^Sent\b/i.test(m.label));
+      const mail = w.mail.find((m) => m.attachments.length > 0 && !/^Sent\b/i.test(m.label));
       if (!mail)
         return {
           content:

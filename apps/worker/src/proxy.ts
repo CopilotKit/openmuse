@@ -62,7 +62,7 @@ export async function startEgressProxy() {
       client.on("close", () => upstream.destroy());
       upstream.once("connect", () => {
         client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-        if (head.length) upstream.write(head);
+        if (head.length > 0) upstream.write(head);
         upstream.pipe(client);
         client.pipe(upstream);
       });

@@ -235,7 +235,7 @@ function htmlToPlainText(html: string): string {
   ]);
   const stack: (DefaultTreeAdapterMap["node"] | string)[] = [root];
   const text: string[] = [];
-  while (stack.length) {
+  while (stack.length > 0) {
     const node = stack.pop();
     if (node === undefined) break;
     if (typeof node === "string") {
@@ -305,11 +305,12 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
   const time = message.internalDate
     ? Number(message.internalDate)
     : Date.parse(metadata.get("date") ?? "");
-  const body = plain.length
-    ? plain.join("\n\n")
-    : html.length
-      ? html.join("\n\n")
-      : decodeSnippet(message.snippet);
+  const body =
+    plain.length > 0
+      ? plain.join("\n\n")
+      : html.length > 0
+        ? html.join("\n\n")
+        : decodeSnippet(message.snippet);
   if (body.length > 1024 * 1024) throw new Error("Gmail message text exceeds the 1 MiB limit");
   return {
     id: message.id,
@@ -717,8 +718,8 @@ export class GoogleClient {
     const mimeHeaders = [
       `From: ${singleLine(profile.emailAddress, "sender")}`,
       `To: ${draft.to.join(",\r\n ")}`,
-      ...(draft.cc.length ? [`Cc: ${draft.cc.join(",\r\n ")}`] : []),
-      ...(draft.bcc.length ? [`Bcc: ${draft.bcc.join(",\r\n ")}`] : []),
+      ...(draft.cc.length > 0 ? [`Cc: ${draft.cc.join(",\r\n ")}`] : []),
+      ...(draft.bcc.length > 0 ? [`Bcc: ${draft.bcc.join(",\r\n ")}`] : []),
       `Subject: ${encodedSubject(draft.subject)}`,
       `Date: ${new Date().toUTCString()}`,
       `Message-ID: <${randomUUID()}@openmuse.invalid>`,
@@ -732,7 +733,7 @@ export class GoogleClient {
       wrapBase64(Buffer.from(draft.body.replace(/\r\n|\r|\n/g, "\r\n"))),
     ].join("\r\n");
     let mime: string;
-    if (!attachments.length) mime = [...mimeHeaders, textPart].join("\r\n");
+    if (attachments.length === 0) mime = [...mimeHeaders, textPart].join("\r\n");
     else {
       const boundary = `openmuse_${randomUUID()}`;
       const parts = [

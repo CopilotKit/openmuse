@@ -207,7 +207,7 @@ export function ChatScreen({
     setLoaded(false);
     const replay = agent.subscribe({
       onMessagesChanged: ({ messages }) => {
-        if (active && richThreads && messages.length) setLoaded(true);
+        if (active && richThreads && messages.length > 0) setLoaded(true);
       },
     });
     async function hydrate() {
@@ -289,7 +289,7 @@ export function ChatScreen({
     [queue, flush],
   );
   useEffect(() => {
-    if (!busy && !agent.isRunning && outbox.pending.length) flush();
+    if (!busy && !agent.isRunning && outbox.pending.length > 0) flush();
   }, [busy, agent.isRunning, outbox.pending.length, flush]);
   useEffect(() => {
     if (active && prompt && isReady && loaded && claimPrompt(prompt.id) && prompt.text.trim())
@@ -317,13 +317,13 @@ export function ChatScreen({
     const text = draft.trim();
     if (!text || !isReady || !loaded) return;
     // A new submission can continue after Stop; held follow-ups still need explicit resume.
-    if (!busy && !agent.isRunning && !saveError && !queue.getSnapshot().pending.length)
+    if (!busy && !agent.isRunning && !saveError && queue.getSnapshot().pending.length === 0)
       queue.resume();
     setShowResults(false);
     const files = w.files.filter((f) => attachments.includes(f.id));
     enqueue(
       text +
-        (files.length
+        (files.length > 0
           ? `\n\nAttached documents: ${files.map((f) => `${f.name} (artifact ID: ${f.id})`).join(", ")}`
           : ""),
     );
@@ -365,7 +365,7 @@ export function ChatScreen({
             </Button>
           </>
         )}
-        {!visible.length ? (
+        {visible.length === 0 ? (
           <View
             style={{
               flexGrow: 1,
@@ -420,7 +420,7 @@ export function ChatScreen({
                 style={{
                   alignSelf: user ? "flex-end" : "flex-start",
                   maxWidth: user ? "85%" : "95%",
-                  width: toolCalls.length ? "95%" : undefined,
+                  width: toolCalls.length > 0 ? "95%" : undefined,
                   gap: 8,
                 }}
               >
@@ -584,7 +584,7 @@ export function ChatScreen({
             Retry saving conversation
           </Button>
         )}
-        {!!outbox.pending.length && (
+        {outbox.pending.length > 0 && (
           <View style={{ padding: 12, gap: 6 }}>
             <Text style={s.small}>
               {outbox.paused ? "Messages on hold" : "Up next"} · Keep the app open until sent
@@ -623,7 +623,7 @@ export function ChatScreen({
           <Card style={{ marginBottom: 12, padding: 15 }}>
             <Text style={s.heading}>Add a document</Text>
             <ScrollView style={{ maxHeight: 230 }} keyboardShouldPersistTaps="handled">
-              {w.files.length ? (
+              {w.files.length > 0 ? (
                 w.files.map((f) => (
                   <CheckRow
                     key={f.id}

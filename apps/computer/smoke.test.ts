@@ -107,7 +107,6 @@ test("real isolated computer executes commands, persists files, bridges PDFs and
       command: "printf ready > /workspace/.smoke-running; sleep 30",
     });
     const deadline = Date.now() + 10000;
-    // biome-ignore lint/suspicious/noUnnecessaryConditions: intentional polling loop with deadline check
     while (true) {
       const processes = await runDocker(
         ["exec", identity.container, "/usr/bin/cat", "/workspace/.smoke-running"],

@@ -15,7 +15,7 @@ if (existsSync(".env")) {
   // (for example OPENAI_API_KEY) would otherwise silently replace the .env setting.
   const shadowed = shadowedEnvKeys(parseEnv(readFileSync(".env", "utf8")));
   process.loadEnvFile(".env");
-  if (shadowed.length)
+  if (shadowed.length > 0)
     console.warn(
       `[OpenMuse] Using ${shadowed.join(", ")} from the environment instead of .env. ` +
         (shadowed.length === 1

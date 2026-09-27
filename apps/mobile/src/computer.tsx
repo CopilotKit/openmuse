@@ -217,7 +217,7 @@ export function ComputerSheet() {
               .map((browser) => (
                 <BrowserThreadCard key={browser.id} browser={browser} />
               ))}
-            {!workspace.browsers.length && (
+            {workspace.browsers.length === 0 && (
               <Text style={s.muted}>
                 Open a page here or ask your agent to research something. Its browsing sessions will
                 appear here.

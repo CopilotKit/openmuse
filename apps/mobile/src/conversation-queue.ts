@@ -30,7 +30,7 @@ export class ConversationQueue {
     if (this.state.running || this.state.paused) return;
     this.update({ running: true });
     try {
-      while (this.state.pending.length && !this.state.paused) {
+      while (this.state.pending.length > 0 && !this.state.paused) {
         const [message, ...pending] = this.state.pending;
         this.update({ pending });
         await send(message!);

@@ -272,7 +272,7 @@ export class ComputerService {
       empty(h.Binds) &&
       empty(h.Devices) &&
       empty(h.DeviceRequests) &&
-      !Object.keys(h.PortBindings ?? {}).length &&
+      Object.keys(h.PortBindings ?? {}).length === 0 &&
       h.PidMode === "" &&
       h.IpcMode === "private" &&
       h.RestartPolicy.Name === "no" &&
@@ -312,7 +312,7 @@ export class ComputerService {
       v.Name !== identity.volume ||
       v.Driver !== "local" ||
       v.Scope !== "local" ||
-      Object.keys(v.Options ?? {}).length ||
+      Object.keys(v.Options ?? {}).length > 0 ||
       !Object.entries(identity.labels).every(([key, value]) => v.Labels?.[key] === value)
     )
       throw new AppError("Computer workspace ownership or isolation does not match", 409);

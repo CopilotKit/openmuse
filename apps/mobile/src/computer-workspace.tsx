@@ -594,7 +594,7 @@ function ComputerFiles({ running, active }: { running: boolean; active: boolean 
                   onPress={() => void importDocument(file)}
                 />
               ))}
-              {!workspace.files.length && (
+              {workspace.files.length === 0 && (
                 <Text style={s.muted}>Add a document from mail or Files first.</Text>
               )}
             </Card>

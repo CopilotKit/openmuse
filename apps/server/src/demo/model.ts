@@ -71,11 +71,11 @@ function summarizePage(message: ChatMessage): FixtureResponse {
       .slice(0, 3);
     introduction = "From CopilotKit’s current page:";
   }
-  if (!excerpts.length) {
+  if (excerpts.length === 0) {
     excerpts = lines.filter((line) => line.length >= 30).slice(0, 3);
     introduction = "Here are excerpts from the page I just opened:";
   }
-  if (!excerpts.length)
+  if (excerpts.length === 0)
     return { content: "The page opened, but it did not expose enough readable text to summarize." };
   const bullets = excerpts.map(
     (line) => `• ${line.length > 110 ? `${line.slice(0, 110).replace(/\s+\S*$/, "")}…` : line}`,
@@ -127,7 +127,7 @@ function demoMailResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
       .map((text) => text.trim())
       .filter((text) => text.length > 40 && !/local workspace/i.test(text))
       .slice(0, 2);
-    if (!paragraphs.length)
+    if (paragraphs.length === 0)
       return { content: "The email was found, but it did not include readable trip details." };
     return {
       content: `From ${message.sender}:\n“${message.subject}”\n\n${paragraphs.join("\n\n")}\n\nI can look up the aquarium next.`,

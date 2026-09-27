@@ -107,8 +107,10 @@ export function TodayScreen() {
             Your day, with a little{"\n"}more room to breathe.
           </Text>
           <Text style={[s.muted, { maxWidth: 420, color: "#617680" }]}>
-            {events.length ? `${events.length} things on your calendar` : "Your calendar has room"}
-            {unread.length ? `, ${unread.length} unread emails` : ""}.{"\n"}Let’s make space for
+            {events.length > 0
+              ? `${events.length} things on your calendar`
+              : "Your calendar has room"}
+            {unread.length > 0 ? `, ${unread.length} unread emails` : ""}.{"\n"}Let’s make space for
             what matters.
           </Text>
           <Button
@@ -241,7 +243,7 @@ export function TodayScreen() {
             action="Full calendar"
             onPress={() => navigate("calendar")}
           />
-          {events.length ? (
+          {events.length > 0 ? (
             events.slice(0, 3).map((e, i) => <AgendaRow key={e.id} event={e} index={i} />)
           ) : (
             <Empty
@@ -273,7 +275,7 @@ export function TodayScreen() {
             action="Open mail"
             onPress={() => navigate("mail")}
           />
-          {w.mail.length ? (
+          {w.mail.length > 0 ? (
             w.mail.slice(0, 3).map((m, i) => (
               <Pressable
                 key={m.id}
@@ -343,11 +345,11 @@ export function TodayScreen() {
         </Card>
         <Card style={{ flex: 1 }}>
           <SectionHeading
-            title={pending.length ? "Ready for your review" : "Recent activity"}
+            title={pending.length > 0 ? "Ready for your review" : "Recent activity"}
             action="View all"
             onPress={() => navigate("activity")}
           />
-          {pending.length
+          {pending.length > 0
             ? pending
                 .slice(0, 3)
                 .map((a) => (
@@ -373,7 +375,7 @@ export function TodayScreen() {
                   </View>
                 </View>
               ))}
-          {!pending.length && !w.activity.length && (
+          {pending.length === 0 && w.activity.length === 0 && (
             <Text style={s.muted}>
               Your workspace is ready. Things you do here will appear in your activity.
             </Text>
@@ -439,7 +441,8 @@ export function AgendaRow({
       <View style={{ flex: 1, gap: 3 }}>
         <Text style={[s.text, { fontSize: 13, fontWeight: "500" }]}>{e.title}</Text>
         <Text numberOfLines={1} style={[s.small, { fontSize: 11 }]}>
-          {e.location || (e.attendees.length ? `${e.attendees.length} attendees` : "Time for you")}
+          {e.location ||
+            (e.attendees.length > 0 ? `${e.attendees.length} attendees` : "Time for you")}
         </Text>
       </View>
       <ChevronRight size={14} color={colors.muted} />
@@ -512,7 +515,7 @@ export function MailScreen() {
           </Button>
         </View>
         {tab === "drafts" ? (
-          filteredDrafts.length ? (
+          filteredDrafts.length > 0 ? (
             filteredDrafts.map((d) => (
               <LinkRow
                 key={d.id}
@@ -529,7 +532,7 @@ export function MailScreen() {
               detail="Messages you save as drafts will be here when you’re ready."
             />
           )
-        ) : items.length ? (
+        ) : items.length > 0 ? (
           items.map((m, i) => (
             <Pressable
               key={m.id}
@@ -549,7 +552,7 @@ export function MailScreen() {
                 <Text style={s.muted} numberOfLines={1}>
                   {m.body.replace(/\n/g, " ")}
                 </Text>
-                {!!m.attachments.length && (
+                {m.attachments.length > 0 && (
                   <View style={[s.row, { gap: 4, marginTop: 2 }]}>
                     <FileText size={12} color={colors.muted} />
                     <Text style={s.small}>
@@ -788,7 +791,7 @@ export function CalendarScreen() {
             <ActivityIndicator size="small" color={colors.blueDark} />
             <Text style={s.muted}>Checking your calendar…</Text>
           </View>
-        ) : events.length ? (
+        ) : events.length > 0 ? (
           events.map((e, i) => (
             <View key={e.id}>
               {all && <Text style={[s.label, { marginTop: 16 }]}>{dateLabel(e.start)}</Text>}
@@ -873,7 +876,7 @@ export function BrowserScreen() {
       </Card>
       <Card>
         <SectionHeading title="Browser sessions" />
-        {w.browsers.length ? (
+        {w.browsers.length > 0 ? (
           w.browsers.map((b) => (
             <Pressable
               key={b.id}
@@ -1042,7 +1045,7 @@ export function FilesScreen() {
           </Pressable>
         ))}
       </View>
-      {!w.files.length && (
+      {w.files.length === 0 && (
         <Card>
           <Empty
             icon={FileText}
@@ -1119,7 +1122,7 @@ export function ActivityScreen() {
       {filter === "all" && (
         <Card>
           <SectionHeading title="Workspace timeline" />
-          {w.activity.length ? (
+          {w.activity.length > 0 ? (
             w.activity.map((a, i) => (
               <View
                 key={a.id}
@@ -1158,7 +1161,7 @@ export function ActivityScreen() {
           )}
         </Card>
       )}
-      {filter === "review" && !actions.length && (
+      {filter === "review" && actions.length === 0 && (
         <Card>
           <Empty
             icon={ShieldCheck}
@@ -1242,7 +1245,7 @@ export function ConnectionsScreen({ query = "" }: { query?: string }) {
     <View style={{ gap: 22 }}>
       {[true, false].map((isConnected) => {
         const group = rows.filter((row) => row.connected === isConnected);
-        if (!group.length) return null;
+        if (group.length === 0) return null;
         return (
           <View key={String(isConnected)} style={{ gap: 8 }}>
             <Text style={[s.small, { marginLeft: 12 }]}>
@@ -1305,7 +1308,7 @@ export function ConnectionsScreen({ query = "" }: { query?: string }) {
           </View>
         );
       })}
-      {!rows.length && <Text style={s.muted}>No matching connectors.</Text>}
+      {rows.length === 0 && <Text style={s.muted}>No matching connectors.</Text>}
       {selected && (
         <Sheet
           title={selected === "google" ? "Google connections" : "OpenBot"}

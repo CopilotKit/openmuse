@@ -43,7 +43,7 @@ export interface PdfInspection {
 
 async function loadPdf(bytes: Uint8Array): Promise<PDFDocument> {
   if (
-    !bytes.length ||
+    bytes.length === 0 ||
     bytes.length > MAX_PDF_BYTES ||
     Buffer.from(bytes.subarray(0, 1024)).indexOf("%PDF-") < 0
   ) {

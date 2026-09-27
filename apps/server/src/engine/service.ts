@@ -563,7 +563,7 @@ export class AgentService {
       .filter(
         (m) =>
           !obsolete("document", m.id) &&
-          m.attachments.length &&
+          m.attachments.length > 0 &&
           /form|permission|complete|fill|sign/i.test(`${m.subject} ${m.body}`),
       )
       .slice(0, 5)) {
@@ -601,7 +601,7 @@ export class AgentService {
       } satisfies Idea);
     }
     for (const goal of await this.db.list<Goal>(owner, "goals"))
-      if (goal.status === "active" && !goal.milestones.length) {
+      if (goal.status === "active" && goal.milestones.length === 0) {
         const id = hash(`goal:${goal.id}:${goal.description}`);
         await this.db.insertIfAbsent(owner, "ideas", {
           id,
@@ -950,7 +950,7 @@ export class AgentService {
       .record(z.string(), z.union([z.string(), z.boolean()]))
       .optional()
       .parse(task.input.fields);
-    if (!fields || !Object.keys(fields).length) {
+    if (!fields || Object.keys(fields).length === 0) {
       const file = await this.files.get(owner, source.fileId);
       const names = file.fields
         ?.filter((f) => f.type !== "unsupported")

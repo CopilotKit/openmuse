@@ -117,7 +117,7 @@ export function tanstackAgent(options: {
       const converted = convertInputToTanStackAI(input);
       // Build the system prompt like the classic mode. It does not forward system messages.
       let system = options.prompt;
-      if (input.context.length) {
+      if (input.context.length > 0) {
         system += "\n## Context from the application\n";
         for (const ctx of input.context) system += `${ctx.description}:\n${ctx.value}\n`;
       }

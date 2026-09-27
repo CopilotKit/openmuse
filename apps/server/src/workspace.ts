@@ -107,7 +107,7 @@ export class WorkspaceService {
             await this.google(owner, connection.id).getThread(id),
             connection.id,
           );
-    if (!mail.length) throw new AppError("Mail thread not found", 404);
+    if (mail.length === 0) throw new AppError("Mail thread not found", 404);
     return mail.sort((a, b) => a.date.localeCompare(b.date));
   }
   async searchMail(owner: string, query: string) {
