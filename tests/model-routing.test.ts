@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { selectTaskModel } from "../apps/server/src/engine/model.ts";
+import { filterTools } from "../apps/server/src/engine/conversation.ts";
 import type { Config } from "../apps/server/src/config.ts";
 import type { AgentTask } from "../packages/domain/src/agent.ts";
+import type { ToolDefinition } from "@copilotkit/runtime/v2";
+import { z } from "zod";
 
 const baseConfig: Config = {
   mode: "live",
@@ -108,4 +111,56 @@ test("selectTaskModel: model-only config uses same model for all kinds", () => {
     const result = selectTaskModel(config, makeTask(kind));
     assert.equal(result.model, "openai/single", `kind=${kind}`);
   }
+});
+
+function makeTool(name: string): ToolDefinition {
+  return { name, description: "", parameters: z.object({}), execute: async () => null };
+}
+
+const allToolNames = [
+  "computer_status", "start_computer", "stop_computer",
+  "run_computer_command", "list_computer_files", "read_computer_file",
+  "write_computer_file", "mkdir_computer", "import_computer_pdf",
+  "export_computer_pdf", "search_mail", "read_mail_thread",
+  "delegate_task", "agent_status", "create_goal", "watch_page", "remember_fact",
+];
+
+test("filterTools: undefined allowlist returns all tools", () => {
+  const tools = allToolNames.map(makeTool);
+  assert.equal(filterTools(tools, undefined).length, 17);
+});
+
+test("filterTools: empty allowlist returns all tools", () => {
+  const tools = allToolNames.map(makeTool);
+  assert.equal(filterTools(tools, []).length, 17);
+});
+
+test("filterTools: exact names keep only matched tools", () => {
+  const tools = allToolNames.map(makeTool);
+  const filtered = filterTools(tools, ["delegate_task", "agent_status", "remember_fact"]);
+  assert.equal(filtered.length, 3);
+  assert.deepEqual(filtered.map((t) => t.name), ["delegate_task", "agent_status", "remember_fact"]);
+});
+
+test("filterTools: prefix glob keeps all matching tools", () => {
+  const tools = allToolNames.map(makeTool);
+  const filtered = filterTools(tools, ["computer_*"]);
+  // Only "computer_status" starts with "computer_"; other tools contain
+  // "_computer_" but have different prefixes (start_computer, etc.).
+  assert.equal(filtered.length, 1);
+  assert.deepEqual(filtered.map((t) => t.name), ["computer_status"]);
+});
+
+test("filterTools: wildcard keeps everything", () => {
+  const tools = allToolNames.map(makeTool);
+  const filtered = filterTools(tools, ["*"]);
+  assert.equal(filtered.length, 17);
+});
+
+test("filterTools: mixed exact and glob patterns", () => {
+  const tools = allToolNames.map(makeTool);
+  const filtered = filterTools(tools, ["delegate_task", "computer_status", "search_*"]);
+  const names = filtered.map((t) => t.name);
+  assert.equal(names.length, 3);
+  assert.deepEqual(names, ["computer_status", "search_mail", "delegate_task"]);
 });

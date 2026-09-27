@@ -42,6 +42,8 @@ export interface Config {
   taskModel?: string;
   /** Model used for simple task kinds (monitor, finance). Falls back to `chatModel`, then `model`. */
   simpleTaskModel?: string;
+  /** Comma-separated tool name allowlist for chat (e.g. "delegate_task,agent_status,*"). */
+  chatToolAllowlist?: string[];
   /** Max tool-call iterations for interactive chat. Default: 6. */
   chatMaxSteps?: number;
   /** Max tool-call iterations for complex tasks. Default: 16. */
@@ -119,6 +121,9 @@ export function readConfig(): Config {
     chatModel: process.env.CHAT_MODEL,
     taskModel: process.env.TASK_MODEL,
     simpleTaskModel: process.env.SIMPLE_TASK_MODEL,
+    chatToolAllowlist: process.env.CHAT_TOOL_ALLOWLIST
+      ? process.env.CHAT_TOOL_ALLOWLIST.split(",").map((s) => s.trim()).filter(Boolean)
+      : undefined,
     chatMaxSteps: process.env.CHAT_MAX_STEPS ? Number(process.env.CHAT_MAX_STEPS) : undefined,
     taskMaxSteps: process.env.TASK_MAX_STEPS ? Number(process.env.TASK_MAX_STEPS) : undefined,
     simpleTaskMaxSteps: process.env.SIMPLE_TASK_MAX_STEPS ? Number(process.env.SIMPLE_TASK_MAX_STEPS) : undefined,
