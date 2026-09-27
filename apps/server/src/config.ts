@@ -42,7 +42,7 @@ export interface Config {
   taskModel?: string;
   /** Model used for simple task kinds (monitor, finance). Falls back to `chatModel`, then `model`. */
   simpleTaskModel?: string;
-  /** Comma-separated tool name allowlist for chat (e.g. "delegate_task,agent_status,*"). */
+  /** Comma-separated tool name allowlist for chat (e.g. "delegate_task,agent_status,computer_*"). */
   chatToolAllowlist?: string[];
   /** Max tool-call iterations for interactive chat. Default: 6. */
   chatMaxSteps?: number;
@@ -50,6 +50,8 @@ export interface Config {
   taskMaxSteps?: number;
   /** Max tool-call iterations for simple tasks (monitor, finance). Default: 6. */
   simpleTaskMaxSteps?: number;
+  /** SSE task-stream polling interval in milliseconds. Default: 2000. */
+  streamPollIntervalMs?: number;
   agentBackend: "sample" | "model" | "agui";
   agentUrl?: string;
   agentToken?: string;
@@ -144,6 +146,9 @@ export function readConfig(): Config {
     allowedOrigins: (
       process.env.ALLOWED_ORIGINS ?? "http://localhost:8081,http://127.0.0.1:8081"
     ).split(","),
+    streamPollIntervalMs: process.env.STREAM_POLL_INTERVAL_MS
+      ? Number(process.env.STREAM_POLL_INTERVAL_MS)
+      : undefined,
   };
   if (
     mode === "live" &&

@@ -94,7 +94,7 @@ export function agentRoutes(service: AgentService): Hono<{ Variables: { owner: s
         return;
       }
       while (true) {
-        await stream.sleep(2000);
+        await stream.sleep(service.config.streamPollIntervalMs ?? 2000);
         const next = (await service.db.list<RunEvent>(owner, "run-events")).filter(
           (e) => e.taskId === taskId && !seen.has(e.id),
         );

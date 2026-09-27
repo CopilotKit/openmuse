@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: openmuse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openmuse}
+      POSTGRES_DB: openmuse
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openmuse"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  openmuse:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # One-way sync: set MODEL, TASK_MODEL, CHAT_MODEL to your local backend
+      - DATABASE_URL=postgresql://openmuse:${POSTGRES_PASSWORD:-openmuse}@postgres:5432/openmuse
+      - PORT=8787
+      - HOST=0.0.0.0
+      - WORKSPACE_MODE=${WORKSPACE_MODE:-sample}
+      - AGENT_BACKEND=${AGENT_BACKEND:-model}
+      - MODEL=${MODEL:-openai/qwen3-8b}
+      - CHAT_MODEL=${CHAT_MODEL:-openai/qwen3-8b}
+      - TASK_MODEL=${TASK_MODEL:-openai/qwen3-32b}
+      - OPENAI_API_FORMAT=${OPENAI_API_FORMAT:-chat-completions}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-http://host.docker.internal:11434/v1}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-local-test}
+      - CPK_INTELLIGENCE_API_KEY=${CPK_INTELLIGENCE_API_KEY:-}
+      - STREAM_POLL_INTERVAL_MS=${STREAM_POLL_INTERVAL_MS:-2000}
+      - CHAT_TOOL_ALLOWLIST=${CHAT_TOOL_ALLOWLIST:-delegate_task,agent_status,remember_fact,search_mail,read_mail_thread,open_workspace}
+    ports:
+      - "8787:8787"
+    # Share dataDir with the computer container
+    volumes:
+      - openmuse-data:/app/.openmuse
+
+volumes:
+  postgres-data:
+  openmuse-data:
