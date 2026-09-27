@@ -15,7 +15,7 @@
     "dev:web": "pnpm --dir apps/mobile web",
     "test": "tsx --test tests/*.test.ts apps/mobile/test/*.test.ts",
     "test:browser": "node --experimental-strip-types --test apps/worker/tests/lifecycle.test.ts",
-    "typecheck": "tsc --noEmit && pnpm --dir apps/mobile typecheck",
+    "typecheck": "tsc --noEmit && pnpm --dir apps/mobile typecheck && tsc --noEmit -p apps/worker/tsconfig.json",
     "lint": "biome check .",
     "format": "biome check --write .",
     "build:server": "tsc -p tsconfig.build.json",
