@@ -68,15 +68,15 @@ test("CopilotKit model worker executes server tools and persists the confirmed o
     );
     assert.ok(requests.length >= 4 && requests.length <= 6);
     assert.ok(requests.every((request) => request.path === "/v1/responses"));
-    assert.ok(requests[0].body.includes('"name":"prepare_email"'));
-    assert.ok(requests[0].body.includes('"name":"run_computer_command"'));
+    assert.ok(requests[0]!.body.includes('"name":"prepare_email"'));
+    assert.ok(requests[0]!.body.includes('"name":"run_computer_command"'));
     assert.ok(
       requests.some(
         (request) => request.body.includes("succeeded") && request.body.includes("hello"),
       ),
     );
     assert.equal((await server.computer.snapshot("owner")).commands[0]?.status, "succeeded");
-    assert.ok(!requests[0].body.includes('"name":"approve"'));
+    assert.ok(!requests[0]!.body.includes('"name":"approve"'));
     requests.length = 0;
     calls.splice(0, calls.length, {
       name: "prepare_event",
@@ -105,7 +105,7 @@ test("CopilotKit model worker executes server tools and persists the confirmed o
     const finished = await server.agent.getTask("owner", appointment.id);
     assert.equal(finished.status, "succeeded", finished.error ?? finished.question);
     assert.equal(finished.actionId, null);
-    assert.ok(requests[0].body.includes("approvalResult"));
+    assert.ok(requests[0]!.body.includes("approvalResult"));
     assert.equal(
       (await db.list<ActionProposal>("owner", "actions")).filter((a) => a.taskId === appointment.id)
         .length,
@@ -223,7 +223,7 @@ test("replaying a completed prepared action returns its receipt without reopenin
       (action) => action.taskId === task.id,
     );
     assert.equal(actions.length, 1);
-    assert.equal(actions[0].status, "succeeded");
+    assert.equal(actions[0]!.status, "succeeded");
     assert.ok(requests.some((request) => request.body.includes(String(completed.result))));
   } finally {
     await server.agent.stop();

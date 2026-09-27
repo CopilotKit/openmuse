@@ -141,7 +141,7 @@ test("finance artifacts compute cents exactly and reject ambiguous CSV", () => {
   );
   assert.equal(report.spending, 30.3);
   assert.equal(report.saved, 969.7);
-  assert.equal(report.categories[0].amount, 30.3);
+  assert.equal(report.categories[0]!.amount, 30.3);
   assert.throws(() =>
     analyzeSpending("date,description,amount,category\n2026-02-31,Purchase,10,Food"),
   );

@@ -33,11 +33,13 @@ import {
   type ProposalInput,
 } from "../../../packages/domain/src";
 import { DelegateSheet, NotificationsSheet, TaskDetail } from "./agent-ui";
+// biome-ignore lint/correctness/noUnresolvedImports: resolves to BrowserConsole.web.tsx / BrowserConsole.native.tsx
 import BrowserConsole from "./BrowserConsole";
 import { browserAddress, browserSite } from "./browser-address";
 import { ComputerSheet } from "./computer";
 import DateTimeEditor from "./DateTimeEditor";
 import { localDateTime, zonedInstant } from "./date-time";
+// biome-ignore lint/correctness/noUnresolvedImports: resolves to PdfReader.web.tsx / PdfReader.native.tsx
 import PdfReader from "./PdfReader";
 import {
   Button,

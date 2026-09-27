@@ -194,8 +194,8 @@ export async function createSamplePdf(): Promise<Uint8Array> {
       });
       page.drawText(`${index + 1} / 2`, { x: 535, y: 35, size: 9, font: regular, color: teal });
     }
-    const first = pages[0];
-    const second = pages[1];
+    const first = pages[0]!,
+      second = pages[1]!;
     first.drawText("A day of discovery at the community museum", {
       x: 48,
       y: 640,

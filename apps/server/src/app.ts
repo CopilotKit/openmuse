@@ -53,6 +53,8 @@ export async function createApp(
     c.header("Referrer-Policy", "no-referrer");
     c.header("Cache-Control", "no-store");
     await next();
+    // biome-ignore lint/complexity/noUselessReturn: needed for noImplicitReturns
+    return;
   });
   app.use(
     "*",

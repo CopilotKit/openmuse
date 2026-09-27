@@ -3,7 +3,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import { createApp } from "../apps/server/src/app.ts";
 import type { Config } from "../apps/server/src/config.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
@@ -50,11 +49,11 @@ before(async () => {
 
 after(async () => {
   await server?.agent?.stop();
-  await db?.close();
+  await db.close();
   await rm(directory, { recursive: true, force: true });
 });
 
-test("session accepts and stores device identity", async (t) => {
+test("session accepts and stores device identity", async () => {
   const session = await server.app.request("/api/session", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -67,12 +66,16 @@ test("session accepts and stores device identity", async (t) => {
   token = newToken;
 
   // Verify the session stored device info by checking task creation
-  const task = await read<AgentTask>("/tasks", { kind: "plan", prompt: "Test device identity" }, 201);
-  assert.ok(task.state.creatorDevice);
-  assert.deepEqual(
-    task.state.creatorDevice,
-    { deviceId: "pixel-8-pro", deviceName: "James Pixel" },
+  const task = await read<AgentTask>(
+    "/tasks",
+    { kind: "plan", prompt: "Test device identity" },
+    201,
   );
+  assert.ok(task.state.creatorDevice);
+  assert.deepEqual(task.state.creatorDevice, {
+    deviceId: "pixel-8-pro",
+    deviceName: "James Pixel",
+  });
 });
 
 test("SSE endpoint returns 404 for unknown task", async () => {
@@ -135,8 +138,14 @@ test("SSE stream delivers existing run-events and task-complete", async () => {
     .filter((m) => m.length > 0)
     .map((m) => {
       const lines = m.split("\n");
-      const event = lines.find((l) => l.startsWith("event:"))?.slice(6).trim();
-      const data = lines.find((l) => l.startsWith("data:"))?.slice(5).trim();
+      const event = lines
+        .find((l) => l.startsWith("event:"))
+        ?.slice(6)
+        .trim();
+      const data = lines
+        .find((l) => l.startsWith("data:"))
+        ?.slice(5)
+        .trim();
       return { event, data: data ? JSON.parse(data) : undefined };
     });
 
@@ -154,7 +163,11 @@ test("SSE stream delivers existing run-events and task-complete", async () => {
 });
 
 test("SSE stream stays open for running tasks", async () => {
-  const task = await read<AgentTask>("/tasks", { kind: "plan", prompt: "Streaming poll test" }, 201);
+  const task = await read<AgentTask>(
+    "/tasks",
+    { kind: "plan", prompt: "Streaming poll test" },
+    201,
+  );
 
   // Start the SSE request — task is "queued", not terminal, so stream stays open
   const response = await server.app.request(`/api/agent/tasks/${task.id}/stream`, {
@@ -169,7 +182,7 @@ test("SSE stream stays open for running tasks", async () => {
   response.body.cancel();
 });
 
-test("task created without device info has no creatorDevice", async (t) => {
+test("task created without device info has no creatorDevice", async () => {
   // Create a separate session without device info
   const session = await server.app.request("/api/session", {
     method: "POST",

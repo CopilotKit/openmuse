@@ -11,7 +11,7 @@ test("background failures retain safe error codes without logging messages", (t)
   backgroundFailure("postgres pool", error);
 
   assert.equal(logged.mock.callCount(), 1);
-  const [entry] = logged.mock.calls[0].arguments as [Record<string, unknown>];
+  const [entry] = logged.mock.calls[0]!.arguments as [Record<string, unknown>];
   assert.equal(entry.error, "Error");
   assert.equal(entry.code, "57P01");
   assert.deepEqual(entry.context, { phase: "postgres pool" });
@@ -24,6 +24,6 @@ test("background failures omit unsafe code strings", (t) => {
 
   backgroundFailure("background", error);
 
-  const [entry] = logged.mock.calls[0].arguments as [Record<string, unknown>];
+  const [entry] = logged.mock.calls[0]!.arguments as [Record<string, unknown>];
   assert.equal("code" in entry, false);
 });

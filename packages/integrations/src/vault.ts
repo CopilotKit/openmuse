@@ -35,7 +35,10 @@ export function decryptSecret(encrypted: string, key: string): string {
     throw new Error("Invalid encrypted secret");
   }
   const encoded = [nonceString, tagString, ciphertextString];
-  const [nonce, tag, ciphertext] = encoded.map((value) => Buffer.from(value, "base64url"));
+  const buffers = encoded.map((value) => Buffer.from(value, "base64url"));
+  const nonce = buffers[0]!,
+    tag = buffers[1]!,
+    ciphertext = buffers[2]!;
   if (
     nonce.length !== 12 ||
     tag.length !== 16 ||

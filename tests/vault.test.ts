@@ -19,8 +19,8 @@ test("vault encrypts with a fresh nonce and authenticates the entire envelope", 
   assert.equal(parts.length, 4);
   for (let index = 1; index < 4; index++) {
     const corrupted = [...parts];
-    const bytes = Buffer.from(corrupted[index], "base64url");
-    bytes[0] ^= 1;
+    const bytes = Buffer.from(corrupted[index]!, "base64url");
+    bytes[0] = bytes[0]! ^ 1;
     corrupted[index] = bytes.toString("base64url");
     assert.throws(() => decryptSecret(corrupted.join("."), key), /authenticate|decrypt/i);
   }

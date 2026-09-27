@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import type {
   AgentIdentity,
@@ -8,7 +9,6 @@ import type {
   AgentTask,
   RunEvent,
 } from "../../../../packages/domain/src/agent.ts";
-import { streamSSE } from "hono/streaming";
 import type { DeviceInfo } from "../auth.ts";
 import { AppError } from "../errors.ts";
 import type { AgentService } from "./service.ts";
@@ -29,7 +29,9 @@ const goalPatchSchema = z.object({
     .optional(),
 });
 
-export function agentRoutes(service: AgentService): Hono<{ Variables: { owner: string; device: DeviceInfo } }> {
+export function agentRoutes(
+  service: AgentService,
+): Hono<{ Variables: { owner: string; device: DeviceInfo } }> {
   const app = new Hono<{ Variables: { owner: string; device: DeviceInfo } }>();
   app.get("/", async (c) => c.json(await service.snapshot(c.get("owner"))));
   app.post("/tasks", async (c) =>
@@ -93,6 +95,7 @@ export function agentRoutes(service: AgentService): Hono<{ Variables: { owner: s
         });
         return;
       }
+      // biome-ignore lint/suspicious/noUnnecessaryConditions: intentional infinite loop with early return
       while (true) {
         await stream.sleep(service.config.streamPollIntervalMs ?? 2000);
         const next = (await service.db.list<RunEvent>(owner, "run-events")).filter(

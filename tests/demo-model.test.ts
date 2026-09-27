@@ -56,21 +56,21 @@ test("the email demo reads the thread returned by search and quotes its actual d
   ];
   const search = demoResponse(mailRequest(messages));
   assert.ok("toolCalls" in search && search.toolCalls);
-  assert.equal(search.toolCalls[0].name, "search_mail");
+  assert.equal(search.toolCalls[0]!.name, "search_mail");
   messages.push({
     role: "tool",
-    tool_call_id: search.toolCalls[0].id,
+    tool_call_id: search.toolCalls[0]!.id,
     content: JSON.stringify({
       matches: [{ threadId: "dynamic-thread", subject: "New trip details" }],
     }),
   });
   const read = demoResponse(mailRequest(messages));
   assert.ok("toolCalls" in read && read.toolCalls);
-  assert.equal(read.toolCalls[0].name, "read_mail_thread");
-  assert.deepEqual(JSON.parse(read.toolCalls[0].arguments), { threadId: "dynamic-thread" });
+  assert.equal(read.toolCalls[0]!.name, "read_mail_thread");
+  assert.deepEqual(JSON.parse(read.toolCalls[0]!.arguments), { threadId: "dynamic-thread" });
   messages.push({
     role: "tool",
-    tool_call_id: read.toolCalls[0].id,
+    tool_call_id: read.toolCalls[0]!.id,
     content: JSON.stringify({
       messages: [
         {
@@ -88,7 +88,7 @@ test("the email demo reads the thread returned by search and quotes its actual d
   messages.push({ role: "user", content: "Check my emails for the school trip again" });
   const next = demoResponse(mailRequest(messages));
   assert.ok("toolCalls" in next && next.toolCalls);
-  assert.equal(next.toolCalls[0].name, "search_mail");
+  assert.equal(next.toolCalls[0]!.name, "search_mail");
 });
 
 test("the email demo handles no matches and disconnected mail without inventing details", () => {
@@ -134,8 +134,8 @@ test("demo only summarizes browser evidence belonging to the current user turn",
   ];
   const reply = demoResponse(request(history));
   assert.ok("toolCalls" in reply && reply.toolCalls);
-  assert.equal(reply.toolCalls[0].name, "browse_web");
-  assert.deepEqual(JSON.parse(reply.toolCalls[0].arguments), { url: "https://copilotkit.ai" });
+  assert.equal(reply.toolCalls[0]!.name, "browse_web");
+  assert.deepEqual(JSON.parse(reply.toolCalls[0]!.arguments), { url: "https://copilotkit.ai" });
 });
 
 test("demo reports missing or failed browser evidence without inventing a summary", () => {

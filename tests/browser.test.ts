@@ -45,7 +45,7 @@ test("browser API reopens an owned profile at the edited address and renews cons
   });
   assert.equal(opened.status, 200);
   assert.equal((await opened.json()).url, "https://example.org/");
-  assert.deepEqual(calls[0], {
+  assert.deepEqual(calls[0]!, {
     path: "/sessions",
     body: { id: sessionId, url: "https://example.org/" },
   });
@@ -127,7 +127,7 @@ test("failed creation remains app-visible and can be retried with its original U
   assert.equal(sessions[0]?.status, "error");
   assert.equal(sessions[0]?.url, "https://example.org/");
   failing = false;
-  const result = await service.reopen("owner", sessions[0].id);
+  const result = await service.reopen("owner", sessions[0]!.id);
   assert.equal(result.id, sessions[0]?.id);
   assert.equal(result.status, "active");
 });
@@ -238,7 +238,7 @@ test("concurrent chat reads keep each navigation paired with its page read", asy
     results.map((result) => result.text),
     urls,
   );
-  assert.equal(results[0].sessionId, results[1].sessionId);
+  assert.equal(results[0]!.sessionId, results[1]!.sessionId);
   assert.equal((await db.list("owner", "browsers")).length, 1);
 });
 
@@ -461,7 +461,7 @@ test("worker protects all controls, validates before launch, and health reveals 
     assert.equal((await fetch(`${base}/sessions`, { headers })).status, 200);
     const restored = await (await fetch(`${base}/sessions`, { headers })).json();
     assert.equal(
-      restored[0].status,
+      restored[0]!.status,
       "closed",
       "restart must not report a closed browser as active",
     );

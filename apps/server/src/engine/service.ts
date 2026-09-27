@@ -24,10 +24,10 @@ import type {
   ProposalInput,
 } from "../../../../packages/domain/src/index.ts";
 import type { ActionService } from "../actions.ts";
+import type { DeviceInfo } from "../auth.ts";
 import type { BrowserService } from "../browser.ts";
 import { ComputerService } from "../computer.ts";
 import type { Config } from "../config.ts";
-import type { DeviceInfo } from "../auth.ts";
 import type { Store } from "../db.ts";
 import { AppError } from "../errors.ts";
 import type { Files } from "../files.ts";
@@ -69,9 +69,11 @@ export class AgentService {
     if (this.maintenance) clearInterval(this.maintenance);
     this.maintenance = undefined;
     await this.worker.stop();
+    // biome-ignore lint/suspicious/noUnnecessaryConditions: intentional polling loop
     while (this.refreshing) await new Promise((resolve) => setTimeout(resolve, 10));
   }
   private async maintain() {
+    // biome-ignore lint/suspicious/noUnnecessaryConditions: refreshing is a mutable flag
     if (this.refreshing) return;
     this.refreshing = true;
     try {
@@ -224,7 +226,12 @@ export class AgentService {
         connectionId: (await this.workspace.connection(owner))?.id ?? null,
         ...(held && input.kind === "monitor" ? { initializingMonitor: true } : {}),
         ...(device?.deviceId || device?.deviceName
-          ? { creatorDevice: { deviceId: device.deviceId ?? null, deviceName: device.deviceName ?? null } }
+          ? {
+              creatorDevice: {
+                deviceId: device.deviceId ?? null,
+                deviceName: device.deviceName ?? null,
+              },
+            }
           : {}),
       },
       createdAt: date(),
@@ -1104,6 +1111,6 @@ export class AgentService {
   }
   private matchesPrice(text: string, threshold: number) {
     const matches = [...text.matchAll(/(?:\$|USD\s*)(\d+(?:,\d{3})*(?:\.\d{1,2})?)/g)];
-    return matches.some((m) => Number(m[1].replace(/,/g, "")) < threshold);
+    return matches.some((m) => Number(m[1]!.replace(/,/g, "")) < threshold);
   }
 }

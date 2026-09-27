@@ -1,5 +1,6 @@
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+// biome-ignore lint/correctness/noUnresolvedImports: playwright types available at runtime via package
 import type { BrowserContext, Page } from "playwright";
 import {
   capturePdfDownload,

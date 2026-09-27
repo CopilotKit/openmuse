@@ -55,7 +55,7 @@ async function documentTask() {
   const reviewed = await server.agent.detail(owner, task.id);
   assert.equal(reviewed.task.status, "waiting_approval");
   assert.equal(reviewed.files.length, 1);
-  assert.ok(reviewed.files[0].url);
+  assert.ok(reviewed.files[0]!.url);
   assert.ok(reviewed.task.actionId);
   const action = await db.get<ActionProposal>(owner, "actions", reviewed.task.actionId);
   assert.ok(action);
@@ -68,7 +68,7 @@ test("document job runs without a client, waits for review, and resumes from its
   const originalIdea = initialIdeas.find((idea) => idea.kind === "document");
   assert.ok(originalIdea);
   const { task, action, originalId } = await documentTask();
-  assert.equal((await server.files.get(owner, originalId)).parentId, undefined);
+  assert.equal((await server.files.get(owner, originalId!)).parentId, undefined);
   assert.equal(
     (await server.workspace.snapshot(owner)).mail.filter((m) => m.subject.startsWith("Re:")).length,
     0,

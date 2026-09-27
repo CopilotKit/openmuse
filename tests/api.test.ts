@@ -64,7 +64,7 @@ test("sample workspace serves a real PDF and filling creates a new version", asy
   const workspace: Workspace = await response.json();
   assert.equal(workspace.mode, "sample");
   assert.equal(workspace.mail.length, 4);
-  const original = workspace.files[0];
+  const original = workspace.files[0]!;
   assert.equal(original.pageCount, 2);
   const signed = await app.request(original.url);
   assert.equal(signed.headers.get("content-type"), "application/pdf");

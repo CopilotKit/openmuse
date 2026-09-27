@@ -57,7 +57,7 @@ before(async () => {
 });
 after(async () => {
   await server?.agent?.stop();
-  await db?.close();
+  await db.close();
   if (directory) await rm(directory, { recursive: true, force: true });
 });
 
@@ -92,12 +92,12 @@ test("the main Rich Thread survives reopening and concurrent initialization", as
     Array.from({ length: 3 }, () => server.app.request("/api/main-thread", { headers: headers() })),
   );
   const threads = await Promise.all(responses.map((response) => response.json()));
-  assert.ok(threads.every((thread) => thread.threadId === threads[0].threadId));
-  assert.equal(threads[0].existing, true);
+  assert.ok(threads.every((thread) => thread.threadId === threads[0]!.threadId));
+  assert.equal(threads[0]!.existing, true);
   const reopened = await (
     await server.app.request("/api/main-thread", { headers: headers() })
   ).json();
-  assert.equal(reopened.threadId, threads[0].threadId);
+  assert.equal(reopened.threadId, threads[0]!.threadId);
   assert.equal(reopened.existing, true);
   assert.equal(await db.get("other-user", "conversation-settings", "main"), null);
 });
@@ -178,7 +178,7 @@ test("goal updates validate milestones and pausing a goal pauses its task", asyn
     milestones: goal.milestones.map((milestone) => ({ ...milestone, done: true })),
   });
   assert.equal(saved.status, "paused");
-  assert.equal(saved.milestones[0].done, true);
+  assert.equal(saved.milestones[0]!.done, true);
   assert.equal((await read<{ task: AgentTask }>(`/tasks/${task.id}`)).task.status, "paused");
   const hidden = await server.agent.createGoal("other-user", { title: "Private goal" });
   assert.equal((await request(`/goals/${hidden.id}`, { status: "completed" })).status, 404);
@@ -230,8 +230,8 @@ test("idea dismissal survives refresh and concurrent acceptance creates one goal
   const ideas = await read<Idea[]>("/ideas/refresh", {});
   assert.ok(ideas.length >= 2);
   assert.ok(ideas.every((idea) => idea.evidence.length > 0));
-  const dismissed = ideas[0],
-    accepted = ideas[1];
+  const dismissed = ideas[0]!,
+    accepted = ideas[1]!;
   assert.equal(
     (await read<Idea>(`/ideas/${dismissed.id}`, { action: "dismiss" })).status,
     "dismissed",
@@ -245,13 +245,13 @@ test("idea dismissal survives refresh and concurrent acceptance creates one goal
     read<Idea>(`/ideas/${accepted.id}`, { action: "accept" }),
     read<Idea>(`/ideas/${accepted.id}`, { action: "accept" }),
   ]);
-  assert.equal(results[0].status, "accepted");
-  assert.equal(results[0].taskId, results[1].taskId);
+  assert.equal(results[0]!.status, "accepted");
+  assert.equal(results[0]!.taskId, results[1]!.taskId);
   const after = await read<AgentWorkspace>("");
   assert.equal(after.goals.length, before.goals.length + 1);
   assert.equal(after.tasks.length, before.tasks.length + 1);
-  assert.ok(results[0].taskId);
-  await read(`/tasks/${results[0].taskId}/control`, { action: "cancel" });
+  assert.ok(results[0]!.taskId);
+  await read(`/tasks/${results[0]!.taskId}/control`, { action: "cancel" });
 });
 
 test("sample monitor saves its baseline and deduplicates notifications for repeated changes", async () => {
@@ -289,9 +289,9 @@ test("sample monitor saves its baseline and deduplicates notifications for repea
   const found = await notifications();
   assert.equal(found.length, 2);
   assert.ok(found.every((item) => !item.read));
-  const readNotification = await read<AgentNotification>(`/notifications/${found[0].id}/read`, {});
+  const readNotification = await read<AgentNotification>(`/notifications/${found[0]!.id}/read`, {});
   assert.equal(readNotification.read, true);
-  assert.equal((await notifications()).find((item) => item.id === found[0].id)?.read, true);
+  assert.equal((await notifications()).find((item) => item.id === found[0]!.id)?.read, true);
   const snapshot = await read<AgentWorkspace>("");
   assert.equal(snapshot.monitors.find((item) => item.id === monitor.id)?.checks, 5);
   assert.equal(
@@ -309,7 +309,7 @@ test("sample monitor saves its baseline and deduplicates notifications for repea
     undefined,
     "private-notice",
   );
-  const privateNotification = (await db.list<AgentNotification>("other-user", "notifications"))[0];
+  const privateNotification = (await db.list<AgentNotification>("other-user", "notifications"))[0]!;
   assert.equal((await request(`/notifications/${privateNotification.id}/read`, {})).status, 404);
   assert.equal(
     (await db.get<AgentNotification>("other-user", "notifications", privateNotification.id))?.read,

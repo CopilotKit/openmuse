@@ -76,10 +76,10 @@ test("mail reads nested plain text and attachment references over authenticated 
       },
     });
   });
-  const [mail] = await client.listMail("from:museum@example.com");
-  assert.equal(paths[0].origin, "https://gmail.googleapis.com");
-  assert.equal(paths[0].searchParams.get("q"), "from:museum@example.com");
-  assert.equal(paths[1].searchParams.get("format"), "full");
+  const mail = (await client.listMail("from:museum@example.com"))[0]!;
+  assert.equal(paths[0]!.origin, "https://gmail.googleapis.com");
+  assert.equal(paths[0]!.searchParams.get("q"), "from:museum@example.com");
+  assert.equal(paths[1]!.searchParams.get("format"), "full");
   assert.equal(mail.body, "Please complete the attached form.");
   assert.equal(mail.from, "museum@example.com");
   assert.equal(mail.sender, "Museum, Community");
@@ -108,7 +108,7 @@ test("HTML-only messages expose complete plain text while removing active and no
           },
         }),
   );
-  const body = (await client.listMail())[0].body;
+  const body = (await client.listMail())[0]!.body;
   assert.ok(body.startsWith("Welcome & thank you\n"));
   assert.ok(body.includes(fullText.trim()));
   assert.ok(body.endsWith("Last details © 🌎."));
@@ -374,7 +374,7 @@ test("calendar writes use calendar IDs, preserve unrelated fields via PATCH, and
     ["POST", "GET", "PATCH", "GET", "DELETE"],
   );
   assert.equal(
-    requests[2].url.pathname,
+    requests[2]!.url.pathname,
     "/calendar/v3/calendars/shared%40example.com/events/event-1",
   );
   assert.ok(
@@ -382,9 +382,9 @@ test("calendar writes use calendar IDs, preserve unrelated fields via PATCH, and
       .filter((item) => item.method !== "GET")
       .every((item) => item.url.searchParams.get("sendUpdates") === "all"),
   );
-  assert.equal(requests[2].ifMatch, eventResponse.etag);
-  assert.equal(requests[4].ifMatch, eventResponse.etag);
-  assert.deepEqual(requests[0].body, {
+  assert.equal(requests[2]!.ifMatch, eventResponse.etag);
+  assert.equal(requests[4]!.ifMatch, eventResponse.etag);
+  assert.deepEqual(requests[0]!.body, {
     summary: draft.title,
     start: { dateTime: draft.start, timeZone: draft.timeZone },
     end: { dateTime: draft.end, timeZone: draft.timeZone },
@@ -637,7 +637,7 @@ test("thread detail retrieves complete text bodies stored behind Gmail attachmen
       ],
     });
   });
-  assert.equal((await client.getThread("thread1"))[0].body, "Entire message beyond the snippet.");
+  assert.equal((await client.getThread("thread1"))[0]!.body, "Entire message beyond the snippet.");
   assert.deepEqual(paths, [
     "/gmail/v1/users/me/threads/thread1",
     "/gmail/v1/users/me/messages/msg1/attachments/body1",
@@ -653,18 +653,18 @@ test("event reads include earlier today and support selected calendars and bound
     return json({ items: [eventResponse] });
   });
   await client.listEvents();
-  assert.equal(queries[0].searchParams.get("timeMin"), midnight.toISOString());
-  assert.equal(queries[0].searchParams.get("maxResults"), "100");
-  assert.ok(Date.parse(queries[0].searchParams.get("timeMax") ?? "") > midnight.getTime());
+  assert.equal(queries[0]!.searchParams.get("timeMin"), midnight.toISOString());
+  assert.equal(queries[0]!.searchParams.get("maxResults"), "100");
+  assert.ok(Date.parse(queries[0]!.searchParams.get("timeMax") ?? "") > midnight.getTime());
   const result = await client.listEvents({
     calendarId: "shared@example.com",
     timeMin: "2026-10-01T00:00:00-07:00",
     timeMax: "2026-11-01T00:00:00-07:00",
   });
-  assert.equal(result[0].calendarId, "shared@example.com");
-  assert.equal(queries[1].pathname, "/calendar/v3/calendars/shared%40example.com/events");
-  assert.equal(queries[1].searchParams.get("timeMin"), "2026-10-01T00:00:00-07:00");
-  assert.equal(queries[1].searchParams.get("timeMax"), "2026-11-01T00:00:00-07:00");
+  assert.equal(result[0]!.calendarId, "shared@example.com");
+  assert.equal(queries[1]!.pathname, "/calendar/v3/calendars/shared%40example.com/events");
+  assert.equal(queries[1]!.searchParams.get("timeMin"), "2026-10-01T00:00:00-07:00");
+  assert.equal(queries[1]!.searchParams.get("timeMax"), "2026-11-01T00:00:00-07:00");
   for (const options of [
     { timeMin: "yesterday" },
     { timeMin: "2026-10-01T00:00:00", timeMax: "2026-11-01T00:00:00Z" },

@@ -106,7 +106,7 @@ test("attaching an existing container fails closed on unsafe isolation or owner 
       value.Config.Labels = {};
     },
     (value: ReturnType<typeof sandbox>) => {
-      value.Mounts[0].Type = "bind";
+      value.Mounts[0]!.Type = "bind";
     },
     (value: ReturnType<typeof sandbox>) => {
       value.Config.Env.push("OPENAI_API_KEY=must-not-enter");

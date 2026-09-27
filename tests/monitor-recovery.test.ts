@@ -95,7 +95,7 @@ before(async () => {
 });
 after(async () => {
   await server?.agent?.stop();
-  await db?.close();
+  await db.close();
   if (directory) await rm(directory, { recursive: true, force: true });
 });
 
@@ -132,7 +132,7 @@ test("a page change stays alertable when the task outcome is lost after the base
 
   const found = await notifications();
   assert.equal(found.length, 1, "the No tables -> One table change should notify exactly once");
-  assert.match(found[0].body, /One table at 7 pm/);
+  assert.match(found[0]!.body, /One table at 7 pm/);
 });
 
 test("resuming a monitor fails without activating it when the task transition does not commit", async () => {

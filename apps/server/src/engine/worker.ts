@@ -62,12 +62,15 @@ export class TaskWorker {
     this.active.get(taskId)?.abort();
   }
   async tick() {
+    // biome-ignore lint/suspicious/noUnnecessaryConditions: mutable instance flag checked across async boundaries
+    // biome-ignore lint/suspicious/noUnnecessaryConditions: mutable instance flag
     if (this.stopping) return;
     if (this.running)
       await this.db.put("system", "worker-status", {
         id: "tasks",
         lastTickAt: new Date(this.now()).toISOString(),
       });
+    // biome-ignore lint/suspicious/noUnnecessaryConditions: mutable instance flag
     if (this.ticking) return;
     this.ticking = true;
     this.lastTickAt = new Date(this.now()).toISOString();
@@ -81,7 +84,7 @@ export class TaskWorker {
             (t.status === "running" && Date.parse(t.leaseUntil ?? "") <= this.now()) ||
             t.status === "waiting_approval"),
       );
-      const eligible = [];
+      const eligible: typeof due = [];
       for (const record of due) {
         if (record.value.status === "waiting_approval") {
           const action = record.value.actionId
@@ -114,6 +117,7 @@ export class TaskWorker {
     }
   }
   private async run(owner: string, previous: AgentTask) {
+    // biome-ignore lint/suspicious/noUnnecessaryConditions: mutable instance flag
     if (this.stopping) return;
     const leaseId = randomUUID(),
       leaseMs = this.options.leaseMs ?? 60000;
@@ -212,8 +216,8 @@ export class TaskWorker {
         );
       } else {
         const detail = error instanceof Error ? error.message : "Task execution failed";
-        await event("error", "Task needs attention", detail).catch((error) =>
-          backgroundFailure("record task error", error),
+        await event("error", "Task needs attention", detail).catch((err) =>
+          backgroundFailure("record task error", err),
         );
         await this.db.compareAndSwap(
           owner,

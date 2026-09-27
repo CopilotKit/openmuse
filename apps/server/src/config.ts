@@ -124,15 +124,21 @@ export function readConfig(): Config {
     taskModel: process.env.TASK_MODEL,
     simpleTaskModel: process.env.SIMPLE_TASK_MODEL,
     chatToolAllowlist: process.env.CHAT_TOOL_ALLOWLIST
-      ? process.env.CHAT_TOOL_ALLOWLIST.split(",").map((s) => s.trim()).filter(Boolean)
+      ? process.env.CHAT_TOOL_ALLOWLIST.split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
       : undefined,
     chatMaxSteps: process.env.CHAT_MAX_STEPS ? Number(process.env.CHAT_MAX_STEPS) : undefined,
     taskMaxSteps: process.env.TASK_MAX_STEPS ? Number(process.env.TASK_MAX_STEPS) : undefined,
-    simpleTaskMaxSteps: process.env.SIMPLE_TASK_MAX_STEPS ? Number(process.env.SIMPLE_TASK_MAX_STEPS) : undefined,
+    simpleTaskMaxSteps: process.env.SIMPLE_TASK_MAX_STEPS
+      ? Number(process.env.SIMPLE_TASK_MAX_STEPS)
+      : undefined,
     agentBackend: backend,
     agentUrl: process.env.AGENT_URL,
     agentToken: process.env.AGENT_TOKEN,
-    openaiApiFormat: (process.env.OPENAI_API_FORMAT as "responses" | "chat-completions") ?? "responses",
+    openaiApiFormat:
+      // biome-ignore lint/suspicious/noUnnecessaryConditions: type assertion makes left side non-nullish
+      (process.env.OPENAI_API_FORMAT as "responses" | "chat-completions") ?? "responses",
     intelligenceApiKey: required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage),
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,

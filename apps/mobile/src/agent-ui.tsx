@@ -552,8 +552,8 @@ export function TaskDetail({ taskId }: { taskId: string }) {
                       if (["running", "scheduled", "queued"].includes(task.status))
                         await mutate(`/tasks/${taskId}/control`, { action: "pause" });
                       open({ type: "browser", browser });
-                    } catch (error) {
-                      setError(errorText(error));
+                    } catch (err) {
+                      setError(errorText(err));
                     } finally {
                       setBusy(false);
                     }

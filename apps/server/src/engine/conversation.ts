@@ -15,7 +15,6 @@ import { computerInstructions, computerTools } from "../computer-tools.ts";
 import type { Config } from "../config.ts";
 import type { AgentService } from "./service.ts";
 import { tanstackAgent } from "./tanstack-agent.ts";
-import type { TaskContext } from "./worker.ts";
 
 /**
  * Keep only tools whose name matches one of the allowlist patterns.
@@ -45,7 +44,7 @@ export class ConversationAgent extends AbstractAgent {
   ) {
     super({ agentId: "default" });
   }
-  clone(): ConversationAgent {
+  override clone(): ConversationAgent {
     return new ConversationAgent(this.config, this.service, this.owner, this.device);
   }
   run(input: RunAgentInput): Observable<BaseEvent> {
@@ -193,7 +192,8 @@ export class ConversationAgent extends AbstractAgent {
         description:
           "Hand a whole job to the durable server worker. It continues when the app closes and pauses for user input or approval. Use document for a selected email form, finance for imported CSV, plan for a goal plan, agent for other jobs.",
         parameters: createTaskSchema,
-        execute: async (args) => this.service.createTask(this.owner, args, key("task", args), false, this.device),
+        execute: async (args) =>
+          this.service.createTask(this.owner, args, key("task", args), false, this.device),
       }),
       defineTool({
         name: "agent_status",

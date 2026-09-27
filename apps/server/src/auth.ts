@@ -50,7 +50,11 @@ export class Auth {
     }>("system", "sessions", digest(authorization.slice(7)).toString("hex"));
     if (!session || session.expiresAt < Date.now())
       throw new AppError("Session expired. Sign in again.", 401);
-    return { owner: session.owner, deviceId: session.deviceId ?? null, deviceName: session.deviceName ?? null };
+    return {
+      owner: session.owner,
+      deviceId: session.deviceId ?? null,
+      deviceName: session.deviceName ?? null,
+    };
   }
   sign(owner: string, path: string) {
     const expires = String(Date.now() + 15 * 60 * 1000);

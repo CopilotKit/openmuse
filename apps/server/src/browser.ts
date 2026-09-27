@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { BrowserSession } from "../../../packages/domain/src/index.ts";
+import type { Artifact, BrowserSession } from "../../../packages/domain/src/index.ts";
 import type { Auth } from "./auth.ts";
 import { browserConsole } from "./browser-console.ts";
 import type { Config } from "./config.ts";
@@ -242,7 +242,7 @@ export class BrowserService {
         failures: z.array(failureSchema),
       })
       .parse(await (await this.request(`/sessions/${id}/downloads`)).json());
-    const saved = [];
+    const saved: Artifact[] = [];
     for (const download of downloads) {
       const existing = await this.db.get<{ fileId: string }>(
         owner,

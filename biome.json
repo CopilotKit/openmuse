@@ -18,10 +18,110 @@
     "enabled": true,
     "rules": {
       "preset": "recommended",
-      "correctness": { "useExhaustiveDependencies": "off" },
-      "a11y": { "noSvgWithoutTitle": "off" }
+      "correctness": {
+        "useExhaustiveDependencies": "off",
+        "noUnusedVariables": "error",
+        "noUnusedImports": "error",
+        "noEmptyPattern": "error",
+        "noSelfAssign": "error",
+        "noUnreachable": "error",
+        "noUnusedInstantiation": "error",
+        "noUnusedLabels": "error",
+        "noUnusedPrivateClassMembers": "error",
+        "useYield": "error",
+        "noUnresolvedImports": "error"
+      },
+      "suspicious": {
+        "noExplicitAny": "error",
+        "noConsole": "warn",
+        "noDoubleEquals": "error",
+        "noIrregularWhitespace": "error",
+        "noMisleadingCharacterClass": "error",
+        "noPrototypeBuiltins": "error",
+        "noRedeclare": "error",
+        "noSelfCompare": "error",
+        "noShadow": "error",
+        "noSparseArray": "error",
+        "noTemplateCurlyInString": "error",
+        "noThenProperty": "error",
+        "noUnnecessaryConditions": "error",
+        "noUnsafeNegation": "error",
+        "noUnusedExpressions": "error",
+        "noVar": "error",
+        "noWith": "error",
+        "noImportCycles": "error",
+        "noEvolvingTypes": "error",
+        "noGlobalAssign": "error",
+        "useAwait": "off",
+        "useErrorMessage": "error",
+        "useGuardForIn": "error",
+        "useIsArray": "error",
+        "useIterableCallbackReturn": "error"
+      },
+      "style": {
+        "useImportType": "error",
+        "useNodejsImportProtocol": "error",
+        "useNumericSeparators": "off",
+        "useTemplate": "error",
+        "useShorthandFunctionType": "error",
+        "useNamingConvention": "off",
+        "noNonNullAssertion": "off",
+        "useConst": "error",
+        "useThrowOnlyError": "error",
+        "useExplicitLengthCheck": "warn",
+        "noUselessElse": "error"
+      },
+      "complexity": {
+        "noUselessRename": "error",
+        "noUselessCatch": "error",
+        "noUselessConstructor": "error",
+        "noUselessFragments": "error",
+        "noUselessReturn": "error",
+        "noStaticOnlyClass": "error",
+        "noFlatMapIdentity": "error"
+      },
+      "performance": {
+        "noDelete": "error"
+      },
+      "a11y": {
+        "noSvgWithoutTitle": "off",
+        "noStaticElementInteractions": "off",
+        "noNoninteractiveTabindex": "off"
+      }
     }
   },
   "javascript": { "formatter": { "quoteStyle": "double" } },
-  "assist": { "actions": { "source": { "organizeImports": "on" } } }
+  "json": { "formatter": { "indentStyle": "space", "indentWidth": 2 } },
+  "assist": {
+    "actions": { "source": { "organizeImports": "on" } }
+  },
+  "overrides": [
+    {
+      "includes": ["**/*.test.ts", "**/*.test.tsx", "**/test/**/*.ts", "**/test/**/*.tsx"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "useAwait": "off",
+            "noShadow": "off",
+            "noExplicitAny": "warn",
+            "noUnnecessaryConditions": "off"
+          },
+          "correctness": {
+            "noUnresolvedImports": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/mobile/**/*.tsx"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noUnnecessaryConditions": "off",
+            "noShadow": "off"
+          }
+        }
+      }
+    }
+  ]
 }

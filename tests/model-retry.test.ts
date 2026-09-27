@@ -59,7 +59,7 @@ test("a transient provider failure is retried and the run completes", async (t) 
   assert.equal(outcome.error, undefined);
   assert.equal(outcome.finished, true);
   assert.equal(requests.length, 2, "exactly one retry follows the transient failure");
-  assert.equal(requests[1].body, requests[0].body, "the retry replays the same model request");
+  assert.equal(requests[1]!.body, requests[0]!.body, "the retry replays the same model request");
 });
 
 test("a non-retryable provider failure fails fast without a retry", async (t) => {
@@ -128,8 +128,8 @@ test("a committed tool result is not re-executed when the next model call fails"
   assert.equal(outcome.finished, true);
   assert.equal(requests.length, 3, "the retry replays the failed model call only");
   assert.equal(
-    requests[2].body,
-    requests[1].body,
+    requests[2]!.body,
+    requests[1]!.body,
     "the retry resent the failed step, not a restarted run",
   );
   assert.equal(toolRuns, 1, "committed tool work is never re-run by a retry");

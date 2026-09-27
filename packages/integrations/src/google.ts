@@ -183,7 +183,7 @@ function decodeSnippet(value: string): string {
     (original, entity: string) => {
       if (!entity.startsWith("#")) return entities[entity.toLowerCase()] ?? original;
       const code =
-        entity[1].toLowerCase() === "x"
+        entity[1]!.toLowerCase() === "x"
           ? Number.parseInt(entity.slice(2), 16)
           : Number.parseInt(entity.slice(1), 10);
       return code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : original;
@@ -260,7 +260,7 @@ function htmlToPlainText(html: string): string {
     }
     if ("childNodes" in node) {
       for (let index = node.childNodes.length - 1; index >= 0; index--)
-        stack.push(node.childNodes[index]);
+        stack.push(node.childNodes[index]!);
     }
   }
   return text
@@ -411,6 +411,7 @@ async function readJson(response: Response): Promise<unknown> {
   const chunks: Uint8Array[] = [];
   let length = 0;
   try {
+    // biome-ignore lint/suspicious/noUnnecessaryConditions: intentional polling loop with early break
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;

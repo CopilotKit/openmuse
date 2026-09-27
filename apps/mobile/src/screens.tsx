@@ -936,7 +936,7 @@ export function FilesScreen() {
         copyToCacheDirectory: true,
       });
       if (result.canceled) return;
-      const file = result.assets[0];
+      const file = result.assets[0]!;
       let artifact: Artifact;
       if (Platform.OS === "web") {
         const form = new FormData();

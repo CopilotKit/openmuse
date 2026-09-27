@@ -11,8 +11,8 @@ export async function startEgressProxy() {
       const target = await validatePublicUrl(incoming.url ?? "");
       if (target.url.protocol !== "http:") throw new Error("HTTP proxy requires HTTP URL");
       const headers: OutgoingHttpHeaders = { ...incoming.headers, host: target.url.host };
-      delete headers["proxy-authorization"];
-      delete headers["proxy-connection"];
+      Reflect.deleteProperty(headers, "proxy-authorization");
+      Reflect.deleteProperty(headers, "proxy-connection");
       const upstream = request(
         {
           hostname: target.address,
@@ -43,10 +43,10 @@ export async function startEgressProxy() {
       response.end("Destination blocked");
     }
   });
-  server.on("connect", async (request, client, head) => {
+  server.on("connect", async (req, client, head) => {
     client.on("error", () => client.destroy());
     try {
-      const authority = request.url ?? "";
+      const authority = req.url ?? "";
       if (!/^(?:\[[0-9a-f:]+\]|[a-z0-9.-]+):443$/i.test(authority))
         throw new Error("Invalid tunnel");
       const target = await validatePublicUrl(`https://${authority}`);

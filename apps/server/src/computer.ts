@@ -240,7 +240,7 @@ export class ComputerService {
     const result = z.array(inspectionSchema).length(1).safeParse(raw);
     if (!result.success)
       throw new AppError("Computer isolation inspection failed; refusing to attach", 409);
-    const c = result.data[0],
+    const c = result.data[0]!,
       h = c.HostConfig;
     const empty = (list: unknown[] | null) => !list?.length;
     const safe =
@@ -250,7 +250,7 @@ export class ComputerService {
       c.Config.WorkingDir === "/workspace" &&
       Object.entries(identity.labels).every(([key, value]) => c.Config.Labels?.[key] === value) &&
       c.Config.Env.every((value) =>
-        ["PATH", "HOME", "LANG", "NODE_VERSION", "YARN_VERSION"].includes(value.split("=")[0]),
+        ["PATH", "HOME", "LANG", "NODE_VERSION", "YARN_VERSION"].includes(value.split("=")[0]!),
       ) &&
       JSON.stringify(c.Config.Entrypoint) === '["/usr/bin/sleep"]' &&
       JSON.stringify(c.Config.Cmd) === '["infinity"]' &&
@@ -279,10 +279,10 @@ export class ComputerService {
       Object.keys(h.Tmpfs ?? {}).length === 1 &&
       h.Tmpfs?.["/tmp"] === "rw,nosuid,nodev,noexec,size=67108864,mode=1777" &&
       c.Mounts.length === 1 &&
-      c.Mounts[0].Type === "volume" &&
-      c.Mounts[0].Name === identity.volume &&
-      c.Mounts[0].Destination === "/workspace" &&
-      c.Mounts[0].RW &&
+      c.Mounts[0]!.Type === "volume" &&
+      c.Mounts[0]!.Name === identity.volume &&
+      c.Mounts[0]!.Destination === "/workspace" &&
+      c.Mounts[0]!.RW &&
       Object.keys(c.NetworkSettings.Networks).every((network) => network === "none");
     if (!safe)
       throw new AppError(
@@ -307,7 +307,7 @@ export class ComputerService {
       .length(1)
       .safeParse(JSON.parse(await this.checked(["volume", "inspect", identity.volume])));
     if (!parsed.success) throw new AppError("Computer workspace ownership inspection failed", 409);
-    const v = parsed.data[0];
+    const v = parsed.data[0]!;
     if (
       v.Name !== identity.volume ||
       v.Driver !== "local" ||

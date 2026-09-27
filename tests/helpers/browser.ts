@@ -16,7 +16,7 @@ export async function browserFixture(
   handle: (path: string, body: Record<string, unknown>) => { status?: number; data: unknown },
 ) {
   const server = createServer(async (request, response) => {
-    const chunks = [];
+    const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {};
     const result = handle(request.url ?? "", body);

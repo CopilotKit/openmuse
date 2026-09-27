@@ -33,7 +33,7 @@ export class ConversationQueue {
       while (this.state.pending.length && !this.state.paused) {
         const [message, ...pending] = this.state.pending;
         this.update({ pending });
-        await send(message);
+        await send(message!);
       }
     } catch (error) {
       // The failed message is already in the transcript. Never resend it implicitly.

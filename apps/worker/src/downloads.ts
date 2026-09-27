@@ -4,6 +4,7 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/p
 import { join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+// biome-ignore lint/correctness/noUnresolvedImports: playwright types available at runtime via package
 import type { Download } from "playwright";
 
 export const MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024;

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { selectTaskModel } from "../apps/server/src/engine/model.ts";
-import { filterTools } from "../apps/server/src/engine/conversation.ts";
-import type { Config } from "../apps/server/src/config.ts";
-import type { AgentTask } from "../packages/domain/src/agent.ts";
 import type { ToolDefinition } from "@copilotkit/runtime/v2";
 import { z } from "zod";
+import type { Config } from "../apps/server/src/config.ts";
+import { filterTools } from "../apps/server/src/engine/conversation.ts";
+import { selectTaskModel } from "../apps/server/src/engine/model.ts";
+import type { AgentTask } from "../packages/domain/src/agent.ts";
 
 const baseConfig: Config = {
   mode: "live",
@@ -118,11 +118,23 @@ function makeTool(name: string): ToolDefinition {
 }
 
 const allToolNames = [
-  "computer_status", "start_computer", "stop_computer",
-  "run_computer_command", "list_computer_files", "read_computer_file",
-  "write_computer_file", "mkdir_computer", "import_computer_pdf",
-  "export_computer_pdf", "search_mail", "read_mail_thread",
-  "delegate_task", "agent_status", "create_goal", "watch_page", "remember_fact",
+  "computer_status",
+  "start_computer",
+  "stop_computer",
+  "run_computer_command",
+  "list_computer_files",
+  "read_computer_file",
+  "write_computer_file",
+  "mkdir_computer",
+  "import_computer_pdf",
+  "export_computer_pdf",
+  "search_mail",
+  "read_mail_thread",
+  "delegate_task",
+  "agent_status",
+  "create_goal",
+  "watch_page",
+  "remember_fact",
 ];
 
 test("filterTools: undefined allowlist returns all tools", () => {
@@ -139,7 +151,10 @@ test("filterTools: exact names keep only matched tools", () => {
   const tools = allToolNames.map(makeTool);
   const filtered = filterTools(tools, ["delegate_task", "agent_status", "remember_fact"]);
   assert.equal(filtered.length, 3);
-  assert.deepEqual(filtered.map((t) => t.name), ["delegate_task", "agent_status", "remember_fact"]);
+  assert.deepEqual(
+    filtered.map((t) => t.name),
+    ["delegate_task", "agent_status", "remember_fact"],
+  );
 });
 
 test("filterTools: prefix glob keeps all matching tools", () => {
@@ -148,7 +163,10 @@ test("filterTools: prefix glob keeps all matching tools", () => {
   // Only "computer_status" starts with "computer_"; other tools contain
   // "_computer_" but have different prefixes (start_computer, etc.).
   assert.equal(filtered.length, 1);
-  assert.deepEqual(filtered.map((t) => t.name), ["computer_status"]);
+  assert.deepEqual(
+    filtered.map((t) => t.name),
+    ["computer_status"],
+  );
 });
 
 test("filterTools: wildcard keeps everything", () => {

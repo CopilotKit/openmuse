@@ -109,6 +109,7 @@ export const eventDraftSchema = z
       });
     }
     try {
+      // biome-ignore lint/correctness/noUnusedInstantiation: validate timezone by construction
       new Intl.DateTimeFormat("en", { timeZone: value.timeZone });
     } catch {
       ctx.addIssue({ code: "custom", message: "Invalid time zone", path: ["timeZone"] });

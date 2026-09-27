@@ -6,7 +6,7 @@ import {
   CopilotRuntime,
   createCopilotHonoHandler,
 } from "@copilotkit/runtime/v2";
-import type { Auth, DeviceInfo } from "./auth.ts";
+import type { Auth } from "./auth.ts";
 import type { Config } from "./config.ts";
 import { ConversationAgent } from "./engine/conversation.ts";
 import type { AgentService } from "./engine/service.ts";
@@ -62,12 +62,10 @@ export function makeRuntime(
       };
     const device = await auth.device(request.headers.get("authorization") ?? undefined);
     return {
-      default: new ConversationAgent(
-        config,
-        service,
-        device.owner,
-        { deviceId: device.deviceId, deviceName: device.deviceName },
-      ),
+      default: new ConversationAgent(config, service, device.owner, {
+        deviceId: device.deviceId,
+        deviceName: device.deviceName,
+      }),
     };
   };
   const runtime = new CopilotRuntime({

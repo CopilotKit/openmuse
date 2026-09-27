@@ -79,14 +79,14 @@ test("chat browse_web emits real SDK tool events and returns observed source con
       EventType.TOOL_CALL_RESULT,
     ],
   );
-  const start = toolEvents[0];
+  const start = toolEvents[0]!;
   assert.equal(start.type, EventType.TOOL_CALL_START);
   if (start.type !== EventType.TOOL_CALL_START) throw new Error("Missing tool start");
   assert.equal(start.toolCallName, "browse_web");
-  const args = toolEvents[1];
+  const args = toolEvents[1]!;
   if (args.type !== EventType.TOOL_CALL_ARGS) throw new Error("Missing tool arguments");
   assert.deepEqual(JSON.parse(args.delta), { url: requestedUrl });
-  const result = toolEvents[3];
+  const result = toolEvents[3]!;
   if (result.type !== EventType.TOOL_CALL_RESULT) throw new Error("Missing tool result");
   assert.equal(result.toolCallId, start.toolCallId);
   const page = JSON.parse(result.content);
@@ -96,10 +96,10 @@ test("chat browse_web emits real SDK tool events and returns observed source con
   assert.equal(events.at(-1)?.type, EventType.RUN_FINISHED);
   assert.equal((await fixture.db.list("local-user", "tasks")).length, 0);
   assert.equal(requests.length, 2);
-  assert.ok(requests[0].body.includes('"name":"browse_web"'));
-  assert.match(requests[0].body, /For public-page summaries.*browse_web/);
-  assert.match(requests[0].body, /untrusted/);
-  assert.ok(requests[1].body.includes(observed.text));
+  assert.ok(requests[0]!.body.includes('"name":"browse_web"'));
+  assert.match(requests[0]!.body, /For public-page summaries.*browse_web/);
+  assert.match(requests[0]!.body, /untrusted/);
+  assert.ok(requests[1]!.body.includes(observed.text));
 
   const { token } = await fixture.auth.session();
   const response = await fixture.app.request(`/api/browsers/${page.sessionId}`, {
@@ -124,7 +124,7 @@ test("chat browse_web emits an honest completed error result when navigation fai
   const result = events.find((event) => event.type === EventType.TOOL_CALL_RESULT);
   assert.ok(result && result.type === EventType.TOOL_CALL_RESULT);
   assert.deepEqual(JSON.parse(result.content), { error: "Public page could not be opened" });
-  assert.ok(requests[1].body.includes("Public page could not be opened"));
+  assert.ok(requests[1]!.body.includes("Public page could not be opened"));
   assert.deepEqual(fixture.browserCalls, ["/sessions"]);
   assert.equal((await fixture.db.list("local-user", "tasks")).length, 0);
 });
@@ -164,7 +164,7 @@ test("chat searches and reads actual owner mail without creating a task or sendi
   const fixture = await chatFixture(t);
   await fixture.workspace.ensureSample("local-user", fixture.actions);
   await fixture.workspace.ensureSample("another-owner", fixture.actions);
-  const foreign = (await fixture.workspace.thread("another-owner", "trip-thread"))[0];
+  const foreign = (await fixture.workspace.thread("another-owner", "trip-thread"))[0]!;
   const actionsBefore = await fixture.db.list("local-user", "actions");
   await fixture.db.put("another-owner", "mail", {
     ...foreign,
@@ -179,14 +179,14 @@ test("chat searches and reads actual owner mail without creating a task or sendi
   );
   const results = events.filter((event) => event.type === EventType.TOOL_CALL_RESULT);
   assert.equal(results.length, 2);
-  const search = JSON.parse(results[0].content);
-  const read = JSON.parse(results[1].content);
+  const search = JSON.parse(results[0]!.content);
+  const read = JSON.parse(results[1]!.content);
   assert.equal(search.matches.length, 1);
-  assert.equal(search.matches[0].threadId, "trip-thread");
-  assert.equal("body" in search.matches[0], false);
-  assert.match(read.messages[0].body, /8:15 AM/);
+  assert.equal(search.matches[0]!.threadId, "trip-thread");
+  assert.equal("body" in search.matches[0]!, false);
+  assert.match(read.messages[0]!.body, /8:15 AM/);
   assert.equal(read.truncated, false);
-  assert.ok(requests[2].body.includes("8:15 AM"));
+  assert.ok(requests[2]!.body.includes("8:15 AM"));
   assert.ok(!JSON.stringify(results).includes("PRIVATE FOREIGN"));
   assert.equal((await fixture.db.list("local-user", "tasks")).length, 0);
   assert.deepEqual(await fixture.db.list("local-user", "actions"), actionsBefore);

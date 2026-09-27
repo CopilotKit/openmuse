@@ -146,7 +146,7 @@ test("computer status uses a Bot ID and rejects unknown lifecycle states or mism
     state: "unreachable",
     reason: "Computer stopped responding.",
   });
-  assert.equal(calls[0].path, "/api/computers/bot%2Fa/status");
+  assert.equal(calls[0]!.path, "/api/computers/bot%2Fa/status");
   for (const response of [
     { botId: "bot-1", state: "running" },
     { botId: "other", state: "ready" },
@@ -166,8 +166,8 @@ test("snapshot is a read that retains server-owned references", async () => {
   };
   const { adapter, calls } = fixture(() => Response.json(snapshot));
   assert.deepEqual(await adapter.snapshot("bot-1"), snapshot);
-  assert.equal(calls[0].path, "/api/computers/bot-1/snapshot");
-  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0]!.path, "/api/computers/bot-1/snapshot");
+  assert.equal(calls[0]!.init.method, "POST");
 });
 
 test("navigation uses the policy gateway, preserves cancellation and never creates a direct computer URL", async () => {
@@ -181,9 +181,9 @@ test("navigation uses the policy gateway, preserves cancellation and never creat
     ),
     navigation,
   );
-  assert.equal(calls[0].path, "/api/computers/bot-1/navigate");
-  assert.equal(calls[0].init.signal, controller.signal);
-  assert.deepEqual(JSON.parse(String(calls[0].init.body)), {
+  assert.equal(calls[0]!.path, "/api/computers/bot-1/navigate");
+  assert.equal(calls[0]!.init.signal, controller.signal);
+  assert.deepEqual(JSON.parse(String(calls[0]!.init.body)), {
     url: "https://example.com/",
     toolCallId: "call-1",
   });
@@ -209,7 +209,7 @@ test("human control reads and transitions use the exact audited gateway routes",
       ["/api/computers/bot-1/control/release", "POST"],
     ],
   );
-  assert.deepEqual(JSON.parse(String(calls[1].init.body)), { reason: "Complete sign in" });
+  assert.deepEqual(JSON.parse(String(calls[1]!.init.body)), { reason: "Complete sign in" });
 });
 
 test("policy refusals preserve status and rule and are never retried", async () => {
