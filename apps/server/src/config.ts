@@ -36,6 +36,12 @@ export interface Config {
   accessKey?: string;
   encryptionKey?: string;
   model?: string;
+  /** Model used for interactive chat (ConversationAgent). Falls back to `model`. */
+  chatModel?: string;
+  /** Model used for complex durable tasks (task worker). Falls back to `model`, then `chatModel`. */
+  taskModel?: string;
+  /** Model used for simple task kinds (monitor, finance). Falls back to `chatModel`, then `model`. */
+  simpleTaskModel?: string;
   agentBackend: "sample" | "model" | "agui";
   agentUrl?: string;
   agentToken?: string;
@@ -102,6 +108,9 @@ export function readConfig(): Config {
     accessKey: process.env.OPENMUSE_ACCESS_KEY,
     encryptionKey: process.env.TOKEN_ENCRYPTION_KEY,
     model: process.env.MODEL,
+    chatModel: process.env.CHAT_MODEL,
+    taskModel: process.env.TASK_MODEL,
+    simpleTaskModel: process.env.SIMPLE_TASK_MODEL,
     agentBackend: backend,
     agentUrl: process.env.AGENT_URL,
     agentToken: process.env.AGENT_TOKEN,

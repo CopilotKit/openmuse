@@ -12,12 +12,13 @@ import { ConversationAgent } from "./engine/conversation.ts";
 import type { AgentService } from "./engine/service.ts";
 
 export function agentConfigured(config: Config) {
+  const hasModel = Boolean(config.model ?? config.chatModel ?? config.taskModel);
   return (
     config.agentBackend === "sample" ||
     (config.agentBackend === "agui"
       ? Boolean(config.agentUrl)
       : Boolean(
-          config.model &&
+          hasModel &&
             (process.env.OPENAI_API_KEY ||
               process.env.ANTHROPIC_API_KEY ||
               process.env.GOOGLE_API_KEY),
