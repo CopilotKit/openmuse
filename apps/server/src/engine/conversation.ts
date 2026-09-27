@@ -216,7 +216,7 @@ export class ConversationAgent extends AbstractAgent {
     ];
     const agent = tanstackAgent({
       model: this.config.chatModel ?? this.config.model ?? "openai/unconfigured",
-      maxSteps: 6,
+      maxSteps: this.config.chatMaxSteps ?? 6,
       stepLimitNote:
         "I reached my step limit for this reply before finishing. Say “continue” and I’ll pick up where I left off.",
       tools,

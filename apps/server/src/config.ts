@@ -42,6 +42,12 @@ export interface Config {
   taskModel?: string;
   /** Model used for simple task kinds (monitor, finance). Falls back to `chatModel`, then `model`. */
   simpleTaskModel?: string;
+  /** Max tool-call iterations for interactive chat. Default: 6. */
+  chatMaxSteps?: number;
+  /** Max tool-call iterations for complex tasks. Default: 16. */
+  taskMaxSteps?: number;
+  /** Max tool-call iterations for simple tasks (monitor, finance). Default: 6. */
+  simpleTaskMaxSteps?: number;
   agentBackend: "sample" | "model" | "agui";
   agentUrl?: string;
   agentToken?: string;
@@ -111,6 +117,9 @@ export function readConfig(): Config {
     chatModel: process.env.CHAT_MODEL,
     taskModel: process.env.TASK_MODEL,
     simpleTaskModel: process.env.SIMPLE_TASK_MODEL,
+    chatMaxSteps: process.env.CHAT_MAX_STEPS ? Number(process.env.CHAT_MAX_STEPS) : undefined,
+    taskMaxSteps: process.env.TASK_MAX_STEPS ? Number(process.env.TASK_MAX_STEPS) : undefined,
+    simpleTaskMaxSteps: process.env.SIMPLE_TASK_MAX_STEPS ? Number(process.env.SIMPLE_TASK_MAX_STEPS) : undefined,
     agentBackend: backend,
     agentUrl: process.env.AGENT_URL,
     agentToken: process.env.AGENT_TOKEN,
