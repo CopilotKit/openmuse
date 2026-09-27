@@ -25,6 +25,27 @@ export function agentConfigured(config: Config) {
         ))
   );
 }
+/**
+ * Resolve the effective model configuration with fallbacks, for the health
+ * endpoint and client discovery. Returns undefined when a route has no model
+ * configured (sample mode, or a slot not set).
+ */
+export function modelInfo(config: Config) {
+  const chatModel = config.chatModel ?? config.model ?? undefined;
+  const taskModel = config.taskModel ?? config.model ?? config.chatModel ?? undefined;
+  const simpleTaskModel = config.simpleTaskModel ?? config.chatModel ?? config.model ?? undefined;
+  return {
+    chatModel,
+    taskModel,
+    simpleTaskModel,
+    maxSteps: {
+      chat: config.chatMaxSteps ?? 6,
+      task: config.taskMaxSteps ?? 16,
+      simpleTask: config.simpleTaskMaxSteps ?? 6,
+    },
+    simpleTaskKinds: ["monitor", "finance"] as const,
+  };
+}
 export function makeRuntime(
   config: Config,
   service: AgentService,

@@ -7,7 +7,7 @@ import { cors } from "hono/cors";
 import { z } from "zod";
 import { emailDraftSchema, proposalSchema } from "../../../packages/domain/src/index.ts";
 import { ActionService } from "./actions.ts";
-import { agentConfigured, makeRuntime } from "./agent.ts";
+import { agentConfigured, makeRuntime, modelInfo } from "./agent.ts";
 import { createAuth } from "./auth.ts";
 import { BrowserService } from "./browser.ts";
 import { ComputerService, type DockerRunner } from "./computer.ts";
@@ -94,8 +94,10 @@ export async function createApp(
       mode: config.mode,
       agentConfigured: agentConfigured(config),
       browserConfigured: Boolean(config.workerUrl && config.workerToken),
+      models: modelInfo(config),
     }),
   );
+  app.get("/api/agent/models", (c) => c.json(modelInfo(config)));
   let loginWindow = 0,
     loginAttempts = 0;
   app.post("/api/session", async (c) => {
