@@ -18,7 +18,7 @@ async function serviceFixture(t: TestContext) {
   return { db, search: new SearchService(db) };
 }
 
-test("search preserves citations, deduplicates payloads and sends project identity without auth", async (t) => {
+test("search preserves citations, reuses session IDs and sends project identity without auth", async (t) => {
   const { requests } = await searchFixture(t);
   const { db, search } = await serviceFixture(t);
   const result = await search.search("owner", "chat:one", input);
@@ -39,7 +39,7 @@ test("search preserves citations, deduplicates payloads and sends project identi
   assert.match(args[0].session_id, /^[a-f0-9-]{36}$/);
   assert.equal(args[0].session_id, args[1].session_id);
   assert.notEqual(args[0].session_id, args[2].session_id);
-  assert.ok(requests.some(({ rpc }) => rpc.method === "tools/list"));
+  assert.ok(!requests.some(({ rpc }) => rpc.method === "tools/list"));
   for (const { headers } of requests) {
     assert.equal(headers["user-agent"], "openmuse/0.1.0");
     assert.equal(headers.authorization, undefined);
@@ -132,24 +132,6 @@ test("search refuses redirects before sending queries to another destination", a
   const { search } = await serviceFixture(t);
   await assert.rejects(search.search("owner", "chat:one", input), /Parallel search failed/);
   assert.ok(!fixture.paths.includes("/redirect-target"));
-});
-
-test("search follows tool discovery pagination before executing", async (t) => {
-  const { requests } = await searchFixture(t, (rpc) =>
-    rpc.method === "tools/list"
-      ? {
-          result: rpc.params?.cursor
-            ? { tools: [{ name: "web_search", inputSchema: { type: "object" } }] }
-            : { tools: [], nextCursor: "second-page" },
-        }
-      : {},
-  );
-  const { search } = await serviceFixture(t);
-  assert.equal((await search.search("owner", "chat:one", input)).results[0].url, searchSource.url);
-  assert.deepEqual(
-    requests.filter(({ rpc }) => rpc.method === "tools/list").map(({ rpc }) => rpc.params?.cursor),
-    [undefined, "second-page"],
-  );
 });
 
 test("search aborts in-flight execution and distinguishes its deadline", async (t) => {

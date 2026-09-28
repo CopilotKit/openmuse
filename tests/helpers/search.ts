@@ -44,12 +44,10 @@ export async function searchFixture(t: TestContext, handle?: (rpc: Rpc) => Reply
             capabilities: { tools: {} },
             serverInfo: { name: "fixture", version: "1.0.0" },
           }
-        : rpc.method === "tools/list"
-          ? { tools: [{ name: "web_search", inputSchema: { type: "object" } }] }
-          : {
-              content: [{ type: "text", text: JSON.stringify({ results: [searchSource] }) }],
-              structuredContent: { results: [searchSource] },
-            });
+        : {
+            content: [{ type: "text", text: JSON.stringify({ results: [searchSource] }) }],
+            structuredContent: { results: [searchSource] },
+          });
     response.writeHead(supplied?.status ?? 200, {
       "content-type": "application/json",
       ...supplied?.headers,

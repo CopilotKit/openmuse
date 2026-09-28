@@ -98,16 +98,6 @@ export class SearchService {
     const options = { signal: requestSignal, timeout: timeoutMs };
     try {
       await client.connect(transport, options);
-      let cursor: string | undefined;
-      let found = false;
-      do {
-        const page = await client.listTools(cursor ? { cursor } : undefined, options);
-        found ||= page.tools.some((tool) => tool.name === "web_search");
-        cursor = page.nextCursor;
-      } while (!found && cursor);
-      if (!found) throw new Error("Parallel did not advertise the web_search tool");
-      // Validate the envelope here and sources individually below. callTool would
-      // enforce the advertised output schema and discard valid sources with one bad entry.
       const result = await client.request(
         {
           method: "tools/call",
