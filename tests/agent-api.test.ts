@@ -389,3 +389,44 @@ test("model routing settings: models endpoint reports server config, device over
   // A non-device session cannot read another device's overrides.
   assert.equal((await request("/device-models")).status, 400);
 });
+test("model info endpoint includes chatToolAllowlist when configured", async () => {
+  const withAllowlist = await createApp(db, {
+    ...config,
+    chatToolAllowlist: ["delegate_task", "agent_status", "remember_fact"],
+  });
+  try {
+    const response = await withAllowlist.app.request("/api/agent/models", {
+      headers: headers(),
+    });
+    assert.equal(response.status, 200);
+    const info = (await response.json()) as ModelRoutingInfo;
+    assert.deepEqual(info.chatToolAllowlist, ["delegate_task", "agent_status", "remember_fact"]);
+  } finally {
+    await withAllowlist.agent.stop();
+  }
+});
+test("device session tasks carry creatorDevice for routing", async () => {
+  const session = await server.app.request("/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: "tablet-002", deviceName: "iPad Pro" }),
+  });
+  assert.equal(session.status, 200);
+  const { token: tabletToken } = await session.json();
+  const tabletHeaders = {
+    authorization: `Bearer ${tabletToken}`,
+    "Content-Type": "application/json",
+  };
+  const task = await server.app.request("/api/agent/tasks", {
+    method: "POST",
+    headers: tabletHeaders,
+    body: JSON.stringify({ prompt: "Book a flight", kind: "agent" }),
+  });
+  assert.equal(task.status, 201);
+  const saved = JSON.parse(await task.clone().text()) as AgentTask;
+  const creatorDevice = saved.state.creatorDevice as
+    | { deviceId?: string; deviceName?: string }
+    | undefined;
+  assert.equal(creatorDevice?.deviceId, "tablet-002");
+  assert.equal(creatorDevice?.deviceName, "iPad Pro");
+});

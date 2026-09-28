@@ -1979,6 +1979,14 @@ export function ModelRoutingSection() {
       ) : (
         <ActivityIndicator color={colors.blueDark} />
       )}
+      <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+        {overrides && (overrides.chatModel || overrides.taskModel || overrides.simpleTaskModel) ? (
+          <Chip tint={colors.green}>Overrides active</Chip>
+        ) : (
+          <Chip tint={colors.line}>Using server defaults</Chip>
+        )}
+        <Text style={s.small}>Key: this device</Text>
+      </View>
       <ErrorNotice error={routingError || overrideError} />
       <Text style={[s.label, { marginTop: 12 }]}>Device overrides</Text>
       <Field

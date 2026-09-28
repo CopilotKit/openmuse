@@ -195,4 +195,8 @@ export interface ExecutionBackend {
   health(): Promise<{ available: boolean; detail: string }>;
 }
 
+export type {
+  DeviceModelRouting,
+  ModelRoutingInfo,
+} from "./agent.ts";
 export type { ComputerCommand, ComputerDirectory, ComputerSnapshot } from "./computer.ts";

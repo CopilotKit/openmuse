@@ -112,6 +112,48 @@ test("selectTaskModel: model-only config uses same model for all kinds", () => {
     assert.equal(result.model, "openai/single", `kind=${kind}`);
   }
 });
+test("selectTaskModel: device overrides take priority over server config", () => {
+  const config: Config = {
+    ...baseConfig,
+    model: "openai/base",
+    taskModel: "openai/qwen3-32b",
+    simpleTaskModel: "openai/qwen3-4b",
+  };
+  const overrides = {
+    chatModel: "openai/mobile-chat-8b",
+    taskModel: "openai/mobile-task-14b",
+    simpleTaskModel: "openai/mobile-simple-3b",
+  };
+  // Device override wins for simple tasks.
+  const simple = selectTaskModel(config, makeTask("finance"), overrides);
+  assert.equal(simple.model, "openai/mobile-simple-3b");
+  assert.equal(simple.maxSteps, 6);
+  // Device override wins for complex tasks.
+  const complex = selectTaskModel(config, makeTask("agent"), overrides);
+  assert.equal(complex.model, "openai/mobile-task-14b");
+  assert.equal(complex.maxSteps, 16);
+});
+test("selectTaskModel: device overrides fill gaps via server fallback chain", () => {
+  // Only override the chat model — simple tasks should still use server config.
+  const config: Config = {
+    ...baseConfig,
+    chatModel: "openai/qwen3-8b",
+    taskModel: "openai/qwen3-32b",
+    simpleTaskModel: "openai/qwen3-4b",
+  };
+  const overrides = { chatModel: "openai/mobile-8b" };
+  const complex = selectTaskModel(config, makeTask("document"), overrides);
+  assert.equal(complex.model, "openai/qwen3-32b"); // falls through to server config
+  const simple = selectTaskModel(config, makeTask("monitor"), overrides);
+  assert.equal(simple.model, "openai/qwen3-4b"); // falls through to server config
+});
+test("selectTaskModel: undefined overrides produce same result as no argument", () => {
+  const config: Config = { ...baseConfig, model: "openai/test" };
+  const without = selectTaskModel(config, makeTask("agent"));
+  const withUndef = selectTaskModel(config, makeTask("agent"), undefined);
+  assert.equal(withUndef.model, without.model);
+  assert.equal(withUndef.maxSteps, without.maxSteps);
+});
 
 function makeTool(name: string): ToolDefinition {
   return { name, description: "", parameters: z.object({}), execute: async () => null };
