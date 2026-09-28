@@ -10,11 +10,12 @@ import { chat, maxIterations, type SchemaInput, toolDefinition } from "@tanstack
 import { type AnthropicChatModel, anthropicText } from "@tanstack/ai-anthropic";
 import { type GeminiTextModel, geminiText } from "@tanstack/ai-gemini";
 import { type OpenAIChatModel, openaiText } from "@tanstack/ai-openai";
-import { map, type Observable } from "rxjs";
+import { map, mergeMap, type Observable } from "rxjs";
 import { z } from "zod";
+import { MODEL_MAX_RETRIES } from "../config.ts";
 
 // Same "provider/model" strings, env vars and base URL formats as the AI SDK resolver in
-// @copilotkit/runtime. Retries are off, like the old `maxRetries: 0`.
+// @copilotkit/runtime. Each provider SDK retries transient failures up to MODEL_MAX_RETRIES times.
 function adapter(spec: string) {
   const [, provider = "", model = ""] = spec.trim().match(/^([^/:]*)[/:](.*)$/) ?? [];
   if (!provider || !model.trim())
@@ -26,13 +27,13 @@ function adapter(spec: string) {
     case "openai":
       return openaiText(id as OpenAIChatModel, {
         baseURL: process.env.OPENAI_BASE_URL,
-        maxRetries: 0,
+        maxRetries: MODEL_MAX_RETRIES,
       });
     case "anthropic":
       // The AI SDK base URL ends in /v1; the Anthropic SDK adds /v1 itself.
       return anthropicText(id as AnthropicChatModel, {
         baseURL: process.env.ANTHROPIC_BASE_URL?.replace(/\/v1\/?$/, ""),
-        maxRetries: 0,
+        maxRetries: MODEL_MAX_RETRIES,
       });
     case "google":
     case "gemini":
@@ -41,14 +42,27 @@ function adapter(spec: string) {
       return geminiText(id as GeminiTextModel, {
         httpOptions: {
           baseUrl: process.env.GOOGLE_GENERATIVE_AI_BASE_URL?.replace(/\/v1beta\/?$/, ""),
-          retryOptions: { attempts: 1 },
+          // @google/genai counts the first call in `attempts`.
+          retryOptions: { attempts: MODEL_MAX_RETRIES + 1 },
         },
       });
     default:
-      throw new Error(
-        `Unknown provider "${provider}" in "${spec}". Supported: openai, anthropic, google (gemini).`,
-      );
+      throw unknownProvider(provider, spec);
   }
+}
+
+/** With OPENAI_BASE_URL set, a gateway model ID most likely needs the openai/ prefix. */
+export function unknownProvider(
+  provider: string,
+  spec: string,
+  baseUrl = process.env.OPENAI_BASE_URL,
+) {
+  const hint = baseUrl?.trim()
+    ? ` For a model on your OPENAI_BASE_URL gateway, use "openai/${spec.trim()}".`
+    : "";
+  return new Error(
+    `Unknown provider "${provider}" in "${spec}". Supported: openai, anthropic, google (gemini).${hint}`,
+  );
 }
 
 // The classic BuiltInAgent always offers these two state tools. The converter turns their
@@ -89,6 +103,8 @@ export function tanstackAgent(options: {
   maxSteps: number;
   tools: ToolDefinition[];
   prompt: string;
+  /** Said when the step limit, not the model, ends a run; otherwise the reply just stops. */
+  stepLimitNote?: string;
 }) {
   const agent = new BuiltInAgent({
     type: "tanstack",
@@ -126,8 +142,43 @@ export function tanstackAgent(options: {
     },
   });
   const run = agent.run.bind(agent);
-  agent.run = (input: RunAgentInput) => splitTextAtToolCalls(run(input));
+  agent.run = (input: RunAgentInput) => {
+    const events = splitTextAtToolCalls(run(input));
+    return options.stepLimitNote
+      ? reportStepLimit(events, options.maxSteps, options.stepLimitNote)
+      : events;
+  };
   return agent;
+}
+
+/**
+ * maxIterations ends the loop after the last allowed tool step without a final model reply.
+ * When a run ends that way, add a short assistant message so it does not stop silently.
+ */
+export function reportStepLimit(events: Observable<BaseEvent>, maxSteps: number, note: string) {
+  let steps = 0;
+  let phase: "text" | "calling" | "results" = "text";
+  return events.pipe(
+    mergeMap((event): BaseEvent[] => {
+      if (event.type === EventType.TOOL_CALL_START) {
+        // Parallel calls of one model step arrive together; results end the step.
+        if (phase !== "calling") steps++;
+        phase = "calling";
+      } else if (event.type === EventType.TOOL_CALL_RESULT) phase = "results";
+      else if (event.type === EventType.TEXT_MESSAGE_CHUNK) phase = "text";
+      else if (event.type === EventType.RUN_FINISHED && phase === "results" && steps >= maxSteps)
+        return [
+          {
+            type: EventType.TEXT_MESSAGE_CHUNK,
+            messageId: randomUUID(),
+            role: "assistant",
+            delta: note,
+          } as BaseEvent,
+          event,
+        ];
+      return [event];
+    }),
+  );
 }
 
 // ponytail: the TanStack converter in @copilotkit/runtime 1.70.1 uses one message ID for the
