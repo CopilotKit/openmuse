@@ -1031,6 +1031,11 @@ export class AgentService {
           : this.matchesPrice(text, Number(monitor.value));
     const previouslyMatched = Boolean(task.state.matched);
     const shouldNotify = matched && (monitor.condition === "change" || !previouslyMatched);
+    // A condition becoming true again is a new event, even with identical page text.
+    // Commit its sequence with the outcome so publication retries still deduplicate.
+    const alertSequence =
+      Number(task.state.alertSequence ?? 0) +
+      (shouldNotify && monitor.condition !== "change" ? 1 : 0);
     const nextCheckAt = new Date(Date.now() + monitor.intervalMinutes * 60000).toISOString();
     await ctx.guard();
     // Worker lease is checked before each publication; monitor control also invalidates that lease.
@@ -1070,12 +1075,16 @@ export class AgentService {
         lastHash: currentHash,
         resumingMonitor: false,
         matched,
+        alertSequence,
         failures: 0,
         notice: shouldNotify
           ? {
               title: monitor.title,
               body: `Condition met at ${observation.url}: ${text.slice(0, 240)}`,
-              key: `monitor:${monitor.id}:${currentHash}`,
+              key:
+                monitor.condition === "change"
+                  ? `monitor:${monitor.id}:${currentHash}`
+                  : `monitor:${monitor.id}:${alertSequence}:${currentHash}`,
             }
           : null,
       },
