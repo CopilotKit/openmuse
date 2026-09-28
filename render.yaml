@@ -46,6 +46,35 @@ services:
         sync: false
       - key: CPK_INTELLIGENCE_API_KEY
         sync: false
+      # Delete these two entries, and the openmuse-browser service below, to
+      # deploy without browsing. The API boots either way.
+      - key: BROWSER_WORKER_URL
+        value: http://openmuse-browser:8790
+      - key: WORKER_TOKEN
+        fromService:
+          name: openmuse-browser
+          type: pserv
+          envVarKey: WORKER_TOKEN
+
+  # Private Chromium for page reads, screenshots, and Take control.
+  # Remove this service to skip it. The image listens on 8790, not $PORT.
+  - type: pserv
+    name: openmuse-browser
+    runtime: docker
+    plan: standard
+    dockerfilePath: ./apps/worker/Dockerfile
+    dockerContext: ./apps/worker
+    disk:
+      name: openmuse-browser-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: WORKER_TOKEN
+        generateValue: true
+      - key: WORKER_HOST
+        value: 0.0.0.0
+      - key: WORKER_DATA_DIR
+        value: /data
 
   - type: web
     name: openmuse-web
