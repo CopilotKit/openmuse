@@ -103,6 +103,8 @@ export function tanstackAgent(options: {
   maxSteps: number;
   tools: ToolDefinition[];
   prompt: string;
+  /** Checked between model turns, after the current turn's tools have settled. */
+  shouldContinue?: () => boolean;
   /** Said when the step limit, not the model, ends a run; otherwise the reply just stops. */
   stepLimitNote?: string;
 }) {
@@ -136,7 +138,8 @@ export function tanstackAgent(options: {
             }).server((args) => (tool.execute as (args: unknown) => Promise<unknown>)(args)),
           ),
         ],
-        agentLoopStrategy: maxIterations(options.maxSteps),
+        agentLoopStrategy: (state) =>
+          maxIterations(options.maxSteps)(state) && (options.shouldContinue?.() ?? true),
         abortController,
       });
     },
