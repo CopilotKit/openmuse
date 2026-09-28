@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { EventType, type RunAgentInput } from "@ag-ui/core";
 import { defineTool } from "@copilotkit/runtime/v2";
 import { z } from "zod";
-import type { AgentTask } from "../../../../packages/domain/src/agent.ts";
+import type { AgentTask, DeviceModelRouting } from "../../../../packages/domain/src/agent.ts";
 import { emailDraftSchema, eventDraftSchema } from "../../../../packages/domain/src/index.ts";
 import { computerInstructions, computerTools } from "../computer-tools.ts";
 import type { Config } from "../config.ts";
@@ -30,15 +30,26 @@ const SIMPLE_TASK_KINDS: AgentTask["kind"][] = ["monitor", "finance"];
 export function selectTaskModel(
   config: Config,
   task: AgentTask,
+  deviceOverrides?: DeviceModelRouting,
 ): { model: string; maxSteps: number } {
   const isSimple = SIMPLE_TASK_KINDS.includes(task.kind);
   if (isSimple)
     return {
-      model: config.simpleTaskModel ?? config.chatModel ?? config.model ?? "openai/unconfigured",
+      model:
+        deviceOverrides?.simpleTaskModel ??
+        config.simpleTaskModel ??
+        config.chatModel ??
+        config.model ??
+        "openai/unconfigured",
       maxSteps: config.simpleTaskMaxSteps ?? 6,
     };
   return {
-    model: config.taskModel ?? config.model ?? config.chatModel ?? "openai/unconfigured",
+    model:
+      deviceOverrides?.taskModel ??
+      config.taskModel ??
+      config.model ??
+      config.chatModel ??
+      "openai/unconfigured",
     maxSteps: config.taskMaxSteps ?? 16,
   };
 }
@@ -50,7 +61,15 @@ export async function executeModelTask(
   ctx: TaskContext,
 ): Promise<Partial<AgentTask>> {
   const config = service.config;
-  const { model, maxSteps } = selectTaskModel(config, initial);
+  const deviceId = (initial.state.creatorDevice as { deviceId?: string } | undefined)?.deviceId;
+  const deviceOverrides = deviceId
+    ? ((await service.db.get<DeviceModelRouting>(
+        owner,
+        "agent-settings",
+        `device-models:${deviceId}`,
+      )) ?? undefined)
+    : undefined;
+  const { model, maxSteps } = selectTaskModel(config, initial, deviceOverrides);
   if (model === "openai/unconfigured")
     return {
       status: "waiting_input",
