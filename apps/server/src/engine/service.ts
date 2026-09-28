@@ -237,6 +237,20 @@ export class AgentService {
     if (action === "resume" && task.status !== "paused")
       throw new AppError("Only paused tasks can be resumed", 409);
     if (action === "pause" && (terminal.has(task.status) || task.status === "paused")) return task;
+    if (task.kind === "monitor" && action === "resume") {
+      // Both UI entry points must activate the monitor before a worker can claim its task.
+      await this.controlMonitor(owner, String(task.input.monitorId), "resume");
+      const resumed = await this.getTask(owner, id);
+      await this.db.put(owner, "run-events", {
+        id: randomUUID(),
+        taskId: id,
+        kind: "status",
+        date: date(),
+        title: `Task ${resumed.status}`,
+        detail: "Changed by you",
+      });
+      return resumed;
+    }
     const status =
       action === "cancel"
         ? "cancelled"
@@ -270,9 +284,6 @@ export class AgentService {
             : action === "pause"
               ? "Paused. Resume when you're ready."
               : "",
-        ...(task.kind === "monitor" && action === "resume"
-          ? { state: { ...task.state, failures: 0, notice: null, resumingMonitor: false } }
-          : {}),
       },
     );
     if (!updated) throw new AppError("Task changed; refresh and try again", 409);
