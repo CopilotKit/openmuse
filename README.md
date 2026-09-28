@@ -12,6 +12,8 @@ Built with CopilotKit React Native for iOS, Android, and web.
 [![CI](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/CopilotKit/OpenMuse)
+
 Clone this template and customize it however you want.
 
 **[Building on OpenMuse? Meet with the CopilotKit team →](https://www.copilotkit.ai/openmuse)**
@@ -90,6 +92,33 @@ Open [localhost:8081](http://localhost:8081). The API runs at [localhost:8787/ap
 4. Start the [browser worker](#browser-worker) and configure a model, then ask **“Check out Hacker News for cool stuff”** or **“Summarize copilotkit.ai”**. Follow the browser inline and use **Take control** to open its session. For a model-free version of this flow, follow the [AI Mock demo setup](docs/DEMO.md#run-the-agent-browser-demo).
 
 For iOS or Android, use `pnpm --dir apps/mobile ios` or `pnpm --dir apps/mobile android`. Xcode or Android tooling is required. The PDF reader needs an Expo development build; use [native setup](apps/mobile/README.md).
+
+## Deploy on Render
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/CopilotKit/OpenMuse)
+
+[render.yaml](render.yaml) provisions two services. The API serves JSON at `/` and does not host the web bundle, so the UI is a separate static site.
+
+| Service | Type | What it runs |
+|---|---|---|
+| `openmuse-api` | Node web service, Standard plan, 1 GB disk at `/var/data` | The Hono API and the in-process task worker. `DATA_DIR` is `/var/data/openmuse`. The disk holds the PGlite database, PDFs, and the signing key. |
+| `openmuse-web` | Static site | The Expo web export. `EXPO_PUBLIC_API_URL` is inlined at build time, so the site rebuilds when the API URL changes. |
+
+The API is Standard because a 512 MB instance runs out of memory before the process binds a port: PGlite loads an embedded Postgres build. The disk is required. Without it, a redeploy wipes the database and files. Chat history is stored by CopilotKit Intelligence, not on this disk, so a thread can still be there after sign-out even when the disk was missing.
+
+Render requires binding `0.0.0.0`. OpenMuse rejects a non-loopback host in sample mode, so the Blueprint sets `WORKSPACE_MODE=live`. Live mode needs `OPENMUSE_ACCESS_KEY` and `TOKEN_ENCRYPTION_KEY`. Render generates both. You supply two secrets when the Blueprint asks:
+
+- `CPK_INTELLIGENCE_API_KEY`: a CopilotKit Intelligence project key. Create one with `npx copilotkit@latest login` and `npx copilotkit@latest project select`. Required in every mode, and kept on the server.
+- `OPENAI_API_KEY`: the provider key for the default `openai/gpt-4o-mini`. Change `MODEL` and swap the key to use Anthropic or Google.
+
+### First run
+
+1. Deploy with the button above. Wait until `openmuse-api` and `openmuse-web` are live.
+2. On `openmuse-api`, open **Environment** and copy `OPENMUSE_ACCESS_KEY`.
+3. Open the `openmuse-web` URL and sign in with that key.
+4. Send a message. Chat needs both secrets from the deploy form. Workspace data, drafts, and files need the disk.
+
+The browser worker, the Docker computer, and Google mail or calendar are not part of this Blueprint. Each needs the extra setup in the sections below.
 
 ## Configure the agent and Google
 
