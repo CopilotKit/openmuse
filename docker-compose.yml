@@ -38,12 +38,35 @@ services:
       - CPK_INTELLIGENCE_API_KEY=${CPK_INTELLIGENCE_API_KEY:-}
       - STREAM_POLL_INTERVAL_MS=${STREAM_POLL_INTERVAL_MS:-2000}
       - CHAT_TOOL_ALLOWLIST=${CHAT_TOOL_ALLOWLIST:-delegate_task,agent_status,remember_fact,search_mail,read_mail_thread,open_workspace}
+      - COMPUTER_ENABLED=${COMPUTER_ENABLED:-false}
+      - COMPUTER_IMAGE=${COMPUTER_IMAGE:-openmuse-computer:local}
     ports:
       - "8787:8787"
-    # Share dataDir with the computer container
     volumes:
       - openmuse-data:/app/.openmuse
+      # Docker socket for computer-container support (COMPUTER_ENABLED=true)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  # Optional: separate browser worker (for browser automation tasks)
+  browser-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    profiles: ["workers"]
+    command: ["node", "--experimental-strip-types", "apps/worker/src/index.ts"]
+    environment:
+      - DATABASE_URL=postgresql://openmuse:${POSTGRES_PASSWORD:-openmuse}@postgres:5432/openmuse
+      - WORKSPACE_MODE=${WORKSPACE_MODE:-sample}
+      - OPENMUSE_ACCESS_KEY=${OPENMUSE_ACCESS_KEY:-}
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY:-}
+      - WORKER_TOKEN=${WORKER_TOKEN:-}
+      - BROWSER_WORKER_URL=http://openmuse:8787
+    volumes:
+      - openmuse-data:/app/.openmuse
+      - browser-worker-data:/app/.openmuse/browser-profiles
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
 volumes:
   postgres-data:
   openmuse-data:
+  browser-worker-data:

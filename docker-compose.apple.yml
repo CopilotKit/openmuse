@@ -1,0 +1,32 @@
+# Apple Container compose override for macOS.
+# Usage: container compose -f docker-compose.yml -f docker-compose.apple.yml up --build -d
+#
+# Key differences from Docker on Linux:
+#   - host.docker.internal resolves to the macOS host IP (Apple Container supports this)
+#   - Docker socket is at /var/run/docker.sock (same path, but mounted differently in VM)
+#   - Apple Containers uses a Linux VM; shared volumes persist in the VM's filesystem
+services:
+  openmuse:
+    environment:
+      # Apple Containers: host.docker.internal works for host-service access
+      # If running Ollama on macOS, use host.docker.internal instead of localhost
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-http://host.docker.internal:11434/v1}
+    volumes:
+      # Apple Containers: mount Docker socket for computer-container support
+      # The socket is available at /var/run/docker.sock inside the VM
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  browser-worker:
+    environment:
+      - WORKER_TOKEN=${WORKER_TOKEN:-}
+      - BROWSER_WORKER_URL=http://openmuse:8787
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+volumes:
+  postgres-data:
+    driver: local
+  openmuse-data:
+    driver: local
+  browser-worker-data:
+    driver: local
