@@ -7,6 +7,7 @@ import type {
   AgentMemory,
   AgentNotification,
   AgentTask,
+  DeviceModelRouting,
   RunEvent,
 } from "../../../../packages/domain/src/agent.ts";
 import type { DeviceInfo } from "../auth.ts";
@@ -196,6 +197,35 @@ export function agentRoutes(
     );
     if (!identity) throw new AppError("Agent identity changed; refresh and try again", 409);
     return c.json(identity);
+  });
+  app.get("/device-models", async (c) => {
+    const device = c.get("device");
+    if (!device.deviceId)
+      throw new AppError("Sign in with a device ID to read model overrides", 400);
+    return c.json(
+      (await service.db.get<DeviceModelRouting>(
+        c.get("owner"),
+        "agent-settings",
+        `device-models:${device.deviceId}`,
+      )) ?? {},
+    );
+  });
+  app.patch("/device-models", async (c) => {
+    const device = c.get("device");
+    if (!device.deviceId)
+      throw new AppError("Sign in with a device ID to save model overrides", 400);
+    const body = z
+      .object({
+        chatModel: z.string().optional(),
+        taskModel: z.string().optional(),
+        simpleTaskModel: z.string().optional(),
+      })
+      .parse(await c.req.json());
+    await service.db.put(c.get("owner"), "agent-settings", {
+      id: `device-models:${device.deviceId}`,
+      ...body,
+    });
+    return c.json({ ok: true });
   });
   app.get("/notifications", async (c) =>
     c.json((await service.snapshot(c.get("owner"))).notifications),

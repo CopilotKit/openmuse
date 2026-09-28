@@ -12,8 +12,10 @@ import type {
   AgentNotification,
   AgentTask,
   AgentWorkspace,
+  DeviceModelRouting,
   Goal,
   Idea,
+  ModelRoutingInfo,
   Monitor,
   RunEvent,
 } from "../packages/domain/src/agent.ts";
@@ -343,4 +345,47 @@ test("live mode rejects sample sources and hides the fixture mutation endpoint",
   } finally {
     await live.agent.stop();
   }
+});
+test("model routing settings: models endpoint reports server config, device overrides round-trip", async () => {
+  // Server-wide model info is always available.
+  const models = await read<ModelRoutingInfo>("/models");
+  assert.ok(typeof models.maxSteps.chat === "number");
+  assert.deepEqual(models.simpleTaskKinds, ["monitor", "finance"]);
+  // Without a deviceId the device-models endpoint rejects.
+  assert.equal((await request("/device-models")).status, 400);
+  // Create a device-attributed session.
+  const session = await server.app.request("/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: "phone-001", deviceName: "Pixel 8" }),
+  });
+  assert.equal(session.status, 200);
+  const { token: deviceToken } = await session.json();
+  const deviceHeaders = () => ({
+    authorization: `Bearer ${deviceToken}`,
+    "Content-Type": "application/json",
+  });
+  const deviceRequest = (path: string, body?: unknown) =>
+    server.app.request(`/api/agent${path}`, {
+      headers: deviceHeaders(),
+      ...(body === undefined ? {} : { method: "PATCH", body: JSON.stringify(body) }),
+    });
+  async function deviceRead<T>(path: string, body?: unknown, status = 200): Promise<T> {
+    const response = await deviceRequest(path, body);
+    assert.equal(response.status, status, await response.clone().text());
+    return response.json();
+  }
+  const empty = await deviceRead<DeviceModelRouting>("/device-models");
+  assert.deepEqual(empty, {});
+  const saved = await deviceRead<{ ok: true }>("/device-models", {
+    chatModel: "openai/qwen3-8b",
+    taskModel: "openai/qwen3-32b",
+  });
+  assert.deepEqual(saved, { ok: true });
+  const loaded = await deviceRead<DeviceModelRouting>("/device-models");
+  assert.equal(loaded.chatModel, "openai/qwen3-8b");
+  assert.equal(loaded.taskModel, "openai/qwen3-32b");
+  assert.equal(loaded.simpleTaskModel, undefined);
+  // A non-device session cannot read another device's overrides.
+  assert.equal((await request("/device-models")).status, 400);
 });

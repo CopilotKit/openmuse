@@ -34,6 +34,7 @@ import type {
   RunEvent,
 } from "../../../packages/domain/src/agent";
 import { useAgentWorkspace } from "./agent-workspace";
+import { useDeviceModelRouting, useModelRouting } from "./model-routing";
 import { ActivityScreen, ConnectionsScreen } from "./screens";
 import {
   Button,
@@ -1804,6 +1805,7 @@ export function AppsScreen() {
               Save preferences
             </Button>
           </Card>
+          <ModelRoutingSection />
           <Card style={{ gap: 12 }}>
             <SectionHeading title="Memory" />
             <Text style={s.muted}>Context you can inspect, correct or forget.</Text>
@@ -1878,5 +1880,141 @@ function MemoryRow({ memory }: { memory: AgentMemory }) {
       </View>
       <ErrorNotice error={error} />
     </View>
+  );
+}
+export function ModelRoutingSection() {
+  const { data: routing, error: routingError, refresh: refreshRouting } = useModelRouting();
+  const { overrides, error: overrideError, loaded, save } = useDeviceModelRouting();
+  const [chatModel, setChatModel] = useState("");
+  const [taskModel, setTaskModel] = useState("");
+  const [simpleTaskModel, setSimpleTaskModel] = useState("");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (overrides) {
+      setChatModel(overrides.chatModel ?? "");
+      setTaskModel(overrides.taskModel ?? "");
+      setSimpleTaskModel(overrides.simpleTaskModel ?? "");
+    }
+  }, [overrides]);
+  async function persist() {
+    setSaving(true);
+    try {
+      await save({
+        chatModel: chatModel || undefined,
+        taskModel: taskModel || undefined,
+        simpleTaskModel: simpleTaskModel || undefined,
+      });
+      void refreshRouting();
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <Card style={{ gap: 12 }}>
+      <SectionHeading title="Model routing" />
+      <Text style={s.muted}>
+        The server routes tasks to different models by kind. On this device you can override the
+        default model for each route. Smaller models are faster but use fewer tools.
+      </Text>
+      {routing ? (
+        <View style={{ gap: 6 }}>
+          <View
+            style={[
+              s.between,
+              { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.line },
+            ]}
+          >
+            <Text style={s.muted}>Chat model (server)</Text>
+            <Text style={[s.text, { fontSize: 12, flexShrink: 1, textAlign: "right" }]}>
+              {routing.chatModel || "Not configured"}
+            </Text>
+          </View>
+          <View
+            style={[
+              s.between,
+              { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.line },
+            ]}
+          >
+            <Text style={s.muted}>Task model (server)</Text>
+            <Text style={[s.text, { fontSize: 12, flexShrink: 1, textAlign: "right" }]}>
+              {routing.taskModel || "Not configured"}
+            </Text>
+          </View>
+          <View
+            style={[
+              s.between,
+              { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.line },
+            ]}
+          >
+            <Text style={s.muted}>Simple-task model (server)</Text>
+            <Text style={[s.text, { fontSize: 12, flexShrink: 1, textAlign: "right" }]}>
+              {routing.simpleTaskModel || "Not configured"}
+            </Text>
+          </View>
+          <View
+            style={[
+              s.between,
+              { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.line },
+            ]}
+          >
+            <Text style={s.muted}>Step budget</Text>
+            <Text style={[s.text, { fontSize: 12, flexShrink: 1, textAlign: "right" }]}>
+              {`chat ${routing.maxSteps?.chat ?? 6} · task ${routing.maxSteps?.task ?? 16} · simple ${routing.maxSteps?.simpleTask ?? 6}`}
+            </Text>
+          </View>
+          {!!routing.chatToolAllowlist && routing.chatToolAllowlist.length > 0 && (
+            <View
+              style={[
+                s.between,
+                { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.line },
+              ]}
+            >
+              <Text style={s.muted}>Chat tool allowlist</Text>
+              <Text style={[s.text, { fontSize: 12, flexShrink: 1, textAlign: "right" }]}>
+                {routing.chatToolAllowlist.join(", ")}
+              </Text>
+            </View>
+          )}
+        </View>
+      ) : (
+        <ActivityIndicator color={colors.blueDark} />
+      )}
+      <ErrorNotice error={routingError || overrideError} />
+      <Text style={[s.label, { marginTop: 12 }]}>Device overrides</Text>
+      <Field
+        label="Chat model"
+        value={chatModel}
+        onChangeText={setChatModel}
+        placeholder={routing?.chatModel || "e.g. openai/qwen3-8b"}
+        autoCapitalize="none"
+      />
+      <Field
+        label="Task model"
+        value={taskModel}
+        onChangeText={setTaskModel}
+        placeholder={routing?.taskModel || "e.g. openai/qwen3-32b"}
+        autoCapitalize="none"
+      />
+      <Field
+        label="Simple-task model"
+        value={simpleTaskModel}
+        onChangeText={setSimpleTaskModel}
+        placeholder={routing?.simpleTaskModel || "e.g. openai/qwen3-8b"}
+        autoCapitalize="none"
+      />
+      <Button
+        small
+        primary
+        busy={saving || !loaded}
+        disabled={saving || !loaded || (!chatModel && !taskModel && !simpleTaskModel)}
+        onPress={() => void persist()}
+      >
+        {saving ? "Saving…" : "Save device overrides"}
+      </Button>
+      <Text style={s.small}>
+        Overrides are keyed to this device and apply across all surfaces. Clear a field to use the
+        server default.
+      </Text>
+    </Card>
   );
 }

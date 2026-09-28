@@ -44,6 +44,7 @@ export function modelInfo(config: Config) {
       simpleTask: config.simpleTaskMaxSteps ?? 6,
     },
     simpleTaskKinds: ["monitor", "finance"] as const,
+    chatToolAllowlist: config.chatToolAllowlist,
   };
 }
 export function makeRuntime(

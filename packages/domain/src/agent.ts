@@ -131,6 +131,25 @@ export interface AgentWorkspace {
   identity: AgentIdentity;
   worker: { running: boolean; lastTickAt?: string };
 }
+/** Server-side model routing configuration, returned by /api/agent/models. */
+export interface ModelRoutingInfo {
+  chatModel?: string;
+  taskModel?: string;
+  simpleTaskModel?: string;
+  maxSteps: {
+    chat: number;
+    task: number;
+    simpleTask: number;
+  };
+  simpleTaskKinds: readonly ("monitor" | "finance")[];
+  chatToolAllowlist?: string[];
+}
+/** Per-device model routing overrides; stored server-side keyed by deviceId. */
+export interface DeviceModelRouting {
+  chatModel?: string;
+  taskModel?: string;
+  simpleTaskModel?: string;
+}
 export const createTaskSchema = z.object({
   title: z.string().trim().min(1).max(160).optional(),
   prompt: z.string().trim().min(1).max(12000),
