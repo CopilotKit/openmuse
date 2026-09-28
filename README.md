@@ -97,28 +97,40 @@ For iOS or Android, use `pnpm --dir apps/mobile ios` or `pnpm --dir apps/mobile 
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/CopilotKit/OpenMuse)
 
-[render.yaml](render.yaml) provisions two services. The API serves JSON at `/` and does not host the web bundle, so the UI is a separate static site.
-
-| Service | Type | What it runs |
-|---|---|---|
-| `openmuse-api` | Node web service, Standard plan, 1 GB disk at `/var/data` | The Hono API and the in-process task worker. `DATA_DIR` is `/var/data/openmuse`. The disk holds the PGlite database, PDFs, and the signing key. |
-| `openmuse-web` | Static site | The Expo web export. `EXPO_PUBLIC_API_URL` is inlined at build time, so the site rebuilds when the API URL changes. |
-
-The API is Standard because a 512 MB instance runs out of memory before the process binds a port: PGlite loads an embedded Postgres build. The disk is required. Without it, a redeploy wipes the database and files. Chat history is stored by CopilotKit Intelligence, not on this disk, so a thread can still be there after sign-out even when the disk was missing.
-
-Render requires binding `0.0.0.0`. OpenMuse rejects a non-loopback host in sample mode, so the Blueprint sets `WORKSPACE_MODE=live`. Live mode needs `OPENMUSE_ACCESS_KEY` and `TOKEN_ENCRYPTION_KEY`. Render generates both. You supply two secrets when the Blueprint asks:
-
-- `CPK_INTELLIGENCE_API_KEY`: a CopilotKit Intelligence project key. Create one with `npx copilotkit@latest login` and `npx copilotkit@latest project select`. Required in every mode, and kept on the server.
-- `OPENAI_API_KEY`: the provider key for the default `openai/gpt-4o-mini`. Change `MODEL` and swap the key to use Anthropic or Google.
+[render.yaml](render.yaml) deploys two services: the API, and the web app. The API answers `/` with JSON, so the UI is its own static site.
 
 ### First run
 
-1. Deploy with the button above. Wait until `openmuse-api` and `openmuse-web` are live.
+1. Click **Deploy to Render**. Wait until `openmuse-api` and `openmuse-web` are both live.
 2. On `openmuse-api`, open **Environment** and copy `OPENMUSE_ACCESS_KEY`.
 3. Open the `openmuse-web` URL and sign in with that key.
-4. Send a message. Chat needs both secrets from the deploy form. Workspace data, drafts, and files need the disk.
+4. Send a message.
 
-The browser worker, the Docker computer, and Google mail or calendar are not part of this Blueprint. Each needs the extra setup in the sections below.
+The deploy form asks for two values you provide. Render generates the other two.
+
+| Variable | Set by | If it is missing |
+|---|---|---|
+| `CPK_INTELLIGENCE_API_KEY` | You. Run `npx copilotkit@latest login`, then `npx copilotkit@latest project select`. Keep it on the server. | Chat cannot open a thread. |
+| `OPENAI_API_KEY` | You. Used by the default `openai/gpt-4o-mini`. Change `MODEL` and supply the matching provider key for Anthropic or Google. | The model call fails. |
+| `OPENMUSE_ACCESS_KEY` | Render | You cannot sign in. |
+| `TOKEN_ENCRYPTION_KEY` | Render | The API refuses to start in live mode. |
+
+Health check: `https://<openmuse-api>/api/health`.
+
+### Services
+
+| Service | Plan | What it runs |
+|---|---|---|
+| `openmuse-api` | Standard, with a 1 GB disk at `/var/data` | The Hono API and the in-process task worker. `DATA_DIR` is `/var/data/openmuse`. |
+| `openmuse-web` | Static site | The Expo web export. `EXPO_PUBLIC_API_URL` is baked in at build time. |
+
+**Standard** is the smallest plan that stays up. At 512 MB the process runs out of memory before it binds a port, because PGlite loads an embedded Postgres build.
+
+**The disk** holds the database, PDFs, and the signing key. A redeploy without it wipes that data. Chat threads are stored by CopilotKit Intelligence, so a thread can still load after you sign back in even when the disk was never attached.
+
+**Live mode** is required. Render binds `0.0.0.0`, and sample mode rejects any host that is not loopback. The Blueprint sets `WORKSPACE_MODE=live`.
+
+The browser worker, the Docker computer, and Google mail or calendar need the setup in the sections below. This Blueprint does not start them.
 
 ## Configure the agent and Google
 
