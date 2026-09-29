@@ -34,6 +34,7 @@ import type {
   RunEvent,
 } from "../../../packages/domain/src/agent";
 import { useAgentWorkspace } from "./agent-workspace";
+import { McpConnections } from "./mcp-connections";
 import { ActivityScreen, ConnectionsScreen } from "./screens";
 import {
   Button,
@@ -1734,6 +1735,7 @@ export function AppsScreen() {
         placeholder="Search connectors"
       />
       <ConnectionsScreen query={query} />
+      <McpConnections query={query} />
       <Text style={s.heading}>On your computer</Text>
       <Card style={{ paddingVertical: 3, backgroundColor: "#F4F5F6" }}>
         {shortcuts

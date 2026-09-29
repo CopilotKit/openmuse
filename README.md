@@ -56,6 +56,7 @@ The computer combines **persistent Chromium and an optional Linux workspace**. T
 | **Documents** | Email attachment → PDF → requested form values → filled copy → reviewed reply → receipt. Native/web PDF viewing, paging, zoom, supported fields, and sharing. |
 | **Finance** | Import transaction CSV to create a spending summary with categories, transactions, and a savings-goal action. |
 | **Gmail & Calendar** | Google OAuth adapters, complete mail threads, drafts/attachments, calendar discovery, and reviewed event creation/update/deletion. Live credentials required. |
+| **MCP connections** | Register Streamable HTTP, SSE, or local command servers in Apps. Discover tools and explicitly enable read-only tools for chat and delegated tasks. OAuth servers need a public HTTPS client metadata URL. |
 | **Personal context** | Editable name, tone, avatar, and memories. Background-update preferences and durable in-app notifications. |
 | **Rich Threads** | CopilotKit Intelligence persistence in every mode, with a stable main conversation, side chats, renaming, archiving, restoring, and replay. A server-only project key is required. |
 
@@ -146,6 +147,10 @@ Copy the commented settings in [.env.example](.env.example) into your private `.
 5. Open **Apps → Gmail** (or **Google Calendar**), connect read access, and grant write access when needed. Every send or calendar change still requires its own stored review. Changing/disconnecting the account invalidates pending connection-bound work.
 
 Google credentials are encrypted at rest. File URLs and browser consoles use short-lived signatures. This deployment uses one owner protected by a shared access key; it is not a multi-tenant authentication system. Use HTTPS and restricted network access for a remote host. Keep the default local-data mode on loopback.
+
+### MCP connections
+
+Set `TOKEN_ENCRYPTION_KEY` (also in sample mode), restart the API, then open **Apps → MCP connections**. Add a Streamable HTTP, SSE, or local command server. OpenMuse discovers its tools and lets you enable tools marked read-only for chat and delegated tasks. Tool output is treated as untrusted data. Write tools are listed but cannot run automatically until a review flow is implemented. [MCP setup and ElevenLabs OAuth](docs/MCP.md).
 
 ## Browser worker
 

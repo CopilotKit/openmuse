@@ -19,6 +19,7 @@ import { AgentService } from "./engine/service.ts";
 import { AppError } from "./errors.ts";
 import { Files } from "./files.ts";
 import { GoogleAuth } from "./google-auth.ts";
+import { mcpRoutes } from "./mcp-routes.ts";
 import { WorkspaceService } from "./workspace.ts";
 
 export async function createApp(
@@ -123,6 +124,28 @@ export async function createApp(
       "<h1>Google is connected</h1><p>Return to OpenMuse and refresh your workspace.</p>",
     );
   });
+  app.get("/api/mcp/callback", async (c) => {
+    if (c.req.query("error"))
+      return c.html("<h1>MCP connection cancelled</h1><p>You can return to OpenMuse.</p>", 400);
+    const state = c.req.query("state"),
+      code = c.req.query("code");
+    if (!state || !code) throw new AppError("MCP callback is incomplete", 400);
+    await agent.mcp.callback(state, code);
+    return c.html(
+      "<h1>MCP server connected</h1><p>Return to OpenMuse and refresh the connection.</p>",
+    );
+  });
+  app.get("/api/mcp/client-metadata", (c) =>
+    c.json({
+      client_id: config.mcpClientMetadataUrl ?? `${config.publicUrl}/api/mcp/client-metadata`,
+      client_name: "OpenMuse",
+      client_uri: config.publicUrl,
+      redirect_uris: [`${config.publicUrl}/api/mcp/callback`],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    }),
+  );
   app.use("/api/*", async (c, next) => {
     const signedRoute =
       /^\/api\/files\/[^/]+\/content$|^\/api\/browsers\/[^/]+\/(?:preview|console)$/.test(
@@ -150,6 +173,7 @@ export async function createApp(
     return c.json(snapshot);
   });
   app.route("/api/agent", agentRoutes(agent));
+  app.route("/api/mcp", mcpRoutes(agent.mcp));
   app.route("/api/computer", computerRoutes(computer, files));
   app.get("/api/calendars", async (c) => c.json(await workspace.calendars(c.get("owner"))));
   app.get("/api/calendar/events", async (c) => {
