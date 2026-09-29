@@ -241,7 +241,6 @@ export class ConversationAgent extends AbstractAgent {
     // struggles when presented with 12+ tools whose names differ only by
     // prefix (read_computer_file vs read_mail_thread). The operator can
     // supply CHAT_TOOL_ALLOWLIST (exact names or prefix globs like "computer_*").
-    const effectiveTools = filterTools(tools, this.config.chatToolAllowlist);
     const agentPromise = (async () => {
       const deviceId = this.device.deviceId;
       const deviceOverrides = deviceId
@@ -251,6 +250,9 @@ export class ConversationAgent extends AbstractAgent {
             `device-models:${deviceId}`,
           )) ?? undefined)
         : undefined;
+      // Device-specific override takes priority over the server-wide setting.
+      const allowlist = deviceOverrides?.chatToolAllowlist ?? this.config.chatToolAllowlist;
+      const effectiveTools = filterTools(tools, allowlist);
       return tanstackAgent({
         model:
           deviceOverrides?.chatModel ??

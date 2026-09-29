@@ -152,6 +152,8 @@ export interface DeviceModelRouting {
   chatMaxSteps?: number;
   taskMaxSteps?: number;
   simpleTaskMaxSteps?: number;
+  /** Override for the server-wide CHAT_TOOL_ALLOWLIST (comma-separated). */
+  chatToolAllowlist?: string[];
 }
 export const createTaskSchema = z.object({
   title: z.string().trim().min(1).max(160).optional(),

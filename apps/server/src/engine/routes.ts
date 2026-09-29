@@ -222,6 +222,7 @@ export function agentRoutes(
         chatMaxSteps: z.number().int().positive().optional(),
         taskMaxSteps: z.number().int().positive().optional(),
         simpleTaskMaxSteps: z.number().int().positive().optional(),
+        chatToolAllowlist: z.array(z.string().min(1)).max(100).optional(),
       })
       .parse(await c.req.json());
     await service.db.put(c.get("owner"), "agent-settings", {
@@ -229,6 +230,21 @@ export function agentRoutes(
       ...body,
     });
     return c.json({ ok: true });
+  });
+  app.get("/available-models", async (c) => {
+    const config = service.config;
+    return c.json({
+      providers: {
+        openai: Boolean(config.intelligenceApiKey),
+        google: Boolean(config.googleClientId),
+      },
+      models: {
+        chat: config.chatModel ?? config.model,
+        task: config.taskModel ?? config.chatModel ?? config.model,
+        simpleTask: config.simpleTaskModel ?? config.chatModel ?? config.model,
+      },
+      chatToolAllowlist: config.chatToolAllowlist,
+    });
   });
   app.get("/notifications", async (c) =>
     c.json((await service.snapshot(c.get("owner"))).notifications),

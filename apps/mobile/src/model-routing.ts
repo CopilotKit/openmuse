@@ -23,6 +23,33 @@ export function useModelRouting() {
   return { data, error, refresh };
 }
 /**
+ * Fetch available models from /api/agent/available-models.
+ * Returns provider availability, default model names, and the server-wide
+ * tool allowlist so the mobile UI can validate device overrides.
+ */
+export function useAvailableModels() {
+  const { api } = useWorkspace();
+  const [data, setData] = useState<AvailableModels | null>();
+  const [error, setError] = useState("");
+  const refresh = () => {
+    setError("");
+    setData(undefined);
+    void api
+      .request<AvailableModels>("/api/agent/available-models")
+      .then((next) => setData(next))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  };
+  useEffect(() => {
+    refresh();
+  }, [api]);
+  return { data, error, refresh };
+}
+export interface AvailableModels {
+  providers: { openai: boolean; google: boolean };
+  models: { chat?: string; task?: string; simpleTask?: string };
+  chatToolAllowlist?: string[];
+}
+/**
  * Fetch and update per-device model routing overrides.
  * These preferences override the server defaults for this specific device,
  * allowing a small mobile model to be selected per task type.

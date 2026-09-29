@@ -1893,6 +1893,7 @@ export function ModelRoutingSection() {
   const [chatMaxSteps, setChatMaxSteps] = useState("");
   const [taskMaxSteps, setTaskMaxSteps] = useState("");
   const [simpleTaskMaxSteps, setSimpleTaskMaxSteps] = useState("");
+  const [toolAllowlist, setToolAllowlist] = useState("");
   useEffect(() => {
     if (overrides) {
       setChatModel(overrides.chatModel ?? "");
@@ -1901,6 +1902,7 @@ export function ModelRoutingSection() {
       setChatMaxSteps(overrides.chatMaxSteps?.toString() ?? "");
       setTaskMaxSteps(overrides.taskMaxSteps?.toString() ?? "");
       setSimpleTaskMaxSteps(overrides.simpleTaskMaxSteps?.toString() ?? "");
+      setToolAllowlist(overrides.chatToolAllowlist?.join(", ") ?? "");
     }
   }, [overrides]);
   async function persist() {
@@ -1927,6 +1929,12 @@ export function ModelRoutingSection() {
         chatMaxSteps: chatMaxSteps ? Number(chatMaxSteps) : undefined,
         taskMaxSteps: taskMaxSteps ? Number(taskMaxSteps) : undefined,
         simpleTaskMaxSteps: simpleTaskMaxSteps ? Number(simpleTaskMaxSteps) : undefined,
+        chatToolAllowlist: toolAllowlist
+          ? toolAllowlist
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : undefined,
       });
       void refreshRouting();
     } finally {
@@ -1940,6 +1948,7 @@ export function ModelRoutingSection() {
     setChatMaxSteps("");
     setTaskMaxSteps("");
     setSimpleTaskMaxSteps("");
+    setToolAllowlist("");
     setSaving(true);
     try {
       await save({});
@@ -2071,6 +2080,15 @@ export function ModelRoutingSection() {
         placeholder={String(routing?.maxSteps?.simpleTask ?? 6)}
         keyboardType="numeric"
       />
+      <Field
+        label="Chat tool allowlist"
+        value={toolAllowlist}
+        onChangeText={setToolAllowlist}
+        placeholder={
+          routing?.chatToolAllowlist?.join(", ") ?? "e.g. delegate_task,agent_status,computer_*"
+        }
+        autoCapitalize="none"
+      />
       <Button
         small
         primary
@@ -2092,7 +2110,8 @@ export function ModelRoutingSection() {
             !simpleTaskModel &&
             !chatMaxSteps &&
             !taskMaxSteps &&
-            !simpleTaskMaxSteps)
+            !simpleTaskMaxSteps &&
+            !toolAllowlist)
         }
         onPress={() => void clearOverrides()}
       >
