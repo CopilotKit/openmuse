@@ -391,6 +391,30 @@ test("model routing settings: models endpoint reports server config, device over
   // A non-device session cannot read another device's overrides.
   assert.equal((await request("/device-models")).status, 400);
 });
+test("device model routing PATCH rejects invalid step budgets", async () => {
+  const session = await server.app.request("/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: "phone-003", deviceName: "Validator" }),
+  });
+  const { token } = (await session.json()) as { token: string };
+  const deviceHeaders = { authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  for (const [label, body] of [
+    ["negative steps", { chatMaxSteps: -1 }],
+    ["zero steps", { taskMaxSteps: 0 }],
+    ["non-integer steps", { simpleTaskMaxSteps: 3.5 }],
+    ["negative string", { chatModel: "openai/x", taskMaxSteps: -5 }],
+  ] satisfies [string, Record<string, unknown>][]) {
+    const response = await server.app.request("/api/agent/device-models", {
+      method: "PATCH",
+      headers: deviceHeaders,
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 422, label);
+    const payload = (await response.json()) as { error: string };
+    assert.equal(typeof payload.error, "string", label);
+  }
+});
 test("model info endpoint includes chatToolAllowlist when configured", async () => {
   const withAllowlist = await createApp(db, {
     ...config,

@@ -8,14 +8,15 @@ const DEVICE_ID_KEY = "openmuse.deviceId";
  *
  * On native platforms, a random UUID is generated on first launch and
  * persisted to expo-secure-store so it survives app restarts. On web
- * (where SecureStore is unavailable) the UUID is ephemeral per JS
- * context — sufficient for current-session routing.
+ * (where SecureStore is unavailable) the UUID falls back to localStorage.
  */
 let cachedDeviceId: string | null = null;
 export async function deviceId(): Promise<string> {
   if (cachedDeviceId) return cachedDeviceId;
   if (Platform.OS === "web") {
-    cachedDeviceId = crypto.randomUUID();
+    const stored = localStorage.getItem(DEVICE_ID_KEY);
+    cachedDeviceId = stored ?? crypto.randomUUID();
+    if (!stored) localStorage.setItem(DEVICE_ID_KEY, cachedDeviceId);
     return cachedDeviceId;
   }
   const stored = await SecureStore.getItemAsync(DEVICE_ID_KEY);

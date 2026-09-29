@@ -1885,6 +1885,7 @@ function MemoryRow({ memory }: { memory: AgentMemory }) {
 export function ModelRoutingSection() {
   const { data: routing, error: routingError, refresh: refreshRouting } = useModelRouting();
   const { overrides, error: overrideError, loaded, save } = useDeviceModelRouting();
+  const [localError, setLocalError] = useState("");
   const [chatModel, setChatModel] = useState("");
   const [taskModel, setTaskModel] = useState("");
   const [simpleTaskModel, setSimpleTaskModel] = useState("");
@@ -1903,6 +1904,20 @@ export function ModelRoutingSection() {
     }
   }, [overrides]);
   async function persist() {
+    // Validate step inputs before sending to the server.
+    for (const [label, value] of [
+      ["Chat max steps", chatMaxSteps],
+      ["Task max steps", taskMaxSteps],
+      ["Simple-task max steps", simpleTaskMaxSteps],
+    ] satisfies [string, string][]) {
+      if (value) {
+        const n = Number(value);
+        if (!Number.isInteger(n) || n < 1) {
+          setLocalError(`Step budget for ${label} must be a positive whole number`);
+          return;
+        }
+      }
+    }
     setSaving(true);
     try {
       await save({
@@ -1913,6 +1928,21 @@ export function ModelRoutingSection() {
         taskMaxSteps: taskMaxSteps ? Number(taskMaxSteps) : undefined,
         simpleTaskMaxSteps: simpleTaskMaxSteps ? Number(simpleTaskMaxSteps) : undefined,
       });
+      void refreshRouting();
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function clearOverrides() {
+    setChatModel("");
+    setTaskModel("");
+    setSimpleTaskModel("");
+    setChatMaxSteps("");
+    setTaskMaxSteps("");
+    setSimpleTaskMaxSteps("");
+    setSaving(true);
+    try {
+      await save({});
       void refreshRouting();
     } finally {
       setSaving(false);
@@ -1996,7 +2026,7 @@ export function ModelRoutingSection() {
         )}
         <Text style={s.small}>Key: this device</Text>
       </View>
-      <ErrorNotice error={routingError || overrideError} />
+      <ErrorNotice error={localError || routingError || overrideError} />
       <Text style={[s.label, { marginTop: 12 }]}>Device overrides</Text>
       <Field
         label="Chat model"
@@ -2049,6 +2079,24 @@ export function ModelRoutingSection() {
         onPress={() => void persist()}
       >
         {saving ? "Saving…" : "Save device overrides"}
+      </Button>
+      <Button
+        small
+        danger
+        busy={saving || !loaded}
+        disabled={
+          saving ||
+          !loaded ||
+          (!chatModel &&
+            !taskModel &&
+            !simpleTaskModel &&
+            !chatMaxSteps &&
+            !taskMaxSteps &&
+            !simpleTaskMaxSteps)
+        }
+        onPress={() => void clearOverrides()}
+      >
+        Clear all overrides
       </Button>
       <Text style={s.small}>
         Overrides are keyed to this device and apply across all surfaces. Clear a field to use the
