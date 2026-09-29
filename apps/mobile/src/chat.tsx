@@ -28,6 +28,7 @@ import { BrowserRunContext, BrowserToolCard } from "./browser-tool-card";
 import { BrowserThreadCard } from "./computer";
 import { ConversationQueue, type QueuedMessage } from "./conversation-queue";
 import { runConversationTurn } from "./conversation-run";
+import { GoalToolCard, IdeasToolCard, TrackingToolCard } from "./goal-tool-cards";
 import { MailToolCard } from "./mail-tool-card";
 import { FileThreadCard, TaskThreadCard } from "./thread-artifacts";
 import { type Selection, useMuseThread } from "./threads";
@@ -92,7 +93,15 @@ export function WorkspaceTools() {
     description: "Display a saved goal",
     parameters: displayParameters,
     render: ({ result, status }) => (
-      <ServerToolCard name="Goal" result={result} loading={status !== "complete"} />
+      <GoalToolCard result={result} loading={status !== "complete"} />
+    ),
+  });
+  useRenderTool({
+    name: "update_goal",
+    description: "Display a goal after recording progress",
+    parameters: displayParameters,
+    render: ({ result, status }) => (
+      <GoalToolCard updating result={result} loading={status !== "complete"} />
     ),
   });
   useRenderTool({
@@ -100,7 +109,15 @@ export function WorkspaceTools() {
     description: "Display a saved page watch",
     parameters: displayParameters,
     render: ({ result, status }) => (
-      <ServerToolCard name="Tracking" result={result} loading={status !== "complete"} />
+      <TrackingToolCard result={result} loading={status !== "complete"} />
+    ),
+  });
+  useRenderTool({
+    name: "find_ideas",
+    description: "Display suggestions the person can start or dismiss",
+    parameters: displayParameters,
+    render: ({ result, status }) => (
+      <IdeasToolCard result={result} loading={status !== "complete"} />
     ),
   });
   useRenderTool({
@@ -153,18 +170,7 @@ function ServerToolCard({
           {loading ? "Waiting for the server." : "Open the workspace to see the saved result."}
         </Text>
       )}
-      <Button
-        small
-        onPress={() =>
-          navigate(
-            name === "Goal" || name === "Tracking"
-              ? "goals"
-              : name === "Memory"
-                ? "apps"
-                : "activity",
-          )
-        }
-      >
+      <Button small onPress={() => navigate(name === "Memory" ? "apps" : "activity")}>
         View {name.toLowerCase()}
       </Button>
     </Card>

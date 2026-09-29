@@ -19,7 +19,7 @@ import {
   Users,
   X,
 } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { ActivityIndicator, Image, Linking, Pressable, Text, View } from "react-native";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import type { Artifact, BrowserSession } from "../../../packages/domain/src";
@@ -1042,7 +1042,7 @@ export function IdeasScreen() {
     </View>
   );
 }
-function TaskLink({ taskId, onOpen }: { taskId: string; onOpen?: () => void }) {
+export function TaskLink({ taskId, onOpen }: { taskId: string; onOpen?: () => void }) {
   const { open } = useWorkspace();
   return (
     <Button
@@ -1057,7 +1057,7 @@ function TaskLink({ taskId, onOpen }: { taskId: string; onOpen?: () => void }) {
     </Button>
   );
 }
-function IdeaCard({ idea }: { idea: Idea }) {
+export function IdeaCard({ idea }: { idea: Idea }) {
   const { mutate } = useAgentWorkspace();
   const { open } = useWorkspace();
   const [expanded, setExpanded] = useState(false);
@@ -1339,7 +1339,15 @@ function GoalForm({ onDone, category }: { onDone: () => void; category?: string 
     </Card>
   );
 }
-function GoalCard({ goal, onOpenTask }: { goal: Goal; onOpenTask?: () => void }) {
+export function GoalCard({
+  goal,
+  onOpenTask,
+  children,
+}: {
+  goal: Goal;
+  onOpenTask?: () => void;
+  children?: ReactNode;
+}) {
   const { data, mutate, delegate } = useAgentWorkspace();
   const { open } = useWorkspace();
   const [busy, setBusy] = useState(false);
@@ -1425,6 +1433,7 @@ function GoalCard({ goal, onOpenTask }: { goal: Goal; onOpenTask?: () => void })
         .map((task) => (
           <TaskCard key={task.id} task={task} compact onOpen={onOpenTask} />
         ))}
+      {children}
     </Card>
   );
 }
@@ -1530,7 +1539,15 @@ function MonitorForm({ onDone }: { onDone: () => void }) {
     </Card>
   );
 }
-function MonitorCard({ monitor, onOpenTask }: { monitor: Monitor; onOpenTask?: () => void }) {
+export function MonitorCard({
+  monitor,
+  onOpenTask,
+  children,
+}: {
+  monitor: Monitor;
+  onOpenTask?: () => void;
+  children?: ReactNode;
+}) {
   const { mutate } = useAgentWorkspace();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1611,6 +1628,7 @@ function MonitorCard({ monitor, onOpenTask }: { monitor: Monitor; onOpenTask?: (
         </Button>
       )}
       <TaskLink taskId={monitor.taskId} onOpen={onOpenTask} />
+      {children}
     </Card>
   );
 }
