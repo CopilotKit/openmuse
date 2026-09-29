@@ -729,6 +729,12 @@ export class AgentService {
         409,
       );
     const proposal = await this.actions.propose(owner, input, `${task.id}:${key}`, task.id);
+    if (proposal.status === "succeeded") return proposal;
+    if (proposal.status !== "awaiting_review" && proposal.status !== "executing")
+      throw new AppError(
+        `Reviewed action ${proposal.status}: ${proposal.error ?? "No further action was taken"}`,
+        409,
+      );
     try {
       await context.checkpoint({ actionId: proposal.id });
     } catch (error) {
@@ -736,11 +742,12 @@ export class AgentService {
         await this.actions.decide(owner, proposal.id, proposal.hash, "deny");
       throw error;
     }
-    await context.event(
-      "approval",
-      proposal.title,
-      `Review prepared for ${proposal.account ?? "the connected account"}`,
-    );
+    if (proposal.status === "awaiting_review")
+      await context.event(
+        "approval",
+        proposal.title,
+        `Review prepared for ${proposal.account ?? "the connected account"}`,
+      );
     return proposal;
   }
   private async execute(
@@ -778,6 +785,8 @@ export class AgentService {
         if (error instanceof LostLeaseError || context.signal.aborted) throw error;
         await context.guard();
         const failures = Number(task.state.failures ?? 0) + 1;
+        // Each streak of failures (after a success or a resume) gets its own alerts.
+        const failureStreak = Number(task.state.failureStreak ?? 0) + (failures === 1 ? 1 : 0);
         const detail = error instanceof Error ? error.message : "Page check failed";
         const nextCheckAt = new Date(
           Date.now() + Math.min(60, 2 ** failures) * 60000,
@@ -802,10 +811,11 @@ export class AgentService {
             ...task.state,
             failures,
             resumingMonitor: false,
+            failureStreak,
             notice: {
               title: "Watch needs attention",
               body: detail,
-              key: `watch-error:${task.id}:${failures >= 5 ? "paused" : "retry"}`,
+              key: `watch-error:${task.id}:${failureStreak}:${failures >= 5 ? "paused" : "retry"}`,
             },
           },
         };

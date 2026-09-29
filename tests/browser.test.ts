@@ -530,3 +530,47 @@ test("egress proxy blocks HTTP and CONNECT traffic to local network destinations
     await proxy.close();
   }
 });
+
+test("the browser counts as connected only while its worker answers", async (t) => {
+  let up = true;
+  let clock = 0;
+  const { db, config } = await browserFixture(t, (path) =>
+    up && path === "/health" ? { data: { status: "ok" } } : { status: 503, data: {} },
+  );
+  const auth = new Auth(db, config, "test-signing-key");
+  const service = new BrowserService(db, config, auth, new Files(db, config, auth), () => clock);
+  assert.equal(await service.reachable(), true);
+  up = false;
+  assert.equal(await service.reachable(), true, "a recent answer is reused briefly");
+  clock += 15_000;
+  assert.equal(await service.reachable(), false);
+  const unconfigured = new BrowserService(
+    db,
+    { ...config, workerUrl: undefined },
+    auth,
+    new Files(db, config, auth),
+  );
+  assert.equal(await unconfigured.reachable(), false);
+});
+
+test("the workspace reports the browser offline while its worker's health check fails", async (t) => {
+  for (const up of [true, false]) {
+    const { db, config } = await browserFixture(t, (path) =>
+      up && path === "/health" ? { data: { status: "ok" } } : { status: 503, data: {} },
+    );
+    const { app, auth, agent } = await createApp(db, config);
+    t.after(() => agent.stop());
+    const { token } = await auth.session();
+    const response = await app.request("/api/workspace", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(response.status, 200);
+    const { connections } = (await response.json()) as {
+      connections: { id: string; status: string }[];
+    };
+    assert.equal(
+      connections.find((connection) => connection.id === "browser")?.status,
+      up ? "connected" : "unavailable",
+    );
+  }
+});

@@ -191,7 +191,7 @@ test("the paused alert is delivered when the final failure outcome is lost", asy
   assert.equal(task?.status, "paused");
   assert.equal((await db.get<Monitor>(owner, "monitors", monitor.id))?.status, "paused");
   const pausedId = createHash("sha256")
-    .update(`watch-error:${monitor.taskId}:paused`)
+    .update(`watch-error:${monitor.taskId}:1:paused`)
     .digest("hex");
   const paused = (await read<AgentNotification[]>("/notifications")).filter(
     (item) => item.id === pausedId,
