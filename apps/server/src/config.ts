@@ -47,6 +47,7 @@ export interface Config {
   googleClientId?: string;
   googleClientSecret?: string;
   googleRedirectUri: string;
+  mcpClientMetadataUrl?: string;
   workerUrl?: string;
   workerToken?: string;
   taskWorkerEnabled?: boolean;
@@ -153,6 +154,9 @@ export function readConfig(): Config {
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
     googleRedirectUri: `${publicUrl}/api/google/callback`,
+    mcpClientMetadataUrl:
+      process.env.MCP_CLIENT_METADATA_URL ??
+      (publicUrl.startsWith("https://") ? `${publicUrl}/api/mcp/client-metadata` : undefined),
     workerUrl: browserWorkerUrl(process.env.BROWSER_WORKER_URL),
     workerToken: process.env.WORKER_TOKEN,
     taskWorkerEnabled: process.env.TASK_WORKER_ENABLED !== "false",
