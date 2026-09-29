@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { createApp } from "../apps/server/src/app.ts";
 import { createStore } from "../apps/server/src/db.ts";
+import { createDemoModel, demoModel } from "../apps/server/src/demo/model.ts";
 import type { ActionProposal } from "../packages/domain/src/index.ts";
+import { browserFixture } from "./helpers/browser.ts";
 import { fixture as computerFixture } from "./helpers/computer.ts";
 import { modelFixture } from "./helpers/model.ts";
 
@@ -114,4 +116,178 @@ test("CopilotKit model worker executes server tools and persists the confirmed o
     await db.close();
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("the model worker keeps the text a model replies with when it calls no tool", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "openmuse-model-text-"));
+  const db = await createStore();
+  const mock = createDemoModel({ latency: 0, firstByteDelay: 0 });
+  await mock.start();
+  const previousBase = process.env.OPENAI_BASE_URL;
+  const previousKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_BASE_URL = `${mock.url}/v1`;
+  process.env.OPENAI_API_KEY = "local-demo-test";
+  t.after(async () => {
+    if (previousBase === undefined) delete process.env.OPENAI_BASE_URL;
+    else process.env.OPENAI_BASE_URL = previousBase;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+    await mock.stop();
+  });
+  const server = await createApp(db, {
+    mode: "sample",
+    port: 8787,
+    host: "127.0.0.1",
+    publicUrl: "http://localhost:8787",
+    dataDir: directory,
+    agentBackend: "model",
+    intelligenceApiKey: "test-project-key-never-sent",
+    model: demoModel,
+    googleRedirectUri: "http://localhost:8787/api/google/callback",
+    allowedOrigins: [],
+  });
+  try {
+    const task = await server.agent.createTask("owner", { prompt: "Plan my week" });
+    await server.agent.worker.tick();
+    const result = await server.agent.detail("owner", task.id);
+    assert.equal(result.task.status, "waiting_input");
+    assert.match(String(result.task.state.lastUpdate), /Find cool stuff on Hacker News/);
+    assert.ok(
+      result.events.some(
+        (event) =>
+          event.title === "Agent update" && /Find cool stuff on Hacker News/.test(event.detail),
+      ),
+      "the reply is recorded in the task timeline",
+    );
+  } finally {
+    await server.agent.stop();
+    await db.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("replaying a completed prepared action returns its receipt without reopening approval", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "openmuse-model-replay-"));
+  const db = await createStore();
+  const draft = {
+    title: "Sample walk",
+    start: "2026-10-10T10:00:00-07:00",
+    end: "2026-10-10T11:00:00-07:00",
+  };
+  let calls: ({ name: string; arguments: object } | undefined)[] = [
+    { name: "prepare_event", arguments: draft },
+  ];
+  const { requests } = await modelFixture(t, (index) => calls[index]);
+  const server = await createApp(db, {
+    mode: "sample",
+    port: 8787,
+    host: "127.0.0.1",
+    publicUrl: "http://localhost:8787",
+    dataDir: directory,
+    agentBackend: "model",
+    intelligenceApiKey: "test-project-key-never-sent",
+    model: "openai/fixture",
+    googleRedirectUri: "http://localhost:8787/api/google/callback",
+    allowedOrigins: [],
+  });
+  try {
+    const task = await server.agent.createTask("replay-owner", {
+      prompt: "Put a sample walk on my calendar",
+    });
+    await server.agent.worker.tick();
+    const pending = await server.agent.getTask("replay-owner", task.id);
+    assert.equal(pending.status, "waiting_approval");
+    assert.ok(pending.actionId);
+    const proposal = await db.get<ActionProposal>("replay-owner", "actions", pending.actionId);
+    assert.ok(proposal);
+    const completed = await server.actions.decide(
+      "replay-owner",
+      proposal.id,
+      proposal.hash,
+      "approve",
+    );
+    assert.equal(completed.status, "succeeded");
+
+    requests.length = 0;
+    calls = [
+      { name: "prepare_event", arguments: draft },
+      { name: "finish_task", arguments: { summary: "The reviewed event is already complete." } },
+    ];
+    await server.agent.worker.tick();
+
+    const finished = await server.agent.getTask("replay-owner", task.id);
+    assert.equal(finished.status, "succeeded", finished.error ?? finished.question);
+    assert.equal(finished.actionId, null);
+    assert.equal(finished.state.approvalResult, completed.result);
+    const actions = (await db.list<ActionProposal>("replay-owner", "actions")).filter(
+      (action) => action.taskId === task.id,
+    );
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0].status, "succeeded");
+    assert.ok(requests.some((request) => request.body.includes(String(completed.result))));
+  } finally {
+    await server.agent.stop();
+    await db.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("browser reads keep observation identity distinct while reusing one session", async (t) => {
+  let currentUrl = "https://example.com/one";
+  const sessionIds = new Set<string>();
+  const browser = await browserFixture(t, (path, body) => {
+    if (path === "/sessions") {
+      const id = String(body.id);
+      currentUrl = String(body.url);
+      sessionIds.add(id);
+      return {
+        data: {
+          id,
+          title: currentUrl,
+          url: currentUrl,
+          status: "active",
+          updatedAt: new Date().toISOString(),
+        },
+      };
+    }
+    if (path.endsWith("/read")) {
+      return {
+        data: {
+          url: currentUrl,
+          title: currentUrl.endsWith("/one") ? "Source one" : "Source two",
+          text: `Evidence from ${currentUrl}`,
+          truncated: false,
+        },
+      };
+    }
+    throw new Error(`Unexpected browser path: ${path}`);
+  });
+  const calls: { name: string; arguments: object }[] = [
+    { name: "read_web", arguments: { url: "https://example.com/one" } },
+    { name: "read_web", arguments: { url: "https://example.com/two" } },
+    { name: "finish_task", arguments: { summary: "Compared both public sources." } },
+  ];
+  await modelFixture(t, (index) => calls[index]);
+  const app = await createApp(browser.db, {
+    ...browser.config,
+    agentBackend: "model",
+    model: "openai/fixture",
+  });
+  t.after(() => app.agent.stop());
+
+  const task = await app.agent.createTask("owner", {
+    prompt: "Read both public sources and compare them.",
+  });
+  await app.agent.worker.tick();
+
+  const saved = await app.agent.getTask("owner", task.id);
+  assert.equal(saved.status, "succeeded", saved.error ?? saved.question);
+  const webEvidence = saved.evidence.filter((item) => item.kind === "web");
+  assert.equal(webEvidence.length, 2);
+  assert.deepEqual(
+    webEvidence.map((item) => item.url),
+    ["https://example.com/one", "https://example.com/two"],
+  );
+  assert.equal(sessionIds.size, 1, "both reads should reuse the same browser session");
+  assert.equal(new Set(webEvidence.map((item) => item.id)).size, 2);
 });

@@ -168,3 +168,46 @@ test("pending reviews do not starve queued work", async () => {
     await db.close();
   }
 });
+test("run history keeps the time the run started", async () => {
+  const db = await createStore();
+  try {
+    await db.put("owner", "tasks", task());
+    let clock = Date.parse("2026-01-01T00:00:00.000Z");
+    await new TaskWorker(
+      db,
+      async () => {
+        clock += 60000;
+        return { status: "succeeded" };
+      },
+      { now: () => clock },
+    ).tick();
+    const [run] = (await db.scan<{ startedAt: string; finishedAt: string }>("runs")).map(
+      ({ value }) => value,
+    );
+    assert.equal(run?.startedAt, "2026-01-01T00:00:00.000Z");
+    assert.equal(run?.finishedAt, "2026-01-01T00:01:00.000Z");
+  } finally {
+    await db.close();
+  }
+});
+test("a failed run record does not leave the task stuck in the worker", async () => {
+  const db = await createStore();
+  try {
+    await db.put("owner", "tasks", task());
+    const flaky = Object.create(db) as typeof db;
+    flaky.put = (async (owner: string, kind: string, value: { id: string }) => {
+      if (kind === "runs") throw new Error("database unavailable");
+      return db.put(owner, kind, value);
+    }) as typeof db.put;
+    const worker = new TaskWorker(flaky, async () => ({ status: "succeeded" }));
+    await worker.tick().catch(() => {});
+    const stopped = await Promise.race([
+      worker.stop().then(() => true),
+      new Promise((r) => setTimeout(() => r(false), 500)),
+    ]);
+    assert.equal(stopped, true);
+    assert.equal((await db.get<AgentTask>("owner", "tasks", "task1"))?.status, "failed");
+  } finally {
+    await db.close();
+  }
+});

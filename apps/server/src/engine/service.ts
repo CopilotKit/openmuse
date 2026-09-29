@@ -271,7 +271,7 @@ export class AgentService {
               ? "Paused. Resume when you're ready."
               : "",
         ...(task.kind === "monitor" && action === "resume"
-          ? { state: { ...task.state, failures: 0, notice: null } }
+          ? { state: { ...task.state, failures: 0, notice: null, resumingMonitor: false } }
           : {}),
       },
     );
@@ -286,6 +286,8 @@ export class AgentService {
         {
           status: action === "cancel" ? "stopped" : action === "pause" ? "paused" : "active",
           nextCheckAt: date(),
+          // Clearing the error fences out a failure reconcile that read the task before this.
+          ...(action === "resume" || action === "retry" ? { error: null } : {}),
         },
       );
     if (action === "cancel" && task.actionId) {
@@ -395,10 +397,26 @@ export class AgentService {
     return monitor;
   }
   private async activateMonitor(owner: string, monitor: Monitor) {
-    if (monitor.status !== "active") return;
+    if (monitor.status !== "active") return null;
     const task = await this.getTask(owner, monitor.taskId);
-    if (task.status !== "paused" || !task.state.initializingMonitor) return;
-    await this.db.compareAndSwap(
+    if (task.status !== "paused") return null;
+    if (task.state.resumingMonitor)
+      return this.db.compareAndSwap(
+        owner,
+        "tasks",
+        task.id,
+        { status: "paused", state: { resumingMonitor: true } },
+        {
+          status: "queued",
+          nextRunAt: date(),
+          leaseId: null,
+          leaseUntil: null,
+          error: null,
+          state: { ...task.state, resumingMonitor: false, failures: 0, notice: null },
+        },
+      );
+    if (!task.state.initializingMonitor) return null;
+    return this.db.compareAndSwap(
       owner,
       "tasks",
       task.id,
@@ -414,18 +432,79 @@ export class AgentService {
     if (!monitor) throw new AppError("Monitor not found", 404);
     if (monitor.status === "stopped" && action !== "stop")
       throw new AppError("Create a new watch to restart this stopped monitor", 409);
-    const status = action === "pause" ? "paused" : action === "stop" ? "stopped" : "active";
-    const saved = await this.db.put(owner, "monitors", { ...monitor, status, nextCheckAt: date() });
-    const task = await this.getTask(owner, monitor.taskId);
-    if (action === "pause" || action === "stop")
+    if (action === "pause" || action === "stop") {
+      const status = action === "pause" ? "paused" : "stopped";
+      const saved = await this.db.put(owner, "monitors", {
+        ...monitor,
+        status,
+        nextCheckAt: date(),
+      });
+      const task = await this.getTask(owner, monitor.taskId);
       await this.control(owner, task.id, action === "pause" ? "pause" : "cancel");
-    else {
+      return saved;
+    }
+    let monitorStatus = monitor.status;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const task = await this.getTask(owner, monitor.taskId);
+      if (task.status === "cancelled") break;
+      if (task.status === "paused") {
+        // Mark the paused task before activating the monitor so no worker can claim it in between.
+        const marked = await this.db.compareAndSwap(
+          owner,
+          "tasks",
+          task.id,
+          { status: "paused", leaseId: task.leaseId ?? null },
+          { state: { ...task.state, resumingMonitor: true } },
+        );
+        if (!marked) break;
+        const activated = await this.db.compareAndSwap<Monitor>(
+          owner,
+          "monitors",
+          id,
+          { status: monitor.status },
+          { status: "active", nextCheckAt: date(), error: null },
+        );
+        const saved = activated ?? (await this.db.get<Monitor>(owner, "monitors", id));
+        if (saved?.status === "active" && (await this.activateMonitor(owner, saved))) return saved;
+        const unmarked = await this.db.compareAndSwap(
+          owner,
+          "tasks",
+          task.id,
+          { status: "paused", state: { resumingMonitor: true } },
+          { state: { ...task.state, resumingMonitor: false } },
+        );
+        // Another request or maintenance may have finished this resume first.
+        if (!unmarked && saved?.status === "active") {
+          const latest = await this.getTask(owner, task.id);
+          if (["queued", "running", "scheduled"].includes(latest.status)) return saved;
+        }
+        if (activated)
+          await this.db.compareAndSwap(
+            owner,
+            "monitors",
+            id,
+            { status: "active" },
+            { status: monitor.status, error: monitor.error ?? null },
+          );
+        break;
+      }
+      // Only activate the monitor we read, so a concurrent stop is never undone.
+      const saved = await this.db.compareAndSwap<Monitor>(
+        owner,
+        "monitors",
+        id,
+        { status: monitorStatus },
+        { status: "active", nextCheckAt: date() },
+      );
+      if (!saved) break;
+      monitorStatus = "active";
       this.worker.abort(task.id);
-      await this.db.compareAndSwap(
+      const queued = await this.db.compareAndSwap(
         owner,
         "tasks",
         task.id,
-        { status: task.status, leaseId: task.leaseId ?? null },
+        // updatedAt fences out a whole run finishing in between, which would move the baseline.
+        { status: task.status, leaseId: task.leaseId ?? null, updatedAt: task.updatedAt },
         {
           status: "queued",
           nextRunAt: date(),
@@ -435,8 +514,9 @@ export class AgentService {
           state: { ...task.state, failures: 0, notice: null },
         },
       );
+      if (queued) return saved;
     }
-    return saved;
+    throw new AppError("The watch changed while updating. Try again.", 409);
   }
   async refreshIdeas(owner: string) {
     const w = await this.workspace.snapshot(owner);
@@ -625,6 +705,12 @@ export class AgentService {
         409,
       );
     const proposal = await this.actions.propose(owner, input, `${task.id}:${key}`, task.id);
+    if (proposal.status === "succeeded") return proposal;
+    if (proposal.status !== "awaiting_review" && proposal.status !== "executing")
+      throw new AppError(
+        `Reviewed action ${proposal.status}: ${proposal.error ?? "No further action was taken"}`,
+        409,
+      );
     try {
       await context.checkpoint({ actionId: proposal.id });
     } catch (error) {
@@ -632,11 +718,12 @@ export class AgentService {
         await this.actions.decide(owner, proposal.id, proposal.hash, "deny");
       throw error;
     }
-    await context.event(
-      "approval",
-      proposal.title,
-      `Review prepared for ${proposal.account ?? "the connected account"}`,
-    );
+    if (proposal.status === "awaiting_review")
+      await context.event(
+        "approval",
+        proposal.title,
+        `Review prepared for ${proposal.account ?? "the connected account"}`,
+      );
     return proposal;
   }
   private async execute(
@@ -674,6 +761,8 @@ export class AgentService {
         if (error instanceof LostLeaseError || context.signal.aborted) throw error;
         await context.guard();
         const failures = Number(task.state.failures ?? 0) + 1;
+        // Each streak of failures (after a success or a resume) gets its own alerts.
+        const failureStreak = Number(task.state.failureStreak ?? 0) + (failures === 1 ? 1 : 0);
         const detail = error instanceof Error ? error.message : "Page check failed";
         const nextCheckAt = new Date(
           Date.now() + Math.min(60, 2 ** failures) * 60000,
@@ -683,11 +772,7 @@ export class AgentService {
           "monitors",
           String(task.input.monitorId),
           { status: "active" },
-          {
-            error: detail,
-            nextCheckAt,
-            ...(failures >= 5 ? { status: "paused" } : {}),
-          },
+          { error: detail, nextCheckAt },
         );
         await context.event(
           "error",
@@ -701,10 +786,12 @@ export class AgentService {
           state: {
             ...task.state,
             failures,
+            resumingMonitor: false,
+            failureStreak,
             notice: {
               title: "Watch needs attention",
               body: detail,
-              key: `watch-error:${task.id}:${failures >= 5 ? "paused" : "retry"}`,
+              key: `watch-error:${task.id}:${failureStreak}:${failures >= 5 ? "paused" : "retry"}`,
             },
           },
         };
@@ -804,6 +891,15 @@ export class AgentService {
       .safeParse(task.state.notice);
     if ((task.status === "scheduled" || (task.status === "paused" && task.error)) && notice.success)
       await this.notify(owner, notice.data.title, notice.data.body, task.id, notice.data.key);
+    // A watch pauses after repeated failures only once that task outcome has committed.
+    if (task.kind === "monitor" && task.status === "paused" && task.error)
+      await this.db.compareAndSwap(
+        owner,
+        "monitors",
+        String(task.input.monitorId),
+        { status: "active", error: task.error },
+        { status: "paused" },
+      );
   }
   private async document(
     owner: string,
@@ -925,7 +1021,8 @@ export class AgentService {
     }
     const text = observation.text.replace(/\s+/g, " ").trim();
     const currentHash = hash(text);
-    const previousHash = monitor.lastHash;
+    const previousHash =
+      typeof task.state.lastHash === "string" ? task.state.lastHash : monitor.lastHash;
     const matched =
       monitor.condition === "change"
         ? Boolean(previousHash && previousHash !== currentHash)
@@ -970,6 +1067,8 @@ export class AgentService {
       state: {
         ...task.state,
         sessionId: observation.sessionId,
+        lastHash: currentHash,
+        resumingMonitor: false,
         matched,
         failures: 0,
         notice: shouldNotify

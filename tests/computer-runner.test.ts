@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { runDocker } from "../apps/server/src/computer.ts";
 
-test("Docker subprocess uses literal argv, strips provider credentials, caps output and bounds hangs", async () => {
+// The fake `docker` below is a #! script, which Windows cannot execute without a shell.
+const posixOnly = process.platform === "win32" && "the fake docker CLI is a POSIX #! script";
+
+test("Docker subprocess uses literal argv, strips provider credentials, caps output and bounds hangs", {
+  skip: posixOnly,
+}, async () => {
   const directory = await mkdtemp(join(tmpdir(), "openmuse-docker-runner-"));
   const previousPath = process.env.PATH;
   const previousKey = process.env.OPENMUSE_TEST_SECRET;
