@@ -34,12 +34,22 @@ export interface Config {
   dataDir: string;
   databaseUrl?: string;
   accessKey?: string;
+  skipAccessKey?: boolean;
   encryptionKey?: string;
   model?: string;
   jevMode?: "off" | "sample" | "live";
   typesafeApiKey?: string;
   jevModel?: string;
   agentBackend: "sample" | "model" | "agui";
+  /**
+   * Intelligence-side identity for this single-user workspace. Defaults to the
+   * local owner so local rows and Intelligence threads share one identity; the
+   * platform accepts the slug form and its validator allows [\w.@:=-]. Thread
+   * rows are keyed by userId, so this must be one shared value — a drift between
+   * identifyUser and getOrCreateThread strands threads under the old owner
+   * (THREAD_NOT_FOUND on read, DATABASE_CONSTRAINT_VIOLATION on re-create).
+   */
+  intelligenceUserId: string;
   agentUrl?: string;
   agentToken?: string;
   intelligenceApiKey?: string;
@@ -119,12 +129,14 @@ export function readConfig(): Config {
     dataDir: resolve(process.env.DATA_DIR ?? ".openmuse"),
     databaseUrl: process.env.DATABASE_URL,
     accessKey: process.env.OPENMUSE_ACCESS_KEY,
+    skipAccessKey: process.env.OPENMUSE_SKIP_ACCESS_KEY === "true",
     encryptionKey: process.env.TOKEN_ENCRYPTION_KEY,
     model: process.env.MODEL,
     jevMode,
     typesafeApiKey,
     jevModel: process.env.JEV_MODEL?.trim() || defaultJevModel,
     agentBackend: backend,
+    intelligenceUserId: process.env.INTELLIGENCE_USER_ID?.trim() || "local-user",
     agentUrl: process.env.AGENT_URL,
     agentToken: process.env.AGENT_TOKEN,
     intelligenceApiKey: required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage),
@@ -141,13 +153,10 @@ export function readConfig(): Config {
       process.env.ALLOWED_ORIGINS ?? "http://localhost:8081,http://127.0.0.1:8081"
     ).split(","),
   };
-  if (
-    mode === "live" &&
-    (!config.accessKey || config.accessKey.length < 24 || !config.encryptionKey)
-  )
-    throw new Error(
-      "Live mode requires OPENMUSE_ACCESS_KEY (24+ characters) and TOKEN_ENCRYPTION_KEY (32-byte base64)",
-    );
+  if (mode === "live" && !config.encryptionKey)
+    throw new Error("Live mode requires TOKEN_ENCRYPTION_KEY (32-byte base64)");
+  if (mode === "live" && !config.skipAccessKey && (!config.accessKey || config.accessKey.length < 24))
+    throw new Error("Live mode requires OPENMUSE_ACCESS_KEY (24+ characters)");
   if (mode === "sample" && !["127.0.0.1", "localhost", "::1"].includes(config.host))
     throw new Error("Sample workspace is local-only. HOST must be a loopback address.");
   return config;

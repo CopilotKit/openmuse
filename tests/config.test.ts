@@ -14,6 +14,7 @@ const sampleConfig: Config = {
   publicUrl: "http://localhost:8787",
   dataDir: ".openmuse",
   agentBackend: "sample",
+  intelligenceUserId: "local-user",
   googleRedirectUri: "http://localhost:8787/api/google/callback",
   allowedOrigins: ["http://localhost:8081"],
 };
