@@ -79,6 +79,13 @@ export function assertApiDeploymentConfig(
   );
 }
 
+/** Accept a full worker URL, or host:port from a platform that omits the scheme. */
+export function browserWorkerUrl(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  return trimmed.includes("://") ? trimmed : `http://${trimmed}`;
+}
+
 // Provider SDKs retry transient failures before the response starts, with
 // exponential backoff: OpenAI and Anthropic retry HTTP 408, 409, 429, 5xx and
 // connection errors and honor retry-after; Gemini retries 408, 429, 500, 502,
@@ -124,7 +131,7 @@ export function readConfig(): Config {
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
     googleRedirectUri: `${publicUrl}/api/google/callback`,
-    workerUrl: process.env.BROWSER_WORKER_URL,
+    workerUrl: browserWorkerUrl(process.env.BROWSER_WORKER_URL),
     workerToken: process.env.WORKER_TOKEN,
     taskWorkerEnabled: process.env.TASK_WORKER_ENABLED !== "false",
     computerEnabled: process.env.COMPUTER_ENABLED === "true",

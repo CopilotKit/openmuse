@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   assertApiDeploymentConfig,
+  browserWorkerUrl,
   type Config,
   shadowedEnvKeys,
 } from "../apps/server/src/config.ts";
@@ -77,6 +78,14 @@ test("Jev mode is off by default and validates explicit modes", async () => {
       else process.env[key] = value;
     }
   }
+});
+
+test("browser worker URL keeps an existing scheme and adds http to host:port", () => {
+  assert.equal(browserWorkerUrl(undefined), undefined);
+  assert.equal(browserWorkerUrl("  "), undefined);
+  assert.equal(browserWorkerUrl("http://127.0.0.1:8790"), "http://127.0.0.1:8790");
+  assert.equal(browserWorkerUrl("https://browser.internal:8790"), "https://browser.internal:8790");
+  assert.equal(browserWorkerUrl("openmuse-browser-h4fx:8790"), "http://openmuse-browser-h4fx:8790");
 });
 
 test("environment variables that override a different .env value are reported by name", () => {
