@@ -97,11 +97,11 @@ For iOS or Android, use `pnpm --dir apps/mobile ios` or `pnpm --dir apps/mobile 
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/CopilotKit/OpenMuse)
 
-[render.yaml](render.yaml) deploys two services: the API, and the web app. The API answers `/` with JSON, so the UI is its own static site.
+[render.yaml](render.yaml) deploys three services: the API, the web app, and a private browser. The API answers `/` with JSON, so the UI is its own static site.
 
 ### First run
 
-1. Click **Deploy to Render**. Wait until `openmuse-api` and `openmuse-web` are both live.
+1. Click **Deploy to Render**. Wait until `openmuse-api`, `openmuse-web`, and `openmuse-browser` are live.
 2. On `openmuse-api`, open **Environment** and copy `OPENMUSE_ACCESS_KEY`.
 3. Open the `openmuse-web` URL and sign in with that key.
 4. Send a message.
@@ -111,7 +111,7 @@ The deploy form asks for two values you provide. Render generates the other two.
 | Variable | Set by | If it is missing |
 |---|---|---|
 | `CPK_INTELLIGENCE_API_KEY` | You. Run `npx copilotkit@latest login`, then `npx copilotkit@latest project select`. Keep it on the server. | Chat cannot open a thread. |
-| `OPENAI_API_KEY` | You. Used by the default `openai/gpt-4o-mini`. Change `MODEL` and supply the matching provider key for Anthropic or Google. | The model call fails. |
+| `OPENAI_API_KEY` | You. Used by the default `openai/gpt-5`. Change `MODEL` and supply the matching provider key for Anthropic or Google. | The model call fails. |
 | `OPENMUSE_ACCESS_KEY` | Render | You cannot sign in. |
 | `TOKEN_ENCRYPTION_KEY` | Render | The API refuses to start in live mode. |
 
@@ -131,7 +131,7 @@ Health check: `https://<openmuse-api>/api/health`.
 
 **Live mode** is required. Render binds `0.0.0.0`, and sample mode rejects any host that is not loopback. The Blueprint sets `WORKSPACE_MODE=live`.
 
-**Browsing is included, and you can take it out.** `openmuse-browser` is a private service, so it has no public URL. The API reaches it at `http://openmuse-browser:8790` with a token Render generates. To deploy without it, delete the `openmuse-browser` service and the `BROWSER_WORKER_URL` and `WORKER_TOKEN` entries on `openmuse-api`. Chat, drafts, and tasks still run. Page reads, screenshots, and **Take control** do not.
+**Browsing is included, and you can take it out.** `openmuse-browser` is a private service, so it has no public URL. The API reaches it at `http://openmuse-browser:8790` with a token Render generates. If the private hostname is not `openmuse-browser`, set `BROWSER_WORKER_URL` to `http://<that-host>:8790`. To deploy without it, delete the `openmuse-browser` service and the `BROWSER_WORKER_URL` and `WORKER_TOKEN` entries on `openmuse-api`. Chat, drafts, and tasks still run. Page reads, screenshots, and **Take control** do not.
 
 The Docker computer and Google mail or calendar need the setup in the sections below. This Blueprint does not start them.
 

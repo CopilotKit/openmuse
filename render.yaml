@@ -23,7 +23,7 @@ services:
       - key: AGENT_BACKEND
         value: model
       - key: MODEL
-        value: openai/gpt-4o-mini
+        value: openai/gpt-5
       - key: DATA_DIR
         value: /var/data/openmuse
       - key: TASK_WORKER_ENABLED
