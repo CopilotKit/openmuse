@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AbstractAgent } from "@ag-ui/client";
-import { CopilotKitCore } from "@copilotkit/core";
+import { AgentThreadLockedError, CopilotKitCore } from "@copilotkit/core";
 import { throwError } from "rxjs";
 import { ConversationQueue } from "../apps/mobile/src/conversation-queue.ts";
-import { runConversationTurn } from "../apps/mobile/src/conversation-run.ts";
+import {
+  ConversationTurnError,
+  runConversationTurn,
+  threadLocked,
+} from "../apps/mobile/src/conversation-run.ts";
 
 test("an emitted CopilotKit run error stops the queue even when runAgent resolves", async () => {
   let attempts = 0;
@@ -34,5 +38,26 @@ test("an emitted CopilotKit run error stops the queue even when runAgent resolve
   assert.deepEqual(
     queue.getSnapshot().pending.map((message) => message.id),
     ["second"],
+  );
+});
+
+test("a turn refused because the thread is locked reports the lock code", async () => {
+  class LockedAgent extends AbstractAgent {
+    run() {
+      return throwError(() => new AgentThreadLockedError("thread"));
+    }
+  }
+  const agent = new LockedAgent({ agentId: "default", threadId: "thread" });
+  const core = new CopilotKitCore({ agents__unsafe_dev_only: { default: agent } });
+  await assert.rejects(
+    runConversationTurn(
+      "default",
+      () => core.runAgent({ agent }),
+      (onError) => core.subscribe({ onError }),
+    ),
+    (error: unknown) =>
+      error instanceof ConversationTurnError &&
+      error.code === threadLocked &&
+      error.message === "Thread thread is locked",
   );
 });

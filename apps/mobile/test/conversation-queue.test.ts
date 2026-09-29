@@ -72,3 +72,14 @@ function deferred() {
   });
   return { promise, resolve };
 }
+
+test("a message the server refused is restored first in line, once", async () => {
+  const queue = new ConversationQueue();
+  queue.enqueue({ id: "later", text: "Later" });
+  queue.restore({ id: "refused", text: "Refused" });
+  queue.restore({ id: "refused", text: "Refused" });
+  assert.deepEqual(
+    queue.getSnapshot().pending.map((message) => message.id),
+    ["refused", "later"],
+  );
+});
