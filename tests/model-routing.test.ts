@@ -244,3 +244,13 @@ test("filterTools: mixed exact and glob patterns", () => {
   assert.equal(names.length, 3);
   assert.deepEqual(names, ["computer_status", "search_mail", "delegate_task"]);
 });
+test("filterTools: mobile-friendly allowlist keeps a small subset for a 3B model", () => {
+  const tools = allToolNames.map(makeTool);
+  // A small mobile model gets only delegation + status + memory tools.
+  const filtered = filterTools(tools, ["delegate_task", "agent_status", "remember_fact"]);
+  assert.equal(filtered.length, 3);
+  assert.deepEqual(
+    filtered.map((t) => t.name),
+    ["delegate_task", "agent_status", "remember_fact"],
+  );
+});
