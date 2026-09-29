@@ -456,3 +456,36 @@ test("device session tasks carry creatorDevice for routing", async () => {
   assert.equal(creatorDevice?.deviceId, "tablet-002");
   assert.equal(creatorDevice?.deviceName, "iPad Pro");
 });
+test("available-models endpoint reports provider availability and server defaults", async () => {
+  const result = await read<{
+    providers: { openai: boolean; google: boolean };
+    models: { chat?: string; task?: string; simpleTask?: string };
+    chatToolAllowlist?: string[];
+  }>("/available-models");
+  assert.equal(result.providers.openai, true);
+  assert.equal(result.providers.google, false);
+  // Model fields are undefined when no MODEL/CHAT_MODEL env vars are set.
+  assert.equal(result.models.chat, undefined);
+  assert.equal(result.chatToolAllowlist, undefined);
+});
+test("device model routing: chatToolAllowlist override round-trips", async () => {
+  const session = await server.app.request("/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: "phone-004", deviceName: "TestDevice" }),
+  });
+  const { token: deviceToken } = await session.json();
+  const dh = { authorization: `Bearer ${deviceToken}`, "Content-Type": "application/json" };
+  const patch = await server.app.request("/api/agent/device-models", {
+    method: "PATCH",
+    headers: dh,
+    body: JSON.stringify({
+      chatToolAllowlist: ["delegate_task", "agent_status", "computer_*"],
+    }),
+  });
+  assert.equal(patch.status, 200);
+  const get = await server.app.request("/api/agent/device-models", { headers: dh });
+  assert.equal(get.status, 200);
+  const loaded = (await get.json()) as DeviceModelRouting;
+  assert.deepEqual(loaded.chatToolAllowlist, ["delegate_task", "agent_status", "computer_*"]);
+});
