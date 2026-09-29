@@ -11,6 +11,7 @@ import {
   type Evidence,
   type Goal,
   goalInputSchema,
+  goalProgressSchema,
   type Idea,
   type Monitor,
   monitorInputSchema,
@@ -358,6 +359,38 @@ export class AgentService {
           await this.control(owner, task.id, "pause");
     return saved;
   }
+  // Chat reports progress by milestone ID. An unknown ID fails rather than being dropped,
+  // and the write goes through updateGoal exactly as a Goals tab change does.
+  async updateGoalProgress(owner: string, raw: unknown, idempotencyKey?: string) {
+    const input = goalProgressSchema.parse(raw);
+    const goal = await this.db.get<Goal>(owner, "goals", input.goalId);
+    if (!goal) throw new AppError("Goal not found", 404);
+    const done = new Map(input.milestones.map((item) => [item.id, item.done]));
+    for (const id of done.keys())
+      if (!goal.milestones.some((item) => item.id === id))
+        throw new AppError(`Milestone ${id} is not part of this goal`, 404);
+    // A replayed tool call derives the same IDs, so it cannot add a milestone twice.
+    const added = input.addMilestones
+      .map((title, index) => ({
+        id: idempotencyKey ? hash(`milestone:${idempotencyKey}:${index}`) : randomUUID(),
+        title,
+        done: false,
+      }))
+      .filter((item) => !goal.milestones.some((existing) => existing.id === item.id));
+    if (!input.status && !done.size && !input.addMilestones.length)
+      throw new AppError("Say which milestones or status to change", 422);
+    const milestones = [
+      ...goal.milestones.map((item) =>
+        done.has(item.id) ? { ...item, done: done.get(item.id) === true } : item,
+      ),
+      ...added,
+    ];
+    if (milestones.length > 100) throw new AppError("A goal can have at most 100 milestones", 422);
+    return this.updateGoal(owner, goal.id, {
+      ...(input.status ? { status: input.status } : {}),
+      ...(done.size || added.length ? { milestones } : {}),
+    });
+  }
   async createMonitor(owner: string, raw: unknown, idempotencyKey?: string) {
     const input = monitorInputSchema.parse(raw);
     const url = new URL(input.url);
@@ -601,6 +634,17 @@ export class AgentService {
     await this.ensure(owner);
     await this.db.compareAndSwap(owner, "agent-settings", "identity", {}, { lastIdeasAt: date() });
     return this.db.list<Idea>(owner, "ideas");
+  }
+  // The chat view of refreshIdeas: open suggestions only, without evidence excerpts.
+  // Cards read the full idea from the workspace; the person starts or dismisses it there.
+  async findIdeas(owner: string, limit = 5) {
+    const ideas = (await this.refreshIdeas(owner)).filter((idea) => idea.status === "new");
+    return {
+      ideas: ideas
+        .slice(0, limit)
+        .map(({ id, title, reason, kind }) => ({ id, title, reason, kind })),
+      more: Math.max(0, ideas.length - limit),
+    };
   }
   async decideIdea(owner: string, id: string, action: "accept" | "dismiss", prompt?: string) {
     let idea = await this.db.get<Idea>(owner, "ideas", id);

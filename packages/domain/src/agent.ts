@@ -162,3 +162,12 @@ export const goalInputSchema = z.object({
   category: z.string().max(80).default("Personal"),
   milestones: z.array(z.string().min(1).max(200)).max(20).default([]),
 });
+export const goalProgressSchema = z.object({
+  goalId: z.string().min(1).max(200),
+  status: z.enum(["active", "paused", "completed"]).optional(),
+  milestones: z
+    .array(z.object({ id: z.string().min(1).max(200), done: z.boolean() }))
+    .max(100)
+    .default([]),
+  addMilestones: z.array(z.string().trim().min(1).max(200)).max(20).default([]),
+});
