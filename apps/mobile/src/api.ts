@@ -32,11 +32,12 @@ export class MuseApi {
 
 export async function createSession(
   accessKey?: string,
+  device?: { deviceId?: string; deviceName?: string },
 ): Promise<{ token: string; mode: "sample" | "live" }> {
   const response = await fetch(`${API_URL}/api/session`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ accessKey }),
+    body: JSON.stringify({ accessKey, ...device }),
   });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error || "Could not open your workspace.");

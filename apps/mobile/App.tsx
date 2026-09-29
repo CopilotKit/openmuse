@@ -37,6 +37,7 @@ import { ChatScreen, WorkspaceTools } from "./src/chat";
 import { ComputerEntry } from "./src/computer";
 import { ComputerDraftProvider } from "./src/computer-drafts";
 import { Details } from "./src/details";
+import { deviceInfo } from "./src/device";
 import { BrowserScreen, CalendarScreen, FilesScreen, MailScreen } from "./src/screens";
 import { ThreadsProvider, ThreadsSheet, useMuseThread } from "./src/threads";
 import { Button, Card, colors, ErrorNotice, Field, IconButton, Mascot, s } from "./src/ui";
@@ -75,7 +76,7 @@ export default function App() {
     setBusy(true);
     setError("");
     try {
-      const session = await createSession(key);
+      const session = await createSession(key, await deviceInfo());
       setToken(session.token);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
