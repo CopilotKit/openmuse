@@ -41,7 +41,7 @@ export function selectTaskModel(
         config.chatModel ??
         config.model ??
         "openai/unconfigured",
-      maxSteps: config.simpleTaskMaxSteps ?? 6,
+      maxSteps: deviceOverrides?.simpleTaskMaxSteps ?? config.simpleTaskMaxSteps ?? 6,
     };
   return {
     model:
@@ -50,7 +50,7 @@ export function selectTaskModel(
       config.model ??
       config.chatModel ??
       "openai/unconfigured",
-    maxSteps: config.taskMaxSteps ?? 16,
+    maxSteps: deviceOverrides?.taskMaxSteps ?? config.taskMaxSteps ?? 16,
   };
 }
 

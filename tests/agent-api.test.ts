@@ -380,12 +380,14 @@ test("model routing settings: models endpoint reports server config, device over
   const saved = await deviceRead<{ ok: true }>("/device-models", {
     chatModel: "openai/qwen3-8b",
     taskModel: "openai/qwen3-32b",
+    chatMaxSteps: 3,
   });
   assert.deepEqual(saved, { ok: true });
   const loaded = await deviceRead<DeviceModelRouting>("/device-models");
   assert.equal(loaded.chatModel, "openai/qwen3-8b");
   assert.equal(loaded.taskModel, "openai/qwen3-32b");
   assert.equal(loaded.simpleTaskModel, undefined);
+  assert.equal(loaded.chatMaxSteps, 3);
   // A non-device session cannot read another device's overrides.
   assert.equal((await request("/device-models")).status, 400);
 });

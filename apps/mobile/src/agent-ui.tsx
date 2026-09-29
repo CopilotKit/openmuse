@@ -1889,11 +1889,17 @@ export function ModelRoutingSection() {
   const [taskModel, setTaskModel] = useState("");
   const [simpleTaskModel, setSimpleTaskModel] = useState("");
   const [saving, setSaving] = useState(false);
+  const [chatMaxSteps, setChatMaxSteps] = useState("");
+  const [taskMaxSteps, setTaskMaxSteps] = useState("");
+  const [simpleTaskMaxSteps, setSimpleTaskMaxSteps] = useState("");
   useEffect(() => {
     if (overrides) {
       setChatModel(overrides.chatModel ?? "");
       setTaskModel(overrides.taskModel ?? "");
       setSimpleTaskModel(overrides.simpleTaskModel ?? "");
+      setChatMaxSteps(overrides.chatMaxSteps?.toString() ?? "");
+      setTaskMaxSteps(overrides.taskMaxSteps?.toString() ?? "");
+      setSimpleTaskMaxSteps(overrides.simpleTaskMaxSteps?.toString() ?? "");
     }
   }, [overrides]);
   async function persist() {
@@ -1903,6 +1909,9 @@ export function ModelRoutingSection() {
         chatModel: chatModel || undefined,
         taskModel: taskModel || undefined,
         simpleTaskModel: simpleTaskModel || undefined,
+        chatMaxSteps: chatMaxSteps ? Number(chatMaxSteps) : undefined,
+        taskMaxSteps: taskMaxSteps ? Number(taskMaxSteps) : undefined,
+        simpleTaskMaxSteps: simpleTaskMaxSteps ? Number(simpleTaskMaxSteps) : undefined,
       });
       void refreshRouting();
     } finally {
@@ -2009,6 +2018,28 @@ export function ModelRoutingSection() {
         onChangeText={setSimpleTaskModel}
         placeholder={routing?.simpleTaskModel || "e.g. openai/qwen3-8b"}
         autoCapitalize="none"
+      />
+      <Text style={[s.label, { marginTop: 12 }]}>Step budget overrides</Text>
+      <Field
+        label="Chat max steps"
+        value={chatMaxSteps}
+        onChangeText={setChatMaxSteps}
+        placeholder={String(routing?.maxSteps?.chat ?? 6)}
+        keyboardType="numeric"
+      />
+      <Field
+        label="Task max steps"
+        value={taskMaxSteps}
+        onChangeText={setTaskMaxSteps}
+        placeholder={String(routing?.maxSteps?.task ?? 16)}
+        keyboardType="numeric"
+      />
+      <Field
+        label="Simple-task max steps"
+        value={simpleTaskMaxSteps}
+        onChangeText={setSimpleTaskMaxSteps}
+        placeholder={String(routing?.maxSteps?.simpleTask ?? 6)}
+        keyboardType="numeric"
       />
       <Button
         small

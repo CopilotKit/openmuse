@@ -154,6 +154,26 @@ test("selectTaskModel: undefined overrides produce same result as no argument", 
   assert.equal(withUndef.model, without.model);
   assert.equal(withUndef.maxSteps, without.maxSteps);
 });
+test("selectTaskModel: device maxSteps overrides take priority over env", () => {
+  const config: Config = {
+    ...baseConfig,
+    model: "openai/base",
+    taskMaxSteps: 20,
+    simpleTaskMaxSteps: 8,
+  };
+  const overrides = {
+    simpleTaskModel: "openai/mobile-simple",
+    taskModel: "openai/mobile-task",
+    taskMaxSteps: 10,
+    simpleTaskMaxSteps: 4,
+  };
+  const complex = selectTaskModel(config, makeTask("agent"), overrides);
+  assert.equal(complex.model, "openai/mobile-task");
+  assert.equal(complex.maxSteps, 10);
+  const simple = selectTaskModel(config, makeTask("monitor"), overrides);
+  assert.equal(simple.model, "openai/mobile-simple");
+  assert.equal(simple.maxSteps, 4);
+});
 
 function makeTool(name: string): ToolDefinition {
   return { name, description: "", parameters: z.object({}), execute: async () => null };

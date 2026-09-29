@@ -219,6 +219,9 @@ export function agentRoutes(
         chatModel: z.string().optional(),
         taskModel: z.string().optional(),
         simpleTaskModel: z.string().optional(),
+        chatMaxSteps: z.number().int().positive().optional(),
+        taskMaxSteps: z.number().int().positive().optional(),
+        simpleTaskMaxSteps: z.number().int().positive().optional(),
       })
       .parse(await c.req.json());
     await service.db.put(c.get("owner"), "agent-settings", {

@@ -149,6 +149,9 @@ export interface DeviceModelRouting {
   chatModel?: string;
   taskModel?: string;
   simpleTaskModel?: string;
+  chatMaxSteps?: number;
+  taskMaxSteps?: number;
+  simpleTaskMaxSteps?: number;
 }
 export const createTaskSchema = z.object({
   title: z.string().trim().min(1).max(160).optional(),
