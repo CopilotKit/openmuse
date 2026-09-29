@@ -16,6 +16,7 @@ import {
   ScrollView,
   Text,
   TextInput,
+  type TextStyle,
   View,
 } from "react-native";
 import { z } from "zod";
@@ -34,6 +35,11 @@ import { Button, Card, CheckRow, colors, ErrorNotice, s } from "./ui";
 import { useWorkspace } from "./workspace";
 
 const displayParameters = z.record(z.string(), z.unknown());
+// The composer pill shows focus with its border, so the browser's ring inside it is noise.
+// Chrome draws `outline-style: auto` at any width, so only `none` removes it; React Native's
+// types omit that value, but react-native-web passes it through.
+const noFocusRing =
+  Platform.OS === "web" ? ({ outlineStyle: "none" } as unknown as TextStyle) : undefined;
 export function WorkspaceTools() {
   const { workspace, section } = useWorkspace();
   useAgentContext({
@@ -749,6 +755,7 @@ export function ChatScreen({
                 paddingHorizontal: 2,
                 paddingTop: 10,
                 paddingBottom: 10,
+                ...noFocusRing,
               }}
               multiline
               editable
