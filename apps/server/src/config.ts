@@ -36,6 +36,9 @@ export interface Config {
   accessKey?: string;
   encryptionKey?: string;
   model?: string;
+  jevMode?: "off" | "sample" | "live";
+  typesafeApiKey?: string;
+  jevModel?: string;
   agentBackend: "sample" | "model" | "agui";
   agentUrl?: string;
   agentToken?: string;
@@ -52,6 +55,9 @@ export interface Config {
   computerDeploymentId?: string;
   allowedOrigins: string[];
 }
+
+/** Pinned so live rankings do not shift when TypeSafe moves the `jev-latest` alias. */
+export const defaultJevModel = "jev-1.13.0";
 
 export const intelligenceKeyRequiredMessage =
   "OpenMuse requires CPK_INTELLIGENCE_API_KEY. " +
@@ -74,6 +80,13 @@ export function assertApiDeploymentConfig(
   );
 }
 
+/** Accept a full worker URL, or host:port from a platform that omits the scheme. */
+export function browserWorkerUrl(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  return trimmed.includes("://") ? trimmed : `http://${trimmed}`;
+}
+
 // Provider SDKs retry transient failures before the response starts, with
 // exponential backoff: OpenAI and Anthropic retry HTTP 408, 409, 429, 5xx and
 // connection errors and honor retry-after; Gemini retries 408, 429, 500, 502,
@@ -91,6 +104,12 @@ export function readConfig(): Config {
     throw new Error("AGENT_BACKEND must be sample, model or agui");
   if (mode === "live" && backend === "sample")
     throw new Error("Live workspaces cannot use the sample agent");
+  const jevMode = process.env.JEV_MODE ?? "off";
+  if (jevMode !== "off" && jevMode !== "sample" && jevMode !== "live")
+    throw new Error("JEV_MODE must be off, sample or live");
+  const typesafeApiKey = process.env.TYPESAFE_API_KEY?.trim();
+  if (jevMode === "live" && !typesafeApiKey)
+    throw new Error("JEV_MODE=live requires a nonblank TYPESAFE_API_KEY");
   const port = Number(process.env.PORT ?? 8787);
   const publicUrl = process.env.PUBLIC_API_URL ?? `http://localhost:${port}`;
   const config: Config = {
@@ -103,6 +122,9 @@ export function readConfig(): Config {
     accessKey: process.env.OPENMUSE_ACCESS_KEY,
     encryptionKey: process.env.TOKEN_ENCRYPTION_KEY,
     model: process.env.MODEL,
+    jevMode,
+    typesafeApiKey,
+    jevModel: process.env.JEV_MODEL?.trim() || defaultJevModel,
     agentBackend: backend,
     agentUrl: process.env.AGENT_URL,
     agentToken: process.env.AGENT_TOKEN,
@@ -110,7 +132,7 @@ export function readConfig(): Config {
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
     googleRedirectUri: `${publicUrl}/api/google/callback`,
-    workerUrl: process.env.BROWSER_WORKER_URL,
+    workerUrl: browserWorkerUrl(process.env.BROWSER_WORKER_URL),
     workerToken: process.env.WORKER_TOKEN,
     taskWorkerEnabled: process.env.TASK_WORKER_ENABLED !== "false",
     webSearchEnabled: process.env.WEB_SEARCH_ENABLED === "true",
