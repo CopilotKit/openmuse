@@ -791,7 +791,13 @@ export function CalendarScreen() {
         ) : events.length ? (
           events.map((e, i) => (
             <View key={e.id}>
-              {all && <Text style={[s.label, { marginTop: 16 }]}>{dateLabel(e.start)}</Text>}
+              {all && (
+                <Text style={[s.label, { marginTop: 16 }]}>
+                  {e.allDay
+                    ? dateLabel(`${e.start}T12:00:00`)
+                    : dateLabel(e.start, { timeZone: e.timeZone })}
+                </Text>
+              )}
               <AgendaRow event={e} index={i} neighbors={events} />
               <Text style={[s.small, { marginLeft: 84, marginBottom: 8 }]}>{e.timeZone}</Text>
             </View>

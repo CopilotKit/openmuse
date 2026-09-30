@@ -1,3 +1,5 @@
+import type { CalendarEvent } from "../../../packages/domain/src/index";
+
 /** Format a timed event in its calendar's named time zone. */
 export function localDateTime(value: string, timeZone: string): { date: string; time: string } {
   const instant = new Date(value);
@@ -38,6 +40,31 @@ export function zonedInstant(date: string, time: string, timeZone: string): stri
     candidate += delta;
   }
   throw new Error("This time does not exist in the selected time zone. Choose another time.");
+}
+
+/** Instant range for an event; all-day events cover their date in the event's own zone. */
+export function calendarInterval(
+  event: Pick<CalendarEvent, "start" | "end" | "allDay" | "timeZone">,
+): { start: number; end: number } | null {
+  try {
+    const start = event.allDay ? zonedInstant(event.start, "00:00", event.timeZone) : event.start;
+    const end = event.allDay ? zonedInstant(event.end, "00:00", event.timeZone) : event.end;
+    const from = Date.parse(start);
+    const to = Date.parse(end);
+    return Number.isFinite(from) && Number.isFinite(to) ? { start: from, end: to } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Half-open overlap: events that only touch at a boundary are not a conflict. */
+export function calendarOverlap(
+  left: Pick<CalendarEvent, "start" | "end" | "allDay" | "timeZone">,
+  right: Pick<CalendarEvent, "start" | "end" | "allDay" | "timeZone">,
+): boolean {
+  const a = calendarInterval(left);
+  const b = calendarInterval(right);
+  return Boolean(a && b && a.start < b.end && a.end > b.start);
 }
 
 /** Only fully serialized instants may reset a date editor's local text. */
