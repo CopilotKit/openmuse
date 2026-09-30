@@ -27,20 +27,33 @@ function liveConfig(intelligenceApiKey?: string): Config {
   };
 }
 
-const missingKeyMessage =
-  "OpenMuse requires CPK_INTELLIGENCE_API_KEY. " +
-  "Run `npx copilotkit@latest login` and `npx copilotkit@latest project select`, " +
-  "then set the generated server-only key. " +
-  "See https://docs.copilotkit.ai/intelligence/connect-your-runtime";
-
-test("every API mode rejects a missing or blank Intelligence key", () => {
+test("every API mode runs without an Intelligence key (local SSE mode)", () => {
   for (const mode of [sampleConfig, liveConfig()]) {
     for (const key of [undefined, "", " \t\n"]) {
-      assert.throws(() => assertApiDeploymentConfig({ ...mode, intelligenceApiKey: key }), {
-        name: "Error",
-        message: missingKeyMessage,
-      });
+      assert.doesNotThrow(() => assertApiDeploymentConfig({ ...mode, intelligenceApiKey: key }));
     }
+  }
+});
+
+test("a self-hosted Intelligence endpoint must set apiUrl and wsUrl together", () => {
+  for (const mode of [sampleConfig, liveConfig()]) {
+    assert.throws(
+      () =>
+        assertApiDeploymentConfig({
+          ...mode,
+          intelligenceApiKey: "local",
+          intelligenceApiUrl: "https://shim.local",
+        }),
+      { name: "Error" },
+    );
+    assert.doesNotThrow(() =>
+      assertApiDeploymentConfig({
+        ...mode,
+        intelligenceApiKey: "local",
+        intelligenceApiUrl: "https://shim.local",
+        intelligenceWsUrl: "wss://shim.local",
+      }),
+    );
   }
 });
 

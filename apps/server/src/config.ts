@@ -43,6 +43,8 @@ export interface Config {
   agentUrl?: string;
   agentToken?: string;
   intelligenceApiKey?: string;
+  intelligenceApiUrl?: string;
+  intelligenceWsUrl?: string;
   googleClientId?: string;
   googleClientSecret?: string;
   googleRedirectUri: string;
@@ -69,14 +71,22 @@ export function required(name: string, message: string, value = process.env[name
   return value.trim();
 }
 
-export function assertApiDeploymentConfig(
-  config: Config,
-): asserts config is Config & { intelligenceApiKey: string } {
-  required(
-    "CPK_INTELLIGENCE_API_KEY",
-    intelligenceKeyRequiredMessage,
-    config.intelligenceApiKey ?? "",
-  );
+/**
+ * Intelligence is optional: with the official cloud key (or a self-hosted
+ * Intelligence shim) the runtime persists threads and streams over its
+ * realtime WS; without one it falls back to the SSE runtime with local thread
+ * endpoints. A self-hosted endpoint must set apiUrl and wsUrl together —
+ * configuring only one would silently leave the other half pointed at the
+ * managed cloud.
+ */
+export function assertApiDeploymentConfig(config: Config): void {
+  if (Boolean(config.intelligenceApiUrl) !== Boolean(config.intelligenceWsUrl))
+    throw new Error("INTELLIGENCE_API_URL and INTELLIGENCE_WS_URL must be set together");
+}
+
+/** Whether Intelligence-backed threads/realtime are enabled at all. */
+export function intelligenceConfigured(config: Config): boolean {
+  return Boolean(config.intelligenceApiKey ?? config.intelligenceApiUrl);
 }
 
 /** Accept a full worker URL, or host:port from a platform that omits the scheme. */
@@ -127,7 +137,9 @@ export function readConfig(): Config {
     agentBackend: backend,
     agentUrl: process.env.AGENT_URL,
     agentToken: process.env.AGENT_TOKEN,
-    intelligenceApiKey: required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage),
+    intelligenceApiKey: process.env.CPK_INTELLIGENCE_API_KEY?.trim() || undefined,
+    intelligenceApiUrl: process.env.INTELLIGENCE_API_URL?.trim() || undefined,
+    intelligenceWsUrl: process.env.INTELLIGENCE_WS_URL?.trim() || undefined,
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
     googleRedirectUri: `${publicUrl}/api/google/callback`,

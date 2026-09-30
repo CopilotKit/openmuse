@@ -12,7 +12,12 @@ import { createAuth } from "./auth.ts";
 import { BrowserService } from "./browser.ts";
 import { ComputerService, type DockerRunner } from "./computer.ts";
 import { computerRoutes } from "./computer-routes.ts";
-import { assertApiDeploymentConfig, type Config } from "./config.ts";
+import { DurableAgentRunner } from "./engine/durable-runner.ts";
+import {
+  assertApiDeploymentConfig,
+  type Config,
+  intelligenceConfigured,
+} from "./config.ts";
 import type { Store } from "./db.ts";
 import { agentRoutes } from "./engine/routes.ts";
 import { AgentService } from "./engine/service.ts";
@@ -41,8 +46,17 @@ export async function createApp(
   const browser = new BrowserService(db, config, auth, files);
   const computer = new ComputerService(db, config, options.docker);
   const agent = new AgentService(db, config, workspace, files, actions, browser, computer);
-  const intelligence = new CopilotKitIntelligence({ apiKey: config.intelligenceApiKey });
-  const runtime = makeRuntime(config, agent, auth, intelligence);
+  // Intelligence is optional: with the key (or a self-hosted shim) the runtime
+  // uses cloud threads and the managed realtime WS; without it, the official
+  // SSE runtime serves local thread endpoints, persisted by DurableAgentRunner.
+  const intelligence = intelligenceConfigured(config)
+    ? new CopilotKitIntelligence({
+        apiKey: config.intelligenceApiKey ?? "local-shim",
+        ...(config.intelligenceApiUrl ? { apiUrl: config.intelligenceApiUrl } : {}),
+        ...(config.intelligenceWsUrl ? { wsUrl: config.intelligenceWsUrl } : {}),
+      })
+    : undefined;
+  const runtime = makeRuntime(config, agent, auth, intelligence, new DurableAgentRunner(db));
   const app = new Hono<{ Variables: { owner: string } }>();
   const origins = new Set([...config.allowedOrigins, new URL(config.publicUrl).origin]);
   app.use("*", async (c, next) => {
@@ -203,6 +217,9 @@ export async function createApp(
     );
   });
   app.get("/api/main-thread", async (c) => {
+    // Local (no Intelligence) mode: no platform thread exists; a stable local id
+    // is all the client needs — history comes from the local thread endpoints.
+    if (!intelligence) return c.json({ threadId: "local-main", existing: true });
     const owner = c.get("owner");
     await db.insertIfAbsent(owner, "conversation-settings", {
       id: "main",
