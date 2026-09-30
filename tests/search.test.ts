@@ -193,6 +193,8 @@ test("enabled native chat and delegated tasks use Parallel and deduplicate sourc
     agentBackend: "model",
     model: "openai/fixture",
     webSearchEnabled: true,
+    workerUrl: undefined,
+    workerToken: undefined,
   } as const;
   const app = await createApp(fixture.db, config);
   t.after(() => app.agent.stop());
@@ -214,6 +216,8 @@ test("enabled native chat and delegated tasks use Parallel and deduplicate sourc
   assert.ok(event && event.type === EventType.TOOL_CALL_RESULT);
   assert.deepEqual(JSON.parse(event.content).results, [searchSource]);
   assert.ok(requests[0].body.includes('"name":"search_web"'));
+  assert.ok(!requests[0].body.includes('"name":"browse_web"'));
+  assert.ok(!requests[0].body.includes('"name":"read_web"'));
   assert.ok(requests[1].body.includes(searchSource.url));
   includeDuplicates = true;
   requests.length = 0;
@@ -259,6 +263,8 @@ test("enabled native chat and delegated tasks use Parallel and deduplicate sourc
   assert.ok(webEvidence.some((source) => source.url === secondSource.url));
   assert.equal(searchRequests.filter(({ rpc }) => rpc.method === "tools/call").length, 3);
   assert.ok(requests[0].body.includes('"name":"search_web"'));
+  assert.ok(!requests[0].body.includes('"name":"browse_web"'));
+  assert.ok(!requests[0].body.includes('"name":"read_web"'));
 });
 
 for (const enabled of [undefined, false]) {
