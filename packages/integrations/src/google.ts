@@ -481,7 +481,8 @@ export class GoogleClient {
                 id: z.string().min(1),
                 summary: z.string().default("(Untitled calendar)"),
                 summaryOverride: z.string().optional(),
-                timeZone: z.string(),
+                // Google marks the calendar time zone as optional.
+                timeZone: z.string().default("UTC"),
                 accessRole: z.string(),
               }),
             )
@@ -533,7 +534,8 @@ export class GoogleClient {
     const timeZone =
       current.start.timeZone ??
       z
-        .object({ timeZone: z.string().min(1) })
+        // Google marks the calendar time zone as optional.
+        .object({ timeZone: z.string().min(1).default("UTC") })
         .parse(
           await this.request(`${CALENDAR}/users/me/calendarList/${encodeURIComponent(calendarId)}`),
         ).timeZone;

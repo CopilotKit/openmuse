@@ -719,6 +719,39 @@ test("calendar discovery follows pagination and retains names, zones, and access
   ]);
 });
 
+test("calendars without an explicit time zone still list with a UTC fallback", async () => {
+  const client = clientWith(() =>
+    json({
+      items: [
+        {
+          id: "shared@example.com",
+          summary: "Family",
+          accessRole: "reader",
+        },
+      ],
+    }),
+  );
+  assert.deepEqual(await client.listCalendars(), [
+    {
+      id: "shared@example.com",
+      name: "Family",
+      timeZone: "UTC",
+      accessRole: "reader",
+    },
+  ]);
+});
+
+test("event review falls back to UTC when neither the event nor its calendar has a zone", async () => {
+  const client = clientWith((request) => {
+    const path = new URL(request.url).pathname;
+    if (path.endsWith("/calendarList/primary"))
+      return json({ id: "primary", summary: "Personal", accessRole: "owner" });
+    return json({ ...eventResponse, start: { dateTime: "2026-10-10T10:00:00-07:00" } });
+  });
+  const { event } = await client.reviewEvent("primary", "event-1");
+  assert.equal(event.timeZone, "UTC");
+});
+
 test("recurring masters and occurrences are rejected from fresh Google data before updates or deletes", async () => {
   for (const recurrence of [
     { recurrence: ["RRULE:FREQ=WEEKLY"] },
