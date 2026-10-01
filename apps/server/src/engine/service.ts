@@ -353,8 +353,8 @@ export class AgentService {
     if (!goal) throw new AppError("Goal not found", 404);
     const saved = await this.db.put(owner, "goals", { ...goal, ...patch });
     if (patch.status === "paused")
-      for (const task of await this.db.list<AgentTask>(owner, "tasks"))
-        if (task.goalId === id && !terminal.has(task.status) && task.status !== "paused")
+      for (const task of await this.db.listByGoalId<AgentTask>(owner, "tasks", id))
+        if (!terminal.has(task.status) && task.status !== "paused")
           await this.control(owner, task.id, "pause");
     return saved;
   }
