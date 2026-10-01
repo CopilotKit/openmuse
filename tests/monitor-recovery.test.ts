@@ -627,7 +627,7 @@ test("a second observe from a stale snapshot loses its monitor commit instead of
     if (kind === "monitors" && id === monitor.id) return base;
     return originalGet(o, kind, id);
   }) as Store["get"];
-  const task = await originalGet(owner, "tasks", monitor.taskId);
+  const task = await originalGet<AgentTask>(owner, "tasks", monitor.taskId);
   assert.ok(task);
   const context = {
     signal: new AbortController().signal,
