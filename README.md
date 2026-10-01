@@ -20,11 +20,7 @@ Clone this template and customize it however you want.
 
 **[Building on OpenMuse? Meet with the CopilotKit team →](https://www.copilotkit.ai/openmuse)**
 
-**Mobile demo · 38 seconds**
-
 https://github.com/user-attachments/assets/8014d185-346c-4954-8ff0-26c582c5093a
-
-**Web demo · 42 seconds**
 
 https://github.com/user-attachments/assets/0cc87de0-c3c1-4f24-b7df-e7d04bb946fd
 
