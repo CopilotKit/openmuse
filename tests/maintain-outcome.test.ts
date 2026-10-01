@@ -5,11 +5,7 @@ import { createStore, type Store } from "../apps/server/src/db.ts";
 import { AgentService } from "../apps/server/src/engine/service.ts";
 import type { AgentNotification, AgentTask } from "../packages/domain/src/agent.ts";
 
-function task(
-  id: string,
-  status: AgentTask["status"],
-  extra: Partial<AgentTask> = {},
-): AgentTask {
+function task(id: string, status: AgentTask["status"], extra: Partial<AgentTask> = {}): AgentTask {
   return {
     id,
     title: `Task ${id}`,
@@ -86,11 +82,7 @@ test("outcome marker preserves a concurrent sibling state write", async () => {
     const service = serviceWith(db);
     const originalInsert = db.insertIfAbsent.bind(db);
     let injected = false;
-    db.insertIfAbsent = (async (
-      owner: string,
-      kind: string,
-      value: { id: string },
-    ) => {
+    db.insertIfAbsent = (async (owner: string, kind: string, value: { id: string }) => {
       if (kind === "notifications" && !injected) {
         injected = true;
         const latest = await db.get<AgentTask>("owner", "tasks", "task1");
@@ -119,19 +111,11 @@ test("outcome marker preserves a concurrent sibling state write", async () => {
 test("a same-status outcome change is not hidden by a stale marker", async () => {
   const db = await createStore();
   try {
-    await db.put(
-      "owner",
-      "tasks",
-      task("task1", "waiting_input", { question: "Old question?" }),
-    );
+    await db.put("owner", "tasks", task("task1", "waiting_input", { question: "Old question?" }));
     const service = serviceWith(db);
     const originalInsert = db.insertIfAbsent.bind(db);
     let changed = false;
-    db.insertIfAbsent = (async (
-      owner: string,
-      kind: string,
-      value: { id: string },
-    ) => {
+    db.insertIfAbsent = (async (owner: string, kind: string, value: { id: string }) => {
       if (kind === "notifications" && !changed) {
         changed = true;
         await db.compareAndSwap(
