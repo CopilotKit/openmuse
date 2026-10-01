@@ -22,11 +22,11 @@ Clone this template and customize it however you want.
 
 **Mobile demo · 38 seconds**
 
-<video src="https://raw.githubusercontent.com/CopilotKit/OpenMuse/main/assets/demos/2026-09-16/mobile.mp4" controls></video>
+https://github.com/user-attachments/assets/8014d185-346c-4954-8ff0-26c582c5093a
 
 **Web demo · 42 seconds**
 
-<video src="https://raw.githubusercontent.com/CopilotKit/OpenMuse/main/assets/demos/2026-09-16/web.mp4" controls></video>
+https://github.com/user-attachments/assets/0cc87de0-c3c1-4f24-b7df-e7d04bb946fd
 
 </div>
 
@@ -38,7 +38,7 @@ On iPhone, ask OpenMuse to find interesting stories on Hacker News and summarize
 
 The 38-second iPhone and 42-second desktop web demos show the current interface, framed in 16:9. The send arrow becomes a stop square inside the input pill while the agent replies, then switches back. Stopping keeps your draft intact. See the [recording notes](docs/DEMO.md) for the model setup and reproduction steps.
 
-[Mobile MP4](assets/demos/2026-09-16/mobile.mp4) · [Web MP4](assets/demos/2026-09-16/web.mp4) · [Recording details and reproduction](docs/DEMO.md)
+[Mobile MP4](https://github.com/user-attachments/assets/8014d185-346c-4954-8ff0-26c582c5093a) · [Web MP4](https://github.com/user-attachments/assets/0cc87de0-c3c1-4f24-b7df-e7d04bb946fd) · [Recording details and reproduction](docs/DEMO.md)
 
 The [Jev aquarium-trip demo](docs/demos/jev-generative-ui.md) walks through a fictional school email, clarification choices, sourced exhibit cards, hands-on preference refinement, and a confirmed selection. [Watch the 83-second live Jev recording](assets/demos/2026-09-23/jev-live-web.mp4), where TypeSafe Jev makes the decisions and a scripted agent keeps the trip scenario repeatable. A [scripted-decision sample recording](assets/demos/2026-09-23/jev-web.mp4) is also available.
 
