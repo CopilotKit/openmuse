@@ -14,7 +14,19 @@ export function analyzeSpending(csv: string) {
         cell += '"';
         i++;
       } else if (!quoted && cell.length) throw new Error("Invalid quoted CSV field");
-      else quoted = !quoted;
+      else {
+        quoted = !quoted;
+        if (!quoted) {
+          const next = csv[i + 1];
+          if (
+            next !== undefined &&
+            next !== "," &&
+            next !== "\n" &&
+            !(next === "\r" && (csv[i + 2] === "\n" || csv[i + 2] === undefined))
+          )
+            throw new Error("Invalid quoted CSV field");
+        }
+      }
     } else if (!quoted && (c === "," || c === "\n" || c === undefined)) {
       row.push(cell.replace(/\r$/, ""));
       cell = "";
