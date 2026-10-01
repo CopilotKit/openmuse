@@ -53,7 +53,7 @@ test("every API mode accepts a non-empty Intelligence key", () => {
   }
 });
 
-test("web search is disabled unless explicitly enabled", (t) => {
+test("web search is enabled by default with an explicit opt-out", (t) => {
   const previous = { ...process.env };
   t.after(() => {
     process.env = previous;
@@ -63,13 +63,13 @@ test("web search is disabled unless explicitly enabled", (t) => {
   process.env.HOST = "127.0.0.1";
   process.env.CPK_INTELLIGENCE_API_KEY = "test-project-key-never-sent";
   delete process.env.WEB_SEARCH_ENABLED;
-  assert.equal(readConfig().webSearchEnabled, false);
-  for (const value of ["false", "", "1", "TRUE"]) {
-    process.env.WEB_SEARCH_ENABLED = value;
-    assert.equal(readConfig().webSearchEnabled, false);
-  }
-  process.env.WEB_SEARCH_ENABLED = "true";
   assert.equal(readConfig().webSearchEnabled, true);
+  for (const value of ["true", "", "1", "TRUE"]) {
+    process.env.WEB_SEARCH_ENABLED = value;
+    assert.equal(readConfig().webSearchEnabled, true);
+  }
+  process.env.WEB_SEARCH_ENABLED = "false";
+  assert.equal(readConfig().webSearchEnabled, false);
 });
 
 test("Jev mode is off by default and validates explicit modes", async () => {
