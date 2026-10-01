@@ -322,4 +322,3 @@ test("a task cancelled between claim and execution never reaches the provider", 
   const saved = await db.get<ActionProposal>("cancel-race", "actions", proposal.id);
   assert.equal(saved?.status, "awaiting_review");
 });
-
