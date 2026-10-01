@@ -31,3 +31,33 @@ test("idle Postgres client errors are logged instead of crashing the process", a
     await pool.end();
   }
 });
+test("listByStatus matches list plus status filtering", async () => {
+  const store = await createStore();
+  try {
+    for (const [id, status] of [
+      ["i0", "new"],
+      ["i1", "dismissed"],
+      ["i2", "new"],
+      ["i3", "accepted"],
+    ] as const)
+      await store.put("owner", "ideas", { id, status });
+    await store.put("owner", "ideas", { id: "i-none" });
+
+    const scoped = await store.listByStatus<{ id: string; status?: string }>(
+      "owner",
+      "ideas",
+      "new",
+    );
+    const expected = (await store.list<{ id: string; status?: string }>("owner", "ideas")).filter(
+      (item) => item.status === "new",
+    );
+    assert.deepEqual(scoped, expected);
+
+    await store.put("other", "ideas", { id: "x", status: "new" });
+    await store.put("owner", "goals", { id: "g", status: "new" });
+    assert.equal((await store.listByStatus("owner", "ideas", "new")).length, 2);
+    assert.equal((await store.listByStatus("nobody", "ideas", "new")).length, 0);
+  } finally {
+    await store.close();
+  }
+});
