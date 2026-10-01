@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { createApp } from "../apps/server/src/app.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
+import { LostLeaseError } from "../apps/server/src/engine/worker.ts";
 import type { AgentNotification, AgentTask, Monitor } from "../packages/domain/src/agent.ts";
 
 let db: Store, server: Awaited<ReturnType<typeof createApp>>, directory: string, token: string;
@@ -610,4 +611,41 @@ test("a check keeps the baseline from a run that finishes during the request", a
   const task = await db.get<AgentTask>(owner, "tasks", monitor.taskId);
   assert.equal(task?.status, "queued");
   assert.equal(task?.state.lastHash, afterRun);
+});
+
+test("a second observe from a stale snapshot loses its monitor commit instead of clobbering it", async () => {
+  await read("/sample-page", { text: "No tables available" });
+  const monitor = await createMonitor("Stale observe");
+  await server.agent.worker.tick();
+  const base = await db.get<Monitor>(owner, "monitors", monitor.id);
+  assert.equal(base?.checks, 1);
+
+  // Two workers read the same monitor snapshot (lease overlap), then both run
+  // observe() to completion. Freeze the monitor read at the pre-run snapshot.
+  const originalGet = db.get.bind(db);
+  db.get = (async (o: string, kind: string, id: string) => {
+    if (kind === "monitors" && id === monitor.id) return base;
+    return originalGet(o, kind, id);
+  }) as Store["get"];
+  const task = await originalGet(owner, "tasks", monitor.taskId);
+  assert.ok(task);
+  const context = {
+    signal: new AbortController().signal,
+    guard: async () => {},
+    checkpoint: async (_patch: Partial<AgentTask>) => task,
+    event: async () => {},
+  };
+  const observe = (
+    server.agent as unknown as {
+      observe(owner: string, task: AgentTask, ctx: typeof context): Promise<Partial<AgentTask>>;
+    }
+  ).observe.bind(server.agent);
+  try {
+    await observe(owner, task, context);
+    await assert.rejects(observe(owner, task, context), LostLeaseError);
+  } finally {
+    db.get = originalGet;
+  }
+  // The loser's commit was rejected: exactly one increment landed.
+  assert.equal((await db.get<Monitor>(owner, "monitors", monitor.id))?.checks, 2);
 });
