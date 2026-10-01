@@ -30,6 +30,7 @@ export interface AgentTask {
   kind: "agent" | "document" | "monitor" | "finance" | "plan";
   status: TaskStatus;
   goalId?: string;
+  milestoneId?: string;
   plan: TaskStep[];
   evidence: Evidence[];
   input: Record<string, unknown>;
@@ -136,6 +137,7 @@ export const createTaskSchema = z.object({
   prompt: z.string().trim().min(1).max(12000),
   kind: z.enum(["agent", "document", "monitor", "finance", "plan"]).default("agent"),
   goalId: z.string().optional(),
+  milestoneId: z.string().min(1).max(200).optional(),
   input: z.record(z.string(), z.unknown()).default({}),
 });
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
