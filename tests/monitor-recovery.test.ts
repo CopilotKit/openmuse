@@ -611,3 +611,90 @@ test("a check keeps the baseline from a run that finishes during the request", a
   assert.equal(task?.status, "queued");
   assert.equal(task?.state.lastHash, afterRun);
 });
+
+test("resuming from Activity cannot let a worker claim the task before its monitor is active", async () => {
+  const monitor = await createMonitor("Activity resume with worker");
+  await server.agent.worker.tick();
+  await read(`/tasks/${monitor.taskId}/control`, { action: "pause" });
+
+  const originalCas: CompareAndSwap = db.compareAndSwap.bind(db);
+  let ran = false;
+  db.compareAndSwap = (async (o, kind, id, expected, patch) => {
+    if (!ran && kind === "monitors" && id === monitor.id && patch.status === "active") {
+      ran = true;
+      // A separate worker can run between the request's two record updates.
+      await server.agent.worker.tick();
+    }
+    return originalCas(o, kind, id, expected, patch);
+  }) as CompareAndSwap;
+  try {
+    await read(`/tasks/${monitor.taskId}/control`, { action: "resume" });
+  } finally {
+    db.compareAndSwap = originalCas;
+  }
+  assert.ok(ran);
+  await maintain();
+  await server.agent.worker.tick();
+  assert.equal((await db.get<Monitor>(owner, "monitors", monitor.id))?.status, "active");
+  assert.equal((await db.get<AgentTask>(owner, "tasks", monitor.taskId))?.status, "scheduled");
+});
+
+test("maintenance finishes an Activity resume interrupted after activating its monitor", async () => {
+  const monitor = await createMonitor("Interrupted Activity resume");
+  await server.agent.worker.tick();
+  await read(`/tasks/${monitor.taskId}/control`, { action: "pause" });
+
+  const originalCas: CompareAndSwap = db.compareAndSwap.bind(db);
+  let interrupted = false;
+  db.compareAndSwap = (async (o, kind, id, expected, patch) => {
+    const saved = await originalCas(o, kind, id, expected, patch);
+    if (
+      !interrupted &&
+      saved &&
+      kind === "monitors" &&
+      id === monitor.id &&
+      patch.status === "active"
+    ) {
+      interrupted = true;
+      throw new Error("Simulated interruption after activating the monitor");
+    }
+    return saved;
+  }) as CompareAndSwap;
+  try {
+    const response = await request(`/tasks/${monitor.taskId}/control`, { action: "resume" });
+    assert.equal(response.status, 502);
+  } finally {
+    db.compareAndSwap = originalCas;
+  }
+  assert.ok(interrupted);
+  await maintain();
+  await server.agent.worker.tick();
+  assert.equal((await db.get<Monitor>(owner, "monitors", monitor.id))?.status, "active");
+  assert.equal((await db.get<AgentTask>(owner, "tasks", monitor.taskId))?.status, "scheduled");
+});
+
+test("a stop during an Activity resume cannot be undone by that resume", async () => {
+  const monitor = await createMonitor("Stop during Activity resume");
+  await server.agent.worker.tick();
+  await read(`/tasks/${monitor.taskId}/control`, { action: "pause" });
+
+  const originalCas: CompareAndSwap = db.compareAndSwap.bind(db);
+  let stopping: Response | undefined;
+  db.compareAndSwap = (async (o, kind, id, expected, patch) => {
+    if (!stopping && kind === "monitors" && id === monitor.id && patch.status === "active") {
+      db.compareAndSwap = originalCas;
+      stopping = await request(`/monitors/${monitor.id}/control`, { action: "stop" });
+    }
+    return originalCas(o, kind, id, expected, patch);
+  }) as CompareAndSwap;
+  let response: Response;
+  try {
+    response = await request(`/tasks/${monitor.taskId}/control`, { action: "resume" });
+  } finally {
+    db.compareAndSwap = originalCas;
+  }
+  assert.equal(stopping?.status, 200);
+  assert.equal(response.status, 409);
+  assert.equal((await db.get<Monitor>(owner, "monitors", monitor.id))?.status, "stopped");
+  assert.equal((await db.get<AgentTask>(owner, "tasks", monitor.taskId))?.status, "cancelled");
+});
