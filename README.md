@@ -1,30 +1,38 @@
-<div align="center">
+  <div align="center">
 
 # OpenMuse
 
-**A personal agent with a browser, terminal, files, and work that keeps going.**
+**A personal agent with a browser, terminal, files, and work that keeps going. Compatible with any agent harness.**
 
 Ask for an outcome. Follow the plan, review actions, and come back to the result.
-Compatible with any agent harness.
+Built with CopilotKit React Native for iOS, Android, and web.
 
-[Talk to our engineers](https://www.copilotkit.ai/talk-to-an-engineer?ref=openmuse_readme) · [Get started](#quick-start) · [Overview](#what-it-is) · [Architecture](#architecture) · [Status](docs/VERIFICATION.md) · [Contributing](CONTRIBUTING.md)
+[Quick start](#quick-start) · [Demo](#demo) · [Features](#features) · [Architecture](#architecture) · [Docs](docs/README.md) · [Contributing](CONTRIBUTING.md)
 
 [![CI](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 <a href="https://trendshift.io/repositories/254992?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-254992" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/254992/daily?language=TypeScript" alt="CopilotKit%2Fopenmuse | Trendshift" width="250" height="55"/></a>
 
-Built with [CopilotKit](https://www.copilotkit.ai/) and [AG-UI](https://docs.ag-ui.com/). Available on iOS, Android, and web with CopilotKit React Native.
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/CopilotKit/OpenMuse)
+
+Clone this template and customize it however you want.
+
+**[Building on OpenMuse? Meet with the CopilotKit team →](https://www.copilotkit.ai/openmuse)**
+
+[![OpenMuse 🪁 — Ask it to browse. Watch the 38-second mobile demo.](assets/demos/2026-09-16/mobile.png)](assets/demos/2026-09-16/mobile.mp4)
+
+**[Watch the mobile demo · 38 seconds](assets/demos/2026-09-16/mobile.mp4)**
+
+[![OpenMuse 🪁 on the web — Watch the 42-second desktop demo.](assets/demos/2026-09-16/web.png)](assets/demos/2026-09-16/web.mp4)
+
+**[Watch the web demo · 42 seconds](assets/demos/2026-09-16/web.mp4)**
 
 </div>
 
 > **Alpha, for self-hosting and building on.** Open-ended reasoning, live Google accounts, and CopilotKit Rich Threads require their own configuration. See [what is verified](docs/VERIFICATION.md) and the [roadmap](ROADMAP.md).
 
 ## Demo
-
-| Mobile · 38 seconds | Web · 42 seconds |
-| :---: | :---: |
-| [![Watch the mobile demo](assets/demos/2026-09-16/mobile.png)](assets/demos/2026-09-16/mobile.mp4) | [![Watch the web demo](assets/demos/2026-09-16/web.png)](assets/demos/2026-09-16/web.mp4) |
 
 On iPhone, ask OpenMuse to find interesting stories on Hacker News and summarize CopilotKit. On desktop, ask it to check the school-trip email, open the message, and research exhibits at Monterey Bay Aquarium. The agent shows email and browser results inline. **Take control** opens that same browser session when you need it.
 
@@ -58,8 +66,6 @@ The computer combines **persistent Chromium and an optional Linux workspace**. T
 The [feature inventory](docs/FEATURES.md) describes implemented capabilities and planned extensions. Health/bank/social connectors, device push, voice, generated executable tools, and automatic reservations/payments are on the [roadmap](ROADMAP.md).
 
 ## Quick start
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/CopilotKit/OpenMuse)
 
 **Requirements:** Node 24 LTS, pnpm 11.19.0, and a CopilotKit Intelligence project key. The local sample app needs no model, Google account, or Docker.
 
@@ -240,9 +246,3 @@ Platform build scripts export JavaScript/Hermes bundles; they do not produce sig
 Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), [ROADMAP.md](ROADMAP.md), and the [security policy](SECURITY.md).
 
 MIT licensed. Built by CopilotKit. Its original interface and fictional assets are included. Website, email, and document content supplies evidence, not permission to act.
-
----
-
-Clone this template and customize it however you want.
-
-[**Building on OpenDots? Meet with the CopilotKit team →**](https://www.copilotkit.ai/talk-to-an-engineer)
