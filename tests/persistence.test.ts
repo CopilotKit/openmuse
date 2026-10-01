@@ -32,7 +32,6 @@ test("idle Postgres client errors are logged instead of crashing the process", a
   }
 });
 
-
 test("countActiveTasks matches the createTask cap semantics", async () => {
   const store = await createStore();
   try {
