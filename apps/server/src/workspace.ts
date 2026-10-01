@@ -263,7 +263,7 @@ export class WorkspaceService {
     wantMail: boolean,
     wantEvents: boolean,
     query?: string,
-  ): Promise<{ mail: Mail[]; events: CalendarEvent[] }> {
+  ): Promise<{ mail: Mail[]; events: CalendarEvent[]; connected: boolean }> {
     let mail: Mail[] = [];
     let events: CalendarEvent[] = [];
     const connected = await this.connected(owner);
@@ -289,12 +289,11 @@ export class WorkspaceService {
       }
       if (wantEvents) events = await this.db.list<CalendarEvent>(owner, "events");
     }
-    return { mail, events };
+    return { mail, events, connected };
   }
 
   async snapshot(owner: string, query?: string): Promise<Workspace> {
-    const connected = await this.connected(owner);
-    const { mail, events } = await this.sourceSections(owner, true, true, query);
+    const { mail, events, connected } = await this.sourceSections(owner, true, true, query);
     const tokens = this.config.mode === "live" ? await this.googleAuth.tokens(owner) : null;
     return {
       mode: this.config.mode,
