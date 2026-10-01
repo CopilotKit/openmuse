@@ -5,9 +5,11 @@
 **A personal agent with a browser, terminal, files, and work that keeps going.**
 
 Ask for an outcome. Follow the plan, review actions, and come back to the result.
-Compatible with any agent harness. Built with CopilotKit React Native for iOS, Android, and web.
+Compatible with any agent harness.
 
-[Quick start](#quick-start) · [Demo](#demo) · [Docs](docs/README.md) · [Contributing](CONTRIBUTING.md)
+[Talk to our engineers](https://www.copilotkit.ai/talk-to-an-engineer?ref=openmuse_readme) · [Get started](#quick-start) · [Overview](#what-it-is) · [Architecture](#architecture) · [Status](docs/VERIFICATION.md) · [Contributing](CONTRIBUTING.md)
+
+Built with [CopilotKit](https://www.copilotkit.ai/) and [AG-UI](https://docs.ag-ui.com/). Available on iOS, Android, and web with CopilotKit React Native.
 
 [![CI](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
