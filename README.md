@@ -20,13 +20,13 @@ Clone this template and customize it however you want.
 
 **[Building on OpenMuse? Meet with the CopilotKit team →](https://www.copilotkit.ai/openmuse)**
 
-[![OpenMuse 🪁 — Ask it to browse. Watch the 38-second mobile demo.](assets/demos/2026-09-16/mobile.png)](assets/demos/2026-09-16/mobile.mp4)
+**Mobile demo · 38 seconds**
 
-**[Watch the mobile demo · 38 seconds](assets/demos/2026-09-16/mobile.mp4)**
+<video src="https://raw.githubusercontent.com/CopilotKit/OpenMuse/main/assets/demos/2026-09-16/mobile.mp4" controls></video>
 
-[![OpenMuse 🪁 on the web — Watch the 42-second desktop demo.](assets/demos/2026-09-16/web.png)](assets/demos/2026-09-16/web.mp4)
+**Web demo · 42 seconds**
 
-**[Watch the web demo · 42 seconds](assets/demos/2026-09-16/web.mp4)**
+<video src="https://raw.githubusercontent.com/CopilotKit/OpenMuse/main/assets/demos/2026-09-16/web.mp4" controls></video>
 
 </div>
 
