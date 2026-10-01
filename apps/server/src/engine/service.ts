@@ -714,7 +714,7 @@ export class AgentService {
     try {
       await context.checkpoint({ actionId: proposal.id });
     } catch (error) {
-      if (proposal.status === "awaiting_review")
+      if (proposal.status === "awaiting_review" && context.signal.aborted)
         await this.actions.decide(owner, proposal.id, proposal.hash, "deny");
       throw error;
     }
