@@ -9,12 +9,12 @@ Compatible with any agent harness.
 
 [Talk to our engineers](https://www.copilotkit.ai/talk-to-an-engineer?ref=openmuse_readme) · [Get started](#quick-start) · [Overview](#what-it-is) · [Architecture](#architecture) · [Status](docs/VERIFICATION.md) · [Contributing](CONTRIBUTING.md)
 
-Built with [CopilotKit](https://www.copilotkit.ai/) and [AG-UI](https://docs.ag-ui.com/). Available on iOS, Android, and web with CopilotKit React Native.
-
 [![CI](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 <a href="https://trendshift.io/repositories/254992?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-254992" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/254992/daily?language=TypeScript" alt="CopilotKit%2Fopenmuse | Trendshift" width="250" height="55"/></a>
+
+Built with [CopilotKit](https://www.copilotkit.ai/) and [AG-UI](https://docs.ag-ui.com/). Available on iOS, Android, and web with CopilotKit React Native.
 
 </div>
 
