@@ -303,7 +303,6 @@ test("an expired lease from a dead executor recovers as interrupted without repl
   assert.equal((await service.start("owner")).status, "running");
 });
 
-
 test("a Stop quarantine that lands before the lease check keeps its record", async () => {
   const f = fixture();
   const service = new ComputerService(db, config, f.runner);
