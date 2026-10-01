@@ -31,3 +31,30 @@ test("idle Postgres client errors are logged instead of crashing the process", a
     await pool.end();
   }
 });
+
+test("listByGoalId matches list plus goalId filtering", async () => {
+  const store = await createStore();
+  try {
+    await store.put("owner", "tasks", { id: "t0", goalId: "g1" });
+    await store.put("owner", "tasks", { id: "t1", goalId: "g2" });
+    await store.put("owner", "tasks", { id: "t2", goalId: "g1" });
+    await store.put("owner", "tasks", { id: "t-none" });
+
+    const scoped = await store.listByGoalId<{ id: string; goalId?: string }>(
+      "owner",
+      "tasks",
+      "g1",
+    );
+    const expected = (await store.list<{ id: string; goalId?: string }>("owner", "tasks")).filter(
+      (item) => item.goalId === "g1",
+    );
+    assert.deepEqual(scoped, expected);
+
+    await store.put("other", "tasks", { id: "x", goalId: "g1" });
+    await store.put("owner", "goals", { id: "g", goalId: "g1" });
+    assert.equal((await store.listByGoalId("owner", "tasks", "g1")).length, 2);
+    assert.equal((await store.listByGoalId("nobody", "tasks", "g1")).length, 0);
+  } finally {
+    await store.close();
+  }
+});
