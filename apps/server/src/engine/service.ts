@@ -184,10 +184,7 @@ export class AgentService {
     const id = idempotencyKey ? hash(`task:${idempotencyKey}`) : randomUUID();
     const existing = await this.db.get<AgentTask>(owner, "tasks", id);
     if (existing) return existing;
-    if (
-      (await this.db.list<AgentTask>(owner, "tasks")).filter((t) => !terminal.has(t.status))
-        .length >= 100
-    )
+    if ((await this.db.countActiveTasks(owner, [...terminal])) >= 100)
       throw new AppError("Finish or cancel some tasks before adding more", 409);
     const titles =
       input.kind === "document"
