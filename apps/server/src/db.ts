@@ -57,6 +57,21 @@ export class Store {
     );
     return (result.rows[0]?.data as T | undefined) ?? null;
   }
+  async compareAndSetJsonPath<T>(
+    owner: string,
+    kind: string,
+    id: string,
+    expected: Record<string, unknown>,
+    path: string[],
+    value: unknown,
+  ): Promise<T | null> {
+    if (path.length === 0) throw new Error("compareAndSetJsonPath requires a non-empty path");
+    const result = await this.db.query(
+      "UPDATE records SET data=jsonb_set(data,$5::text[],$6::jsonb,true),updated_at=now() WHERE owner=$1 AND kind=$2 AND id=$3 AND data @> $4::jsonb RETURNING data",
+      [owner, kind, id, JSON.stringify(expected), path, JSON.stringify(value)],
+    );
+    return (result.rows[0]?.data as T | undefined) ?? null;
+  }
   async insertIfAbsent<T extends { id: string }>(
     owner: string,
     kind: string,
