@@ -30,6 +30,14 @@ export class Store {
     );
     return result.rows.map((row) => row.data as T);
   }
+  async countActiveTasks(owner: string, terminalStatuses: string[]): Promise<number> {
+    const result = await this.db.query(
+      "SELECT count(*)::int AS n FROM records WHERE owner=$1 AND kind='tasks' AND NOT (COALESCE(data->>'status','') = ANY($2::text[]))",
+      [owner, terminalStatuses],
+    );
+    const row = result.rows[0] as unknown as { n: number } | undefined;
+    return row?.n ?? 0;
+  }
   async put<T extends { id: string }>(owner: string, kind: string, value: T): Promise<T> {
     await this.db.query(
       "INSERT INTO records(owner,kind,id,data) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(owner,kind,id) DO UPDATE SET data=excluded.data,updated_at=now()",
