@@ -13,7 +13,14 @@ import type { ProposalInput } from "../packages/domain/src/index.ts";
 const owner = "owner-1";
 const input: ProposalInput = {
   kind: "email.send",
-  data: { to: ["a@example.com"], subject: "Hello", body: "World" },
+  data: {
+    to: ["a@example.com"],
+    cc: [],
+    bcc: [],
+    subject: "Hello",
+    body: "World",
+    attachmentIds: [],
+  },
 };
 
 const baseTask = (): AgentTask => ({
@@ -37,7 +44,10 @@ const baseTask = (): AgentTask => ({
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), "openmuse-prepare-"));
   const db = await createStore({ dataDir: join(root, "pg") });
-  const actions = new ActionService(db, {});
+  const actions = new ActionService(db, {
+    execute: async () => "sent",
+    connected: async () => true,
+  });
   const service = new AgentService(
     db,
     {} as never,
