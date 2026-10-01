@@ -16,7 +16,10 @@ export function sanitizeFileName(name: string): string {
   const cleaned = Array.from(base)
     .filter((character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127)
     .slice(0, 180)
-    .join("");
+    .join("")
+    // A lone high surrogate at the cut point is always unpaired; drop it so the
+    // name stays encodable for the content-disposition header.
+    .replace(/[\uD800-\uDBFF]$/, "");
   return cleaned || "document.pdf";
 }
 
