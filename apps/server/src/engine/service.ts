@@ -524,8 +524,8 @@ export class AgentService {
       w.mail.filter((mail) => /^Sent\b/i.test(mail.label)).map((mail) => mail.id),
     );
     const completedSources = new Set(
-      (await this.db.list<AgentTask>(owner, "tasks"))
-        .filter((task) => task.status === "succeeded" && typeof task.input.messageId === "string")
+      (await this.db.listByStatus<AgentTask>(owner, "tasks", "succeeded"))
+        .filter((task) => typeof task.input.messageId === "string")
         .map((task) => `${task.kind}:${task.input.messageId}`),
     );
     const obsolete = (kind: AgentTask["kind"], messageId: unknown) =>
@@ -533,8 +533,8 @@ export class AgentService {
       (sentIds.has(messageId) || completedSources.has(`${kind}:${messageId}`));
     // Retire earlier suggestions as well as preventing new duplicates. A concurrent
     // acceptance wins its own compare-and-swap and is never overwritten here.
-    for (const idea of await this.db.list<Idea>(owner, "ideas"))
-      if (idea.status === "new" && obsolete(idea.kind, idea.input.messageId))
+    for (const idea of await this.db.listByStatus<Idea>(owner, "ideas", "new"))
+      if (obsolete(idea.kind, idea.input.messageId))
         await this.db.compareAndSwap(
           owner,
           "ideas",
@@ -583,8 +583,8 @@ export class AgentService {
         createdAt: date(),
       } satisfies Idea);
     }
-    for (const goal of await this.db.list<Goal>(owner, "goals"))
-      if (goal.status === "active" && !goal.milestones.length) {
+    for (const goal of await this.db.listByStatus<Goal>(owner, "goals", "active"))
+      if (!goal.milestones.length) {
         const id = hash(`goal:${goal.id}:${goal.description}`);
         await this.db.insertIfAbsent(owner, "ideas", {
           id,
