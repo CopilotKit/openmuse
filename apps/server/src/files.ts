@@ -28,7 +28,8 @@ export class Files {
     const safeName = Array.from(name.split(/[\\/]/).at(-1) ?? "document.pdf")
       .filter((character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127)
       .join("")
-      .slice(0, 180);
+      .slice(0, 180)
+      .replace(/[\uD800-\uDBFF]$/, "");
     const artifact: Artifact = {
       id,
       name: safeName,
