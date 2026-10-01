@@ -18,7 +18,7 @@ Built with CopilotKit React Native for iOS, Android, and web.
 
 Clone this template and customize it however you want.
 
-**[Building on OpenMuse? Meet with the CopilotKit team →](https://www.copilotkit.ai/openmuse)**
+**[Building on OpenMuse? Meet with the CopilotKit team →](https://www.copilotkit.ai/talk-to-an-engineer?ref=openmuse_hero)**
 
 https://github.com/user-attachments/assets/8014d185-346c-4954-8ff0-26c582c5093a
 
