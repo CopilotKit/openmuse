@@ -52,7 +52,7 @@ function fake(
     afterInfo?: (id: string) => void;
     /** Exit code for a setup command, e.g. a failing xdotool call. */
     setupExit?: (command: string) => number | undefined;
-    /** Applies an input before simulating a lost setup response. */
+    /** Applies an input before simulating a failed or lost setup response. */
     setupEffect?: (command: string) => Promise<void> | void;
     /** Holds every stream (re)start until it resolves. */
     streamGate?: () => Promise<void>;
@@ -742,11 +742,11 @@ test("a desktop action runs with a screenshot after it, leaves a receipt and kee
   assert.match(f.calls.setup.at(-1)?.command ?? "", /^scrot --pointer/);
 });
 
-test("a failed desktop action is reported and recorded; a stopped box is never resumed", async () => {
-  const f = fake({ boxes: [{}], setupExit: (command) => (command.startsWith("xdotool") ? 3 : 0) });
+test("a failed screenshot is reported and recorded; a stopped box is never resumed", async () => {
+  const f = fake({ boxes: [{}], setupExit: (command) => (command.includes("scrot") ? 4 : 0) });
   const { computer, owner } = service(f);
-  await assert.rejects(computer.desktopAction(owner, { action: "key", text: "Return" }), {
-    message: "The desktop action failed",
+  await assert.rejects(computer.desktopAction(owner, { action: "screenshot" }), {
+    message: "The desktop screenshot failed",
   });
   assert.equal(
     (await db.list<ComputerCommand>(owner, "computer-desktop-actions"))[0]?.status,
@@ -1018,6 +1018,69 @@ test("a delivered input with a lost response returns a durable uncertain receipt
       assert.equal(receipt?.exitCode, undefined);
       assert.match(receipt?.stderr ?? "", /outcome is unknown/);
       assert.equal(f.calls.reads.length, 1, "only a fresh screenshot follows uncertain input");
+    }
+  }
+});
+
+test("partially delivered input with a nonzero exit stays uncertain without replay", async () => {
+  for (const action of [{ action: "key", text: "Return ctrl-l" }, { action: "double_click" }]) {
+    for (const screenshotFails of [false, true]) {
+      let applied = 0;
+      let owner: string;
+      const isInput = (command: string) =>
+        command.startsWith("xdotool ") && command.includes("|| exit 3");
+      const f = fake({
+        boxes: [{}],
+        setupEffect: async (command) => {
+          if (!isInput(command)) return;
+          const [intent] = await db.list<ComputerCommand>(owner, "computer-desktop-actions");
+          assert.equal(intent.status, "interrupted", "intent is durable before any input");
+          applied++; // Return submits, or the first click lands, before xdotool fails.
+        },
+        setupExit: (command) =>
+          isInput(command) ? 3 : screenshotFails && command.includes("scrot") ? 4 : 0,
+      });
+      const serviceUnderTest = service(f);
+      owner = serviceUnderTest.owner;
+      const tool = computerTools(
+        serviceUnderTest.computer,
+        {} as Parameters<typeof computerTools>[1],
+        owner,
+        "scope",
+      ).find((candidate) => candidate.name === "use_desktop");
+      const execute = tool?.execute as (
+        args: unknown,
+      ) => Promise<{ type: string; content?: string }[]>;
+      const result = await execute(action);
+      assert.equal(applied, 1, "partially delivered input must not be replayed");
+      const [persisted] = await db.list<ComputerCommand>(owner, "computer-desktop-actions");
+      assert.equal(persisted.status, "interrupted", "a nonzero exit cannot undo delivered input");
+      assert.ok(Array.isArray(result), JSON.stringify(result));
+      const text = JSON.parse(result[0].content ?? "{}");
+      assert.equal(text.status, "interrupted");
+      assert.equal(text.error, undefined);
+      assert.match(
+        text.warning,
+        /outcome is unknown.*before repeating.*do not automatically retry/,
+      );
+      const receipt = await db.get<ComputerCommand>(
+        owner,
+        "computer-desktop-actions",
+        text.receiptId,
+      );
+      assert.equal(receipt?.status, "interrupted");
+      assert.equal(receipt?.exitCode, undefined);
+      assert.match(receipt?.stderr ?? "", /outcome is unknown.*do not automatically retry/);
+      assert.equal(f.calls.setup.filter((call) => call.command.includes("scrot")).length, 1);
+      assert.equal(
+        result.some((content) => content.type === "image"),
+        !screenshotFails,
+      );
+      if (!screenshotFails)
+        assert.deepEqual(
+          (await serviceUnderTest.restarted().latestScreenshot(owner, text.receiptId)).bytes,
+          Buffer.from(jpeg),
+        );
     }
   }
 });

@@ -539,15 +539,15 @@ export class E2BDesktopComputer {
         ...(input.startsWith("xdotool ") ? [releaseModifiers] : []),
         `${input} || exit 3`,
       ].join("\n");
-      let code: number | undefined;
       try {
-        code = await box.setup(script, user);
+        // xdotool dispatches sequentially: a later failure can follow a delivered
+        // click or Return. A nonzero exit cannot confirm that no input occurred.
+        uncertain = (await box.setup(script, user)) !== 0;
       } catch {
         // A lost response cannot tell us whether xdotool delivered the input.
         // Capture a screenshot if possible, but never replay the input here.
         uncertain = true;
       }
-      if (code !== undefined && code !== 0) throw new AppError("The desktop action failed", 502);
     }
     const warning = uncertain
       ? "The desktop input outcome is unknown: it may already have been performed. Inspect a fresh screenshot before repeating the action; do not automatically retry it."
