@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { link, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Config } from "./config.ts";
 import type { Store } from "./db.ts";
@@ -74,7 +74,17 @@ export async function createAuth(db: Store, config: Config) {
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
     key = randomBytes(32).toString("base64");
-    await writeFile(path, key, { mode: 0o600, flag: "wx" });
+    const temporary = `${path}.${randomBytes(16).toString("hex")}.tmp`;
+    await writeFile(temporary, key, { mode: 0o600, flag: "wx" });
+    try {
+      // Publish only complete bytes, without replacing another process's key.
+      await link(temporary, path);
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+      key = await readFile(path, "utf8");
+    } finally {
+      await unlink(temporary);
+    }
   }
   return new Auth(db, config, key);
 }
