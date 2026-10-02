@@ -323,6 +323,9 @@ export class WorkspaceService {
         provider: this.config.agentBackend === "sample" ? "sample" : "model",
         configured: agentConfigured(this.config),
         openbotConfigured: false,
+        // Rich threads (multi-session sidebar / history hydration) work in both
+        // modes: with Intelligence they use the cloud, without it they use the
+        // runtime's local thread endpoints backed by DurableAgentRunner.
         richThreads: true,
       },
     };
