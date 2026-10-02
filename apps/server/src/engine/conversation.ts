@@ -296,7 +296,8 @@ export class ConversationAgent extends AbstractAgent {
     ];
     const agent = tanstackAgent({
       model: this.config.model ?? "openai/unconfigured",
-      maxSteps: 6,
+      // Desktop work takes one step per click or key, each checked on a screenshot.
+      maxSteps: this.config.computerProvider === "e2b-desktop" ? 16 : 6,
       stepLimitNote:
         "I reached my step limit for this reply before finishing. Say “continue” and I’ll pick up where I left off.",
       tools,
@@ -306,7 +307,7 @@ export class ConversationAgent extends AbstractAgent {
         (jev
           ? " When a request has several possible next steps, call present_choices with factual clarification options. If those choices depend on email, first search and read the relevant thread, then provide its mailThreadId to present_choices. Generic choices need no mail. For exhibit or other research comparisons, call browse_web for every cited source before calling present_choices with a comparison. Comparison details must be exact phrases from the returned page text, and each source URL must be the final URL from successful browsing. If source reading fails, report the failure and do not present a sourced comparison. To refine a panel, pass its refinementPanelId with empty options; retained candidates will be ranked again. A selection is a preference; continue the user's requested planning from it."
           : "") +
-        computerInstructions,
+        computerInstructions(this.config.computerProvider),
     });
     return this.expireOnUserTurn(
       new Observable((subscriber) => {
