@@ -23,6 +23,21 @@ function assertFileId(id: string): void {
   if (!FILE_ID.test(id)) throw new AppError("File not found", 404);
 }
 
+// Keyed operations need the same ID on every retry, so the ID is derived from the
+// owner and operation key instead of random. It is shaped as a version 5 UUID
+// (first 128 bits of a SHA-256 hash, version and variant bits set) so it is
+// accepted anywhere a random file UUID is.
+export function deterministicFileId(owner: string, operationKey: string): string {
+  const bytes = createHash("sha256")
+    .update(JSON.stringify([owner, operationKey]))
+    .digest()
+    .subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export class Files {
   constructor(
     private readonly db: Store,
@@ -37,12 +52,7 @@ export class Files {
     parentId?: string,
     operationKey?: string,
   ): Promise<Artifact> {
-    const id =
-      operationKey === undefined
-        ? randomUUID()
-        : createHash("sha256")
-            .update(JSON.stringify([owner, operationKey]))
-            .digest("hex");
+    const id = operationKey === undefined ? randomUUID() : deterministicFileId(owner, operationKey);
     if (operationKey !== undefined) {
       const existing = await this.db.get<Artifact>(owner, "files", id);
       if (existing) return this.signed(owner, existing);
