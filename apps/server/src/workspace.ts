@@ -438,6 +438,8 @@ export class WorkspaceService {
       decodeURIComponent(filename),
       await this.google(owner, connection.id).getAttachment(messageId, attachmentId),
       `Gmail · ${message.subject}`,
+      undefined,
+      JSON.stringify(["attachment", connection.id, reference]),
     );
     await this.db.put(owner, "imports", {
       id: reference,

@@ -158,8 +158,15 @@ export async function executeModelTask(
       }),
       async (args) =>
         cached("fill_pdf", args, async () => {
-          const file = await service.files.fill(owner, args.fileId, args.fields);
-          task = await ctx.checkpoint({ artifactIds: [...task.artifactIds, file.id] });
+          const file = await service.files.fill(
+            owner,
+            args.fileId,
+            args.fields,
+            `model:${task.id}:fill_pdf`,
+          );
+          task = await ctx.checkpoint({
+            artifactIds: [...new Set([...task.artifactIds, file.id])],
+          });
           return { id: file.id, name: file.name, fields: file.fields };
         }),
     ),
