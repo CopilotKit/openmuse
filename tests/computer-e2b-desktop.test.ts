@@ -934,3 +934,11 @@ test("transient keepAlive errors remain provider failures on a running computer"
   assert.equal((await computer.snapshot(owner)).status, "running");
   assert.equal(f.calls.connect.length, 1);
 });
+
+test("file attachment failures retain their provider error instead of a path error", async () => {
+  const f = fake({ boxes: [{}], keepAliveError: new Error("network failed") });
+  const { computer, owner } = service(f);
+  await computer.start(owner);
+  await assert.rejects(computer.read(owner, "/workspace/doc.txt"), { status: 503 });
+  assert.equal(f.calls.run.length, 0);
+});

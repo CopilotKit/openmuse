@@ -537,6 +537,7 @@ export class E2BDesktopComputer {
       timeoutMs: number;
       signal?: AbortSignal;
       maxOutputBytes?: number;
+      propagateAttachError?: boolean;
     },
   ): Promise<DockerResult> {
     const limit = Math.min(options.maxOutputBytes ?? outputLimit, 15 * 1024 * 1024);
@@ -576,6 +577,7 @@ export class E2BDesktopComputer {
     try {
       ({ box } = await this.attach(labels));
     } catch (error) {
+      if (options.propagateAttachError) throw error;
       // Nothing started, so this is a plain failure and the box keeps running.
       result.stderr =
         error instanceof AppError ? error.message : "The computer could not be reached.";

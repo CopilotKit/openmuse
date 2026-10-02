@@ -815,7 +815,7 @@ export class ComputerService {
         ? await this.desktop.run(
             this.labels(owner),
             `/usr/bin/timeout --kill-after=1s ${seconds}s /usr/bin/python3 -I /opt/openmuse/files.py`,
-            { timeoutMs: (seconds + 2) * 1000, input, maxOutputBytes },
+            { timeoutMs: (seconds + 2) * 1000, input, maxOutputBytes, propagateAttachError: true },
           )
         : await this.docker(
             [
