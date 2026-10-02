@@ -44,6 +44,7 @@ function fake(
     boxes?: Partial<DesktopInfo>[];
     listFails?: boolean;
     startError?: Error;
+    keepAliveError?: Error;
     /** Runs after every getInfo, e.g. to land a Stop between find() and use. */
     afterInfo?: (id: string) => void;
     /** Exit code for a setup command, e.g. a failing xdotool call. */
@@ -150,6 +151,7 @@ function fake(
     },
     async keepAlive(timeoutMs) {
       calls.keepAlive.push(timeoutMs);
+      if (options.keepAliveError) throw options.keepAliveError;
       // Like the SDK: setTimeout on a paused sandbox is a not-found error, not a resume.
       if (boxes.get(id)?.state !== "running") throw new Error("Sandbox not found");
       (boxes.get(id) as DesktopInfo).endAt = new Date(Date.now() + timeoutMs);
@@ -922,4 +924,13 @@ test("PDF exports budget for the response size as well as the small request", as
   await computer.pdfBytes(owner, "/workspace/doc.pdf");
   assert.match(f.calls.run[0].command, /23s/);
   assert.equal(f.calls.run[0].options.timeoutMs, 25000);
+});
+
+test("transient keepAlive errors remain provider failures on a running computer", async () => {
+  const f = fake({ boxes: [{}], keepAliveError: new Error("rate limited") });
+  const { computer, owner } = service(f);
+  await computer.start(owner);
+  await assert.rejects(computer.desktopUrl(owner), { status: 503 });
+  assert.equal((await computer.snapshot(owner)).status, "running");
+  assert.equal(f.calls.connect.length, 1);
 });

@@ -462,10 +462,13 @@ export class E2BDesktopComputer {
     if (cached) {
       try {
         await cached.box.keepAlive(this.awake(info, keepMs));
-      } catch {
-        // Paused since find(): Stop or the idle timeout won the race.
-        this.forget(id);
-        throw stopped();
+      } catch (error) {
+        const current = await this.find(labels);
+        if (current?.state !== "running") {
+          this.forget(id);
+          throw stopped();
+        }
+        await this.control(() => Promise.reject(error));
       }
       return cached;
     }
