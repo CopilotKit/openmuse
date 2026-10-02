@@ -28,6 +28,7 @@ import { BrowserRunContext, BrowserToolCard } from "./browser-tool-card";
 import { BrowserThreadCard } from "./computer";
 import { ConversationQueue, type QueuedMessage } from "./conversation-queue";
 import { runConversationTurn } from "./conversation-run";
+import { DesktopCardContext, DesktopToolCard } from "./desktop-tool-card";
 import { confirmedJevSelection, displayJevUserMessage, latestJevPanelId } from "./jev-actions";
 import { JevInteractionContext, JevToolCard } from "./jev-tool-card";
 import { MailToolCard } from "./mail-tool-card";
@@ -71,6 +72,14 @@ export function WorkspaceTools() {
     parameters: displayParameters,
     render: ({ args, result, status }) => (
       <BrowserToolCard url={args.url} result={result} loading={status !== "complete"} />
+    ),
+  });
+  useRenderTool({
+    name: "use_desktop",
+    description: "Show the agent working on the computer's desktop",
+    parameters: displayParameters,
+    render: ({ toolCallId, result, status }) => (
+      <DesktopToolCard toolCallId={toolCallId} result={result} loading={status !== "complete"} />
     ),
   });
   useRenderTool({
@@ -396,6 +405,10 @@ export function ChatScreen({
       ? messages[latestUserIndex].content
       : null;
   const visible = messages.filter((m) => m.role === "user" || m.role === "assistant");
+  const latestDesktop = messages
+    .flatMap((m) => ("toolCalls" in m ? m.toolCalls || [] : []))
+    .filter((call) => call.function.name === "use_desktop")
+    .at(-1)?.id;
   const replying = busy || agent.isRunning;
   return (
     <View style={{ flex: 1 }}>
@@ -543,15 +556,17 @@ export function ChatScreen({
                         (busy || agent.isRunning) && messages.indexOf(message) > latestUserIndex,
                     }}
                   >
-                    {toolCalls.map((toolCall) => {
-                      const toolMessage = messages.find(
-                        (candidate): candidate is ToolMessage =>
-                          candidate.role === "tool" && candidate.toolCallId === toolCall.id,
-                      );
-                      return (
-                        <View key={toolCall.id}>{renderToolCall({ toolCall, toolMessage })}</View>
-                      );
-                    })}
+                    <DesktopCardContext value={{ latest: latestDesktop }}>
+                      {toolCalls.map((toolCall) => {
+                        const toolMessage = messages.find(
+                          (candidate): candidate is ToolMessage =>
+                            candidate.role === "tool" && candidate.toolCallId === toolCall.id,
+                        );
+                        return (
+                          <View key={toolCall.id}>{renderToolCall({ toolCall, toolMessage })}</View>
+                        );
+                      })}
+                    </DesktopCardContext>
                   </BrowserRunContext>
                 </JevInteractionContext.Provider>
               </View>
