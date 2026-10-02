@@ -84,7 +84,7 @@ With this provider the agent gets one more tool, `use_desktop`, in chat and in d
 
 #### Desktop card in chat
 
-When the agent uses `use_desktop`, the chat shows a **Desktop** card for each step with what it did. Only the newest card in a thread embeds the live desktop; older cards collapse to their action label, so a long thread never opens more than one VNC session. On web the newest card embeds the same stream as the Desktop tab. On iOS and Android it shows the latest screenshot and an **Open desktop** button. When the computer is stopped, the card says it is offline and offers **Start computer**. **Open in Desktop tab** opens the computer sheet on its Desktop tab.
+When the agent uses `use_desktop`, the chat shows a **Desktop** card for each step with what it did. A persistent viewer after the tool cards embeds the live desktop, so new steps preserve the VNC connection. The per-step cards show their action labels. On web the viewer embeds the same stream as the Desktop tab. On iOS and Android it shows the latest screenshot and an **Open desktop** button. When the computer is stopped, the card says it is offline and offers **Start computer**. **Open in Desktop tab** opens the computer sheet on its Desktop tab.
 
 ## Work with files
 

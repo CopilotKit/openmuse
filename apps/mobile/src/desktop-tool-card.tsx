@@ -1,5 +1,5 @@
 import { Monitor, Play } from "lucide-react-native";
-import { createContext, useContext, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, AppState, Image, Platform, Text, View } from "react-native";
 import { z } from "zod";
 import type { ComputerSnapshot } from "../../../packages/domain/src/computer";
@@ -7,9 +7,6 @@ import { useComputerDraft } from "./computer-drafts";
 import { DesktopStream } from "./desktop-stream";
 import { Button, Card, colors, ErrorNotice, s } from "./ui";
 import { useWorkspace } from "./workspace";
-
-/** The newest use_desktop call in the thread; only its card embeds the live desktop. */
-export const DesktopCardContext = createContext<{ latest?: string }>({});
 
 const resultSchema = z.object({
   action: z.string().optional(),
@@ -29,17 +26,18 @@ function parse(result: unknown) {
 /** Chat card for the agent's use_desktop tool: the live desktop on web, the latest
  * screenshot on native, or an offline notice with Start when the computer is stopped. */
 export function DesktopToolCard({
-  toolCallId,
   result,
+  live = false,
   loading,
 }: {
   toolCallId: string;
+  live?: boolean;
   result: unknown;
   loading: boolean;
 }) {
   const { api, open } = useWorkspace();
   const [, setTab] = useComputerDraft("tab");
-  const latest = useContext(DesktopCardContext).latest === toolCallId;
+  const latest = live;
   const value = parse(result);
   const [snapshot, setSnapshot] = useState<ComputerSnapshot>();
   const [error, setError] = useState("");

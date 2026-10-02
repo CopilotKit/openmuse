@@ -28,7 +28,7 @@ import { BrowserRunContext, BrowserToolCard } from "./browser-tool-card";
 import { BrowserThreadCard } from "./computer";
 import { ConversationQueue, type QueuedMessage } from "./conversation-queue";
 import { runConversationTurn } from "./conversation-run";
-import { DesktopCardContext, DesktopToolCard } from "./desktop-tool-card";
+import { DesktopToolCard } from "./desktop-tool-card";
 import { confirmedJevSelection, displayJevUserMessage, latestJevPanelId } from "./jev-actions";
 import { JevInteractionContext, JevToolCard } from "./jev-tool-card";
 import { MailToolCard } from "./mail-tool-card";
@@ -556,22 +556,32 @@ export function ChatScreen({
                         (busy || agent.isRunning) && messages.indexOf(message) > latestUserIndex,
                     }}
                   >
-                    <DesktopCardContext value={{ latest: latestDesktop }}>
-                      {toolCalls.map((toolCall) => {
-                        const toolMessage = messages.find(
-                          (candidate): candidate is ToolMessage =>
-                            candidate.role === "tool" && candidate.toolCallId === toolCall.id,
-                        );
-                        return (
-                          <View key={toolCall.id}>{renderToolCall({ toolCall, toolMessage })}</View>
-                        );
-                      })}
-                    </DesktopCardContext>
+                    {toolCalls.map((toolCall) => {
+                      const toolMessage = messages.find(
+                        (candidate): candidate is ToolMessage =>
+                          candidate.role === "tool" && candidate.toolCallId === toolCall.id,
+                      );
+                      return (
+                        <View key={toolCall.id}>{renderToolCall({ toolCall, toolMessage })}</View>
+                      );
+                    })}
                   </BrowserRunContext>
                 </JevInteractionContext.Provider>
               </View>
             );
           })
+        )}
+        {!!latestDesktop && (
+          <DesktopToolCard
+            live
+            toolCallId={latestDesktop}
+            result={
+              messages.find(
+                (message) => message.role === "tool" && message.toolCallId === latestDesktop,
+              )?.content
+            }
+            loading={replying}
+          />
         )}
         {!richThreads && (
           <>
