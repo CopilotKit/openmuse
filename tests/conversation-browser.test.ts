@@ -211,3 +211,40 @@ test("chat mail tools report disconnected mail and refuse another owner's thread
   call = { name: "read_mail_thread", arguments: { threadId: "trip-thread" } };
   assert.match(await toolError(), /not found/);
 });
+
+for (const missing of ["workerUrl", "workerToken", "both"] as const) {
+  test(`chat and tasks omit browser tools when ${missing} is missing`, async (t) => {
+    const { requests } = await modelFixture(t, () => undefined);
+    const fixture = await browserFixture(t, () => {
+      throw new Error("An unconfigured browser must not receive requests");
+    });
+    const config = {
+      ...fixture.config,
+      agentBackend: "model",
+      model: "openai/fixture",
+      jevMode: "sample",
+      workerUrl: missing === "workerToken" ? fixture.config.workerUrl : undefined,
+      workerToken: missing === "workerUrl" ? fixture.config.workerToken : undefined,
+    } as const;
+    const app = await createApp(fixture.db, config);
+    t.after(() => app.agent.stop());
+    await lastValueFrom(
+      new ConversationAgent(config, app.agent, "local-user").run(runInput()).pipe(toArray()),
+    );
+    const chatCount = requests.length;
+    assert.ok(chatCount > 0);
+    await app.agent.createTask("local-user", { kind: "agent", prompt: "Read a public webpage" });
+    await app.agent.worker.tick();
+    assert.ok(requests.length > chatCount);
+    for (const { body } of requests) {
+      const request = JSON.parse(body);
+      assert.ok(
+        !request.tools.some((tool: { name: string }) =>
+          ["browse_web", "read_web"].includes(tool.name),
+        ),
+      );
+      assert.doesNotMatch(body, /call browse_web|read_web can read/);
+      assert.match(body, /Full-page browsing is not configured/);
+    }
+  });
+}
