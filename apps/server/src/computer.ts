@@ -9,10 +9,13 @@ import type {
   ComputerSnapshot,
 } from "../../../packages/domain/src/computer.ts";
 import {
-  type DesktopInfo,
+  type ComputerBackend,
+  DesktopComputerBackend,
+  DockerComputer,
+} from "./computer-backend.ts";
+import {
   describeDesktopAction,
   desktopActionSchema,
-  desktopCommand,
   E2BDesktopComputer,
 } from "./computer-e2b-desktop.ts";
 import type { Config } from "./config.ts";
@@ -22,7 +25,6 @@ import { AppError } from "./errors.ts";
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const outputLimit = 128 * 1024;
 const fileLimit = 256 * 1024;
-const controlTimeout = 10000;
 const leaseDuration = 180000;
 export const computerCommandSchema = z.object({
   command: z.string().trim().min(1).max(16000),
@@ -146,50 +148,6 @@ export function workspacePath(path: string): string {
     throw new AppError("Choose an absolute path inside /workspace", 422);
   return normalized;
 }
-const inspectionSchema = z.object({
-  Id: z.string(),
-  Name: z.string(),
-  Config: z.object({
-    Image: z.string(),
-    User: z.string(),
-    Labels: z.record(z.string(), z.string()).nullable(),
-    Env: z.array(z.string()),
-    Entrypoint: z.array(z.string()).nullable(),
-    Cmd: z.array(z.string()).nullable(),
-    WorkingDir: z.string(),
-  }),
-  HostConfig: z.object({
-    ReadonlyRootfs: z.boolean(),
-    Privileged: z.boolean(),
-    CapDrop: z.array(z.string()).nullable(),
-    CapAdd: z.array(z.string()).nullable(),
-    SecurityOpt: z.array(z.string()).nullable(),
-    NetworkMode: z.string(),
-    Memory: z.number(),
-    MemorySwap: z.number(),
-    PidsLimit: z.number().nullable(),
-    NanoCpus: z.number(),
-    Binds: z.array(z.string()).nullable(),
-    Devices: z.array(z.unknown()).nullable(),
-    DeviceRequests: z.array(z.unknown()).nullable(),
-    PortBindings: z.record(z.string(), z.unknown()).nullable(),
-    PidMode: z.string(),
-    IpcMode: z.string(),
-    Tmpfs: z.record(z.string(), z.string()).nullable(),
-    RestartPolicy: z.object({ Name: z.string() }),
-  }),
-  Mounts: z.array(
-    z.object({
-      Type: z.string(),
-      Name: z.string().optional(),
-      Destination: z.string(),
-      RW: z.boolean(),
-    }),
-  ),
-  NetworkSettings: z.object({ Networks: z.record(z.string(), z.unknown()) }),
-  State: z.object({ Running: z.boolean() }),
-});
-type Inspection = z.infer<typeof inspectionSchema>;
 /** Metadata for the latest screenshot blob, using the same shared data directory as Files. */
 interface Screen {
   id: "latest";
@@ -211,150 +169,43 @@ type Lease = {
   operation: "command" | "operation";
 };
 export class ComputerService {
+  private readonly backend: ComputerBackend;
   constructor(
     readonly db: Store,
     readonly config: Config,
-    private readonly docker: DockerRunner = runDocker,
+    docker: DockerRunner = runDocker,
     // Set only for COMPUTER_PROVIDER=e2b-desktop; the Docker paths below never use it.
     private readonly desktop: E2BDesktopComputer | undefined = config.computerProvider ===
     "e2b-desktop"
       ? new E2BDesktopComputer(config)
       : undefined,
-  ) {}
+  ) {
+    this.backend = desktop
+      ? new DesktopComputerBackend(config, desktop)
+      : new DockerComputer(config, docker);
+  }
   // Receipts are kept per provider, so Docker history never shows up on the desktop.
   private get receipts() {
-    return this.desktop ? "computer-desktop-commands" : "computer-commands";
+    return this.backend.receipts;
   }
   get provider() {
-    return this.desktop ? ("e2b-desktop" as const) : ("docker" as const);
+    return this.backend.provider;
   }
   private labels(owner: string) {
     return computerIdentity(this.config, owner).labels;
   }
   /** Whether the owner's computer runs, on whichever provider is configured. */
   private async isRunning(owner: string) {
-    return this.desktop
-      ? (await this.desktop.state(this.labels(owner))) === "running"
-      : !!(await this.inspect(owner))?.State.Running;
+    return (await this.backend.state(owner)) === "running";
   }
   private enabled() {
     if (!this.config.computerEnabled)
       throw new AppError(
-        "Computer is not configured. Enable COMPUTER_ENABLED and build the local computer image.",
+        this.provider === "docker"
+          ? "Computer is not configured. Enable COMPUTER_ENABLED and build the local computer image."
+          : "Computer is not configured. Enable COMPUTER_ENABLED and configure the desktop provider.",
         503,
       );
-  }
-  private image() {
-    const image = this.config.computerImage ?? "openmuse-computer:local";
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{0,250}$/.test(image))
-      throw new AppError("COMPUTER_IMAGE is invalid", 503);
-    return image;
-  }
-  private async checked(args: string[]) {
-    const result = await this.docker(args, { timeoutMs: controlTimeout });
-    if (result.timedOut)
-      throw new AppError("Docker did not respond within 10 seconds. Check the Docker engine.", 503);
-    if (result.interrupted || result.exitCode !== 0 || result.truncated)
-      throw new AppError(
-        "Docker operation failed. Check that the engine is running and the computer image is built locally.",
-        503,
-      );
-    return result.stdout;
-  }
-  private async inspect(owner: string): Promise<Inspection | undefined> {
-    const identity = computerIdentity(this.config, owner);
-    const found = (
-      await this.checked([
-        "container",
-        "ls",
-        "--all",
-        "--filter",
-        `name=^/${identity.container}$`,
-        "--format",
-        "{{.ID}}",
-      ])
-    ).trim();
-    if (!found) return undefined;
-    const raw = JSON.parse(await this.checked(["container", "inspect", identity.container]));
-    const result = z.array(inspectionSchema).length(1).safeParse(raw);
-    if (!result.success)
-      throw new AppError("Computer isolation inspection failed; refusing to attach", 409);
-    const c = result.data[0],
-      h = c.HostConfig;
-    const empty = (list: unknown[] | null) => !list?.length;
-    const safe =
-      c.Name === `/${identity.container}` &&
-      c.Config.Image === this.image() &&
-      c.Config.User === "1000:1000" &&
-      c.Config.WorkingDir === "/workspace" &&
-      Object.entries(identity.labels).every(([key, value]) => c.Config.Labels?.[key] === value) &&
-      c.Config.Env.every((value) =>
-        ["PATH", "HOME", "LANG", "NODE_VERSION", "YARN_VERSION"].includes(value.split("=")[0]),
-      ) &&
-      JSON.stringify(c.Config.Entrypoint) === '["/usr/bin/sleep"]' &&
-      JSON.stringify(c.Config.Cmd) === '["infinity"]' &&
-      h.ReadonlyRootfs &&
-      !h.Privileged &&
-      h.CapDrop?.includes("ALL") &&
-      empty(h.CapAdd) &&
-      h.SecurityOpt?.length === 1 &&
-      h.SecurityOpt.includes("no-new-privileges") &&
-      h.NetworkMode === "none" &&
-      h.Memory > 0 &&
-      h.Memory <= 536870912 &&
-      h.MemorySwap === h.Memory &&
-      h.PidsLimit !== null &&
-      h.PidsLimit > 0 &&
-      h.PidsLimit <= 128 &&
-      h.NanoCpus > 0 &&
-      h.NanoCpus <= 1000000000 &&
-      empty(h.Binds) &&
-      empty(h.Devices) &&
-      empty(h.DeviceRequests) &&
-      !Object.keys(h.PortBindings ?? {}).length &&
-      h.PidMode === "" &&
-      h.IpcMode === "private" &&
-      h.RestartPolicy.Name === "no" &&
-      Object.keys(h.Tmpfs ?? {}).length === 1 &&
-      h.Tmpfs?.["/tmp"] === "rw,nosuid,nodev,noexec,size=67108864,mode=1777" &&
-      c.Mounts.length === 1 &&
-      c.Mounts[0].Type === "volume" &&
-      c.Mounts[0].Name === identity.volume &&
-      c.Mounts[0].Destination === "/workspace" &&
-      c.Mounts[0].RW &&
-      Object.keys(c.NetworkSettings.Networks).every((network) => network === "none");
-    if (!safe)
-      throw new AppError(
-        "Computer ownership or isolation does not match this deployment; refusing to attach",
-        409,
-      );
-    await this.verifyVolume(owner);
-    return c;
-  }
-  private async verifyVolume(owner: string) {
-    const identity = computerIdentity(this.config, owner);
-    const parsed = z
-      .array(
-        z.object({
-          Name: z.string(),
-          Labels: z.record(z.string(), z.string()).nullable(),
-          Driver: z.string(),
-          Options: z.record(z.string(), z.unknown()).nullable(),
-          Scope: z.string(),
-        }),
-      )
-      .length(1)
-      .safeParse(JSON.parse(await this.checked(["volume", "inspect", identity.volume])));
-    if (!parsed.success) throw new AppError("Computer workspace ownership inspection failed", 409);
-    const v = parsed.data[0];
-    if (
-      v.Name !== identity.volume ||
-      v.Driver !== "local" ||
-      v.Scope !== "local" ||
-      Object.keys(v.Options ?? {}).length ||
-      !Object.entries(identity.labels).every(([key, value]) => v.Labels?.[key] === value)
-    )
-      throw new AppError("Computer workspace ownership or isolation does not match", 409);
   }
   private async acquire(owner: string, operation: Lease["operation"] = "operation") {
     this.enabled();
@@ -451,16 +302,17 @@ export class ComputerService {
       enabled: Boolean(this.config.computerEnabled),
       provider: this.provider,
       workspacePath: "/workspace" as const,
-      network: this.desktop ? ("enabled" as const) : ("disabled" as const),
+      network: this.backend.network,
       commands: await this.commands(owner),
     };
     if (!base.enabled)
       return {
         ...base,
         status: "unconfigured",
-        message: this.desktop
-          ? "Enable the E2B desktop computer on the server to use its desktop, terminal and workspace files."
-          : "Enable the Docker computer on the server to use its terminal and workspace files.",
+        message:
+          this.provider === "e2b-desktop"
+            ? "Enable the E2B desktop computer on the server to use its desktop, terminal and workspace files."
+            : "Enable the Docker computer on the server to use its terminal and workspace files.",
       };
     try {
       return { ...base, status: (await this.isRunning(owner)) ? "running" : "stopped" };
@@ -471,82 +323,12 @@ export class ComputerService {
         message:
           error instanceof AppError
             ? error.message
-            : "Computer inspection failed. Check Docker setup.",
+            : "Computer inspection failed. Check the computer provider setup.",
       };
     }
   }
   async start(owner: string) {
-    await this.exclusive(owner, async () => {
-      if (this.desktop) return this.desktop.start(this.labels(owner));
-      const identity = computerIdentity(this.config, owner);
-      const existing = await this.inspect(owner);
-      if (existing) {
-        if (!existing.State.Running) await this.checked(["container", "start", identity.container]);
-        return;
-      }
-      const labels = Object.entries(identity.labels).flatMap(([key, value]) => [
-        "--label",
-        `${key}=${value}`,
-      ]);
-      const volume = (
-        await this.checked([
-          "volume",
-          "ls",
-          "--filter",
-          `name=^${identity.volume}$`,
-          "--format",
-          "{{.Name}}",
-        ])
-      ).trim();
-      if (!volume) await this.checked(["volume", "create", ...labels, identity.volume]);
-      await this.verifyVolume(owner);
-      await this.checked([
-        "container",
-        "create",
-        "--pull",
-        "never",
-        "--name",
-        identity.container,
-        ...labels,
-        "--user",
-        "1000:1000",
-        "--workdir",
-        "/workspace",
-        "--read-only",
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--network",
-        "none",
-        "--ipc",
-        "private",
-        "--memory",
-        "512m",
-        "--memory-swap",
-        "512m",
-        "--cpus",
-        "1",
-        "--pids-limit",
-        "128",
-        "--restart",
-        "no",
-        "--tmpfs",
-        "/tmp:rw,nosuid,nodev,noexec,size=67108864,mode=1777",
-        "--mount",
-        `type=volume,source=${identity.volume},target=/workspace`,
-        "--env",
-        "HOME=/workspace",
-        "--env",
-        "LANG=C.UTF-8",
-        "--entrypoint",
-        "/usr/bin/sleep",
-        this.image(),
-        "infinity",
-      ]);
-      await this.inspect(owner);
-      await this.checked(["container", "start", identity.container]);
-    });
+    await this.exclusive(owner, () => this.backend.start(owner));
     return this.snapshot(owner);
   }
   async stop(owner: string) {
@@ -590,15 +372,7 @@ export class ComputerService {
               stderr: "Stopped by the user. Inspect the workspace before repeating this command.",
             },
           );
-      if (this.desktop) await this.desktop.stop(this.labels(owner));
-      else if ((await this.inspect(owner))?.State.Running)
-        await this.checked([
-          "container",
-          "stop",
-          "--time",
-          "2",
-          computerIdentity(this.config, owner).container,
-        ]);
+      await this.backend.stop(owner);
       await this.db.compareAndSwap(
         owner,
         "computer-state",
@@ -621,17 +395,9 @@ export class ComputerService {
     }
     return this.snapshot(owner);
   }
-  private async running(owner: string): Promise<string | DesktopInfo> {
+  private async running(owner: string) {
     this.enabled();
-    if (this.desktop) {
-      const info = await this.desktop.inspect(this.labels(owner));
-      if (info?.state !== "running")
-        throw new AppError("Start the computer before using its terminal or files", 409);
-      return info;
-    }
-    if (!(await this.isRunning(owner)))
-      throw new AppError("Start the computer before using its terminal or files", 409);
-    return computerIdentity(this.config, owner).container;
+    return this.backend.running(owner);
   }
   async execute(
     owner: string,
@@ -654,7 +420,7 @@ export class ComputerService {
     return this.exclusive(
       owner,
       async (lease) => {
-        const container = await this.running(owner);
+        const session = await this.running(owner);
         if (options.signal?.aborted)
           throw new AppError("Computer command was interrupted before execution", 409);
         const command: ComputerCommand = {
@@ -688,33 +454,7 @@ export class ComputerService {
           });
         let result: DockerResult;
         try {
-          result = this.desktop
-            ? await this.desktop.run(this.labels(owner), desktopCommand(args.command), {
-                cwd,
-                timeoutMs: 35000,
-                signal: options.signal,
-                verified: typeof container === "string" ? undefined : container,
-              })
-            : await this.docker(
-                [
-                  "exec",
-                  "--user",
-                  "1000:1000",
-                  "--workdir",
-                  cwd,
-                  container as string,
-                  "/usr/bin/timeout",
-                  "--signal=TERM",
-                  "--kill-after=2s",
-                  "30s",
-                  "/bin/bash",
-                  "--noprofile",
-                  "--norc",
-                  "-c",
-                  args.command,
-                ],
-                { timeoutMs: 35000, signal: options.signal },
-              );
+          result = await session.exec(args.command, cwd, options.signal);
         } catch {
           result = {
             stdout: "",
@@ -747,9 +487,7 @@ export class ComputerService {
           // cannot release until cleanup is confirmed and this executor is done.
           if (cleanup) {
             try {
-              // A lost E2B stream cannot be trusted either: pause the whole sandbox.
-              if (this.desktop) await this.desktop.stop(this.labels(owner));
-              else await this.checked(["container", "stop", "--time", "2", container as string]);
+              await session.stop();
               await this.db.compareAndSwap(
                 owner,
                 "computer-state",
@@ -814,41 +552,14 @@ export class ComputerService {
     if (text !== undefined && Buffer.byteLength(text) > fileLimit)
       throw new AppError("Text files must be 256 KB or smaller", 413);
     return this.exclusive(owner, async () => {
-      const container = await this.running(owner);
+      const session = await this.running(owner);
       const input = JSON.stringify({ operation, path, text, base64 });
       const maxOutputBytes = operation === "read_pdf" ? 15 * 1024 * 1024 : 2 * 1024 * 1024;
       // On E2B the request crosses the network on stdin after the process starts, so
       // the limit accounts for upload and expected download (PDF JSON can reach 14 MB).
       const expectedOutput = operation === "read_pdf" ? maxOutputBytes : 0;
       const seconds = 8 + Math.ceil(Math.max(input.length, expectedOutput) / (1024 * 1024));
-      const result = this.desktop
-        ? await this.desktop.run(
-            this.labels(owner),
-            `/usr/bin/timeout --kill-after=1s ${seconds}s /usr/bin/python3 -I /opt/openmuse/files.py`,
-            {
-              timeoutMs: (seconds + 2) * 1000,
-              input,
-              maxOutputBytes,
-              propagateAttachError: true,
-              verified: typeof container === "string" ? undefined : container,
-            },
-          )
-        : await this.docker(
-            [
-              "exec",
-              "-i",
-              "--user",
-              "1000:1000",
-              container as string,
-              "/usr/bin/timeout",
-              "--kill-after=1s",
-              "8s",
-              "/usr/bin/python3",
-              "-I",
-              "/opt/openmuse/files.py",
-            ],
-            { timeoutMs: 10000, input, maxOutputBytes },
-          );
+      const result = await session.file(input, seconds, maxOutputBytes);
       if (result.exitCode !== 0 || result.timedOut || result.interrupted || result.truncated)
         throw new AppError(
           "Computer file operation failed. Check the path, permissions and file size; symlinks cannot be opened.",
