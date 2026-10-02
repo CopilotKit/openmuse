@@ -23,7 +23,7 @@ import type { Store } from "./db.ts";
 import { AppError } from "./errors.ts";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
-const outputLimit = 128 * 1024;
+export const computerOutputLimit = 128 * 1024;
 const fileLimit = 256 * 1024;
 const leaseDuration = 180000;
 export const computerCommandSchema = z.object({
@@ -46,23 +46,47 @@ export type DockerRunner = (
   options: { timeoutMs: number; input?: string; signal?: AbortSignal; maxOutputBytes?: number },
 ) => Promise<DockerResult>;
 
+/** Shared byte cap for both providers; stdout and stderr consume one budget. */
+export function computerOutput(maxOutputBytes = computerOutputLimit) {
+  const limit = Math.min(maxOutputBytes, 15 * 1024 * 1024);
+  const result: DockerResult = {
+    stdout: "",
+    stderr: "",
+    exitCode: null,
+    timedOut: false,
+    interrupted: false,
+    truncated: false,
+  };
+  const stdout: Buffer[] = [],
+    stderr: Buffer[] = [];
+  let count = 0;
+  const capture = (chunks: Buffer[]) => (data: string | Buffer) => {
+    const chunk = Buffer.from(data);
+    const remaining = Math.max(0, limit - count);
+    if (chunk.length > remaining) result.truncated = true;
+    if (remaining) chunks.push(chunk.subarray(0, remaining));
+    count += Math.min(remaining, chunk.length);
+  };
+  return {
+    result,
+    limit,
+    stdout: capture(stdout),
+    stderr: capture(stderr),
+    finish() {
+      result.stdout = Buffer.concat(stdout).toString("utf8");
+      result.stderr = Buffer.concat(stderr).toString("utf8");
+      return result;
+    },
+  };
+}
+
 // The only host process this provider can launch is Docker. User input is an argv
 // element or stdin, never a host shell program. Do not add a shell fallback here.
 export const runDocker: DockerRunner = (args, options) =>
   new Promise((resolve) => {
-    const limit = Math.min(options.maxOutputBytes ?? outputLimit, 15 * 1024 * 1024);
-    const result: DockerResult = {
-      stdout: "",
-      stderr: "",
-      exitCode: null,
-      timedOut: false,
-      interrupted: false,
-      truncated: false,
-    };
-    const stdout: Buffer[] = [],
-      stderr: Buffer[] = [];
-    let count = 0,
-      settled = false;
+    const output = computerOutput(options.maxOutputBytes);
+    const { result } = output;
+    let settled = false;
     const env: Record<string, string> = {};
     for (const key of [
       "PATH",
@@ -80,15 +104,7 @@ export const runDocker: DockerRunner = (args, options) =>
       settled = true;
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", abort);
-      result.stdout = Buffer.concat(stdout).toString("utf8");
-      result.stderr = Buffer.concat(stderr).toString("utf8");
-      resolve(result);
-    };
-    const capture = (chunks: Buffer[], chunk: Buffer) => {
-      const remaining = Math.max(0, limit - count);
-      if (chunk.length > remaining) result.truncated = true;
-      if (remaining) chunks.push(chunk.subarray(0, remaining));
-      count += Math.min(remaining, chunk.length);
+      resolve(output.finish());
     };
     const abort = () => {
       result.interrupted = true;
@@ -100,13 +116,10 @@ export const runDocker: DockerRunner = (args, options) =>
       child.kill("SIGKILL");
       finish();
     }, options.timeoutMs);
-    child.stdout.on("data", (chunk: Buffer) => capture(stdout, chunk));
-    child.stderr.on("data", (chunk: Buffer) => capture(stderr, chunk));
+    child.stdout.on("data", output.stdout);
+    child.stderr.on("data", output.stderr);
     child.on("error", () => {
-      capture(
-        stderr,
-        Buffer.from("Docker CLI could not be started. Install Docker and start its engine."),
-      );
+      output.stderr("Docker CLI could not be started. Install Docker and start its engine.");
       finish();
     });
     child.on("close", (code) => {

@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { z } from "zod";
-import type { ComputerState, DockerResult } from "./computer.ts";
+import {
+  type ComputerState,
+  computerOutput,
+  computerOutputLimit,
+  type DockerResult,
+} from "./computer.ts";
 import type { Config } from "./config.ts";
 import { AppError } from "./errors.ts";
 
@@ -17,7 +22,6 @@ const createMs = 60_000;
 const user = "user"; // the desktop template's uid 1000 account
 const display = ":0";
 export const resolution: [number, number] = [1280, 800];
-const outputLimit = 128 * 1024;
 // The SDK keeps every output byte in memory, so a command that keeps writing
 // past the capture limit is killed once it reaches this hard ceiling.
 const outputCeiling = 1024 * 1024;
@@ -186,7 +190,11 @@ const streamStop = [
  * Output goes to temporary files, so a background GUI app (`firefox-esr URL &`)
  * cannot hold the output stream open after the shell exits. A watchdog stops the
  * command once those files pass `ceiling` bytes, so a runaway writer cannot fill the disk. */
-export function desktopCommand(command: string, limit = outputLimit, ceiling = diskCeiling) {
+export function desktopCommand(
+  command: string,
+  limit = computerOutputLimit,
+  ceiling = diskCeiling,
+) {
   const script = [
     // fd 3 is the real stderr; bash's own job notices go to /dev/null.
     "exec 3>&2 2>/dev/null",
@@ -561,33 +569,16 @@ export class E2BDesktopComputer {
       verified?: DesktopInfo;
     },
   ): Promise<DockerResult> {
-    const limit = Math.min(options.maxOutputBytes ?? outputLimit, 15 * 1024 * 1024);
-    const result: DockerResult = {
-      stdout: "",
-      stderr: "",
-      exitCode: null,
-      timedOut: false,
-      interrupted: false,
-      truncated: false,
-    };
-    const stdout: Buffer[] = [],
-      stderr: Buffer[] = [];
-    let count = 0,
-      received = 0,
+    const output = computerOutput(options.maxOutputBytes);
+    const { result, limit, finish } = output;
+    let received = 0,
       handle: DesktopHandle | undefined,
       overflowed = false;
-    const finish = () => {
-      result.stdout = Buffer.concat(stdout).toString("utf8");
-      result.stderr = Buffer.concat(stderr).toString("utf8");
-      return result;
-    };
-    const capture = (chunks: Buffer[]) => (data: string) => {
-      const chunk = Buffer.from(data);
-      received += chunk.length;
-      const remaining = Math.max(0, limit - count);
-      if (chunk.length > remaining) result.truncated = true;
-      if (remaining) chunks.push(chunk.subarray(0, remaining));
-      count += Math.min(remaining, chunk.length);
+    // Terminal output is also capped in the VM; this guards filesystem responses
+    // and any unexpected output outside that wrapper.
+    const capture = (write: (data: string | Buffer) => void) => (data: string) => {
+      write(data);
+      received += Buffer.byteLength(data);
       if (received > limit + outputCeiling && !overflowed) {
         overflowed = true;
         void handle?.kill().catch(() => {});
@@ -620,14 +611,14 @@ export class E2BDesktopComputer {
           stdin: options.input !== undefined,
           timeoutMs: options.timeoutMs,
           signal: options.signal,
-          onStdout: capture(stdout),
-          onStderr: capture(stderr),
+          onStdout: capture(output.stdout),
+          onStderr: capture(output.stderr),
         });
       } catch (error) {
         if (error instanceof InvalidArgumentError) {
           // A missing working directory is rejected before the command starts.
           result.exitCode = 126;
-          stderr.push(Buffer.from("The working directory does not exist."));
+          output.stderr("The working directory does not exist.");
           return finish();
         }
         throw error;
