@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { posix } from "node:path";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { join, posix } from "node:path";
 import { z } from "zod";
 import type {
   ComputerCommand,
@@ -189,12 +190,13 @@ const inspectionSchema = z.object({
   State: z.object({ Running: z.boolean() }),
 });
 type Inspection = z.infer<typeof inspectionSchema>;
-/** The latest desktop screenshot, stored base64 for the native chat card. */
+/** Metadata for the latest screenshot blob, using the same shared data directory as Files. */
 interface Screen {
   id: "latest";
   receiptId: string;
   mimeType: string;
-  data: string;
+  blob?: string;
+  data?: string; // Older deployments stored base64; accepted until the next screenshot.
   takenAt?: string;
 }
 type Lease = {
@@ -913,14 +915,25 @@ export class ComputerService {
       let warning = shot.warning;
       try {
         await this.db.put(owner, "computer-desktop-actions", saved);
-        if (data)
+        if (data) {
+          const directory = join(this.config.dataDir, "desktop-screens");
+          await mkdir(directory, { recursive: true, mode: 0o700 });
+          const blob = `${hash(owner)}.jpg`;
+          const temporary = join(directory, `${receipt.id}.tmp`);
+          try {
+            await writeFile(temporary, shot.image, { mode: 0o600, flag: "wx" });
+            await rename(temporary, join(directory, blob));
+          } finally {
+            await unlink(temporary).catch(() => {});
+          }
           await this.db.put<Screen>(owner, "computer-desktop-screens", {
             id: "latest",
             receiptId: saved.id,
             mimeType: shot.mimeType,
-            data,
+            blob,
             takenAt: saved.completedAt,
           });
+        }
       } catch {
         warning =
           "Action performed; its receipt or screenshot could not be saved. Take a screenshot before retrying the action.";
@@ -934,7 +947,13 @@ export class ComputerService {
     const shot = await this.db.get<Screen>(owner, "computer-desktop-screens", "latest");
     if (!shot || (receiptId && shot.receiptId !== receiptId))
       throw new AppError("No desktop screenshot yet", 404);
-    return { mimeType: shot.mimeType, bytes: Buffer.from(shot.data, "base64") };
+    return {
+      mimeType: shot.mimeType,
+      bytes:
+        shot.blob === `${hash(owner)}.jpg`
+          ? await readFile(join(this.config.dataDir, "desktop-screens", shot.blob))
+          : Buffer.from(shot.data ?? "", "base64"),
+    };
   }
   list(owner: string, path = "/workspace") {
     return this.file<ComputerDirectory>(owner, "list", path);

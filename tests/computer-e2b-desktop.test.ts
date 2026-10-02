@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { EventType } from "@ag-ui/core";
 import { defineTool } from "@copilotkit/runtime/v2";
@@ -196,10 +199,12 @@ function fake(
 let db: Store;
 let owners = 0;
 before(async () => {
+  config.dataDir = await mkdtemp(join(tmpdir(), "openmuse-desktop-test-"));
   db = await createStore();
 });
 after(async () => {
   await db.close();
+  await rm(config.dataDir, { recursive: true, force: true });
 });
 // Each test gets a fresh owner so leases and receipts never leak between tests.
 function service(f: ReturnType<typeof fake>) {
@@ -726,6 +731,9 @@ test("a desktop action runs with a screenshot after it, leaves a receipt and kee
     [shot.receipt.id],
   );
   assert.deepEqual((await computer.latestScreenshot(owner)).bytes, Buffer.from(jpeg));
+  const stored = await db.get(owner, "computer-desktop-screens", "latest");
+  assert.equal(stored?.data, undefined);
+  assert.match(String(stored?.blob), /\.jpg$/);
   // A plain screenshot sends no input.
   await computer.desktopAction(owner, { action: "screenshot" });
   assert.match(f.calls.setup.at(-1)?.command ?? "", /^scrot --pointer/);
