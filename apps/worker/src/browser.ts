@@ -33,17 +33,20 @@ export function validateSessionId(id: unknown): string {
   return id.toLowerCase();
 }
 
-export async function createBrowserManager(options: {
-  dataDir: string;
-  maxSessions?: number;
-  idleTimeoutMs?: number;
-}) {
+export async function createBrowserManager(
+  options: {
+    dataDir: string;
+    maxSessions?: number;
+    idleTimeoutMs?: number;
+  },
+  createProxy = startEgressProxy,
+) {
   const { dataDir, maxSessions = 3, idleTimeoutMs = 30 * 60_000 } = options;
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   const sessions = new Map<string, Session>();
   const running = new Map<string, Running>();
   const queues = new Map<string, Promise<unknown>>();
-  const proxy = await startEgressProxy();
+  const proxy = await createProxy();
   for (const id of await readdir(dataDir)) {
     if (!SESSION_ID.test(id)) continue;
     try {

@@ -28,12 +28,21 @@ try {
     "/data",
     "--publish",
     "127.0.0.1::8790",
+    "--publish",
+    "127.0.0.1::8791",
+    "--mount",
+    `type=bind,source=${root}tests,target=/app/tests,readonly`,
     "--env",
     "WORKER_TOKEN",
     "openmuse-browser-worker:test",
+    "node",
+    "--experimental-strip-types",
+    "tests/fixture-worker.ts",
   ]);
   const binding = run(["port", name, "8790"], { encoding: "utf8", stdio: "pipe" }).trim();
   const url = `http://${binding}`;
+  const fixtureBinding = run(["port", name, "8791"], { encoding: "utf8", stdio: "pipe" }).trim();
+  const fixtureUrl = `http://${fixtureBinding}`;
   let healthy = false;
   for (let attempt = 0; attempt < 30; attempt++) {
     if (
@@ -50,7 +59,12 @@ try {
   execFileSync(process.execPath, ["--experimental-strip-types", "--test", "tests/docker.test.ts"], {
     cwd: root,
     stdio: "inherit",
-    env: { ...env, WORKER_TEST_URL: url, WORKER_TEST_CONTAINER: name },
+    env: {
+      ...env,
+      WORKER_TEST_URL: url,
+      WORKER_FIXTURE_URL: fixtureUrl,
+      WORKER_TEST_CONTAINER: name,
+    },
   });
 } catch (error) {
   run(["logs", name]);
