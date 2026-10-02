@@ -1229,14 +1229,6 @@ export function ConnectionsScreen({ query = "" }: { query?: string }) {
       connected: w.connections.some((c) => c.id === "browser" && c.status === "connected"),
       group: "browser",
     },
-    {
-      id: "openbot",
-      name: "OpenBot",
-      icon: Sparkles,
-      color: "#6866A6",
-      connected: false,
-      group: "openbot",
-    },
   ].filter((row) => `${row.name} ${row.group}`.toLowerCase().includes(query.toLowerCase()));
   return (
     <View style={{ gap: 22 }}>
@@ -1308,11 +1300,11 @@ export function ConnectionsScreen({ query = "" }: { query?: string }) {
       {!rows.length && <Text style={s.muted}>No matching connectors.</Text>}
       {selected && (
         <Sheet
-          title={selected === "google" ? "Google connections" : "OpenBot"}
-          subtitle={selected === "google" ? google?.account : "A computer for your agent"}
+          title="Google connections"
+          subtitle={google?.account}
           onClose={() => setSelected(undefined)}
         >
-          {selected === "google" ? (
+          {selected === "google" && (
             <View style={{ gap: 18 }}>
               <Text style={s.muted}>
                 Bring Gmail and Google Calendar into your conversations. Choose read access, then
@@ -1360,17 +1352,6 @@ export function ConnectionsScreen({ query = "" }: { query?: string }) {
               >
                 Refresh connections
               </Button>
-            </View>
-          ) : (
-            <View style={{ gap: 14 }}>
-              <Text style={s.text}>
-                The OpenBot adapter is available in this open-source project. A live OpenBot backend
-                has not been configured.
-              </Text>
-              <Text style={s.muted}>
-                Your current computer uses OpenMuse’s persistent Chromium worker. OpenBot
-                integration will expand the execution backend while keeping this interface.
-              </Text>
             </View>
           )}
         </Sheet>

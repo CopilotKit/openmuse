@@ -49,6 +49,7 @@ after(async () => {
 
 test("API protects private data and rejects unrelated web origins", async () => {
   assert.equal((await app.request("/api/workspace")).status, 401);
+  assert.equal((await app.request("/api/mcp/servers")).status, 401);
   assert.equal(
     (
       await app.request("/api/workspace", {
@@ -57,6 +58,13 @@ test("API protects private data and rejects unrelated web origins", async () => 
     ).status,
     403,
   );
+});
+test("MCP client metadata identifies its own document URL", async () => {
+  const response = await app.request("/api/mcp/client-metadata");
+  assert.equal(response.status, 200);
+  const metadata = await response.json();
+  assert.equal(metadata.client_id, "http://localhost:8787/api/mcp/client-metadata");
+  assert.deepEqual(metadata.redirect_uris, ["http://localhost:8787/api/mcp/callback"]);
 });
 test("sample workspace serves a real PDF and filling creates a new version", async () => {
   const response = await app.request("/api/workspace", { headers: headers() });

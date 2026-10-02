@@ -31,6 +31,7 @@ import type { Store } from "../db.ts";
 import { AppError } from "../errors.ts";
 import type { Files } from "../files.ts";
 import { backgroundFailure } from "../log.ts";
+import { McpService } from "../mcp.ts";
 import type { WorkspaceService } from "../workspace.ts";
 import { analyzeSpending } from "./finance.ts";
 import { executeModelTask } from "./model.ts";
@@ -51,6 +52,7 @@ export class AgentService {
     readonly actions: ActionService,
     readonly browser: BrowserService,
     readonly computer: ComputerService = new ComputerService(db, config),
+    readonly mcp: McpService = new McpService(db, config),
   ) {
     this.worker = new TaskWorker(db, (owner, task, context) => this.execute(owner, task, context), {
       settled: (owner, task) => this.publishOutcome(owner, task),
