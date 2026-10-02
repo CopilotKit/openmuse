@@ -1041,7 +1041,7 @@ export class AgentService {
       owner,
       "monitors",
       monitor.id,
-      { status: "active" },
+      { status: "active", checks: monitor.checks },
       {
         checks: monitor.checks + 1,
         lastCheckedAt: date(),
