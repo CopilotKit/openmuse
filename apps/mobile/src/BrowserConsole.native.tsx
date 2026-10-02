@@ -3,7 +3,13 @@ import { View } from "react-native";
 import { WebView } from "react-native-webview";
 import { ErrorNotice } from "./ui";
 // `title` labels the web iframe; the native WebView has no equivalent.
-export default function BrowserConsole({ url }: { url: string; title?: string }) {
+export default function BrowserConsole({
+  url,
+}: {
+  url: string;
+  title?: string;
+  sandboxed?: boolean;
+}) {
   const [error, setError] = useState("");
   return (
     <View>

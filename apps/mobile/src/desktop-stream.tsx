@@ -78,7 +78,7 @@ export const DesktopStream = memo(function DesktopStream({
       <ErrorNotice error={error} />
       {!url && !error && <ActivityIndicator color={colors.blueDark} />}
       {!!url && embed && Platform.OS === "web" && (
-        <BrowserConsole url={url} title="Computer desktop" />
+        <BrowserConsole url={url} title="Computer desktop" sandboxed />
       )}
       {!!url && (
         <Button
