@@ -57,6 +57,8 @@ function fake(
   // Whether Xfce runs in each box. A filesystem-only resume cold-boots without it.
   const desktops = new Map<string, boolean>();
   const calls = {
+    lists: 0,
+    infos: 0,
     create: [] as { template: string; metadata: Record<string, string> }[],
     pause: [] as string[],
     connect: [] as { id: string; timeoutMs: number }[],
@@ -159,12 +161,14 @@ function fake(
   });
   const driver: DesktopDriver = {
     async list(metadata) {
+      calls.lists++;
       if (options.listFails) throw new Error("network down");
       return [...boxes.values()]
         .filter((b) => Object.entries(metadata).every(([k, v]) => b.metadata[k] === v))
         .map((b) => b.sandboxId);
     },
     async info(id) {
+      calls.infos++;
       const info = structuredClone(boxes.get(id) as DesktopInfo);
       options.afterInfo?.(id);
       return info;
@@ -954,4 +958,26 @@ test("delivered input remains succeeded when the screenshot fails", async () => 
     (await db.list<ComputerCommand>(owner, "computer-desktop-actions"))[0].status,
     "succeeded",
   );
+});
+
+test("commands and files reuse the verified inspection instead of finding twice", async () => {
+  const f = fake({
+    boxes: [{}],
+    run: (_command, options) => {
+      options.onStdout('{"text":"ok"}');
+      return 0;
+    },
+  });
+  const { computer, owner } = service(f);
+  await computer.start(owner);
+  for (const operation of [
+    () => computer.execute(owner, { command: "true" }),
+    () => computer.read(owner, "/workspace/doc.txt"),
+  ]) {
+    const lists = f.calls.lists,
+      infos = f.calls.infos;
+    await operation();
+    assert.equal(f.calls.lists - lists, 1);
+    assert.equal(f.calls.infos - infos, 1);
+  }
 });

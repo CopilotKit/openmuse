@@ -8,6 +8,7 @@ import type {
   ComputerSnapshot,
 } from "../../../packages/domain/src/computer.ts";
 import {
+  type DesktopInfo,
   describeDesktopAction,
   desktopActionSchema,
   desktopCommand,
@@ -618,8 +619,14 @@ export class ComputerService {
     }
     return this.snapshot(owner);
   }
-  private async running(owner: string) {
+  private async running(owner: string): Promise<string | DesktopInfo> {
     this.enabled();
+    if (this.desktop) {
+      const info = await this.desktop.inspect(this.labels(owner));
+      if (info?.state !== "running")
+        throw new AppError("Start the computer before using its terminal or files", 409);
+      return info;
+    }
     if (!(await this.isRunning(owner)))
       throw new AppError("Start the computer before using its terminal or files", 409);
     return computerIdentity(this.config, owner).container;
@@ -684,6 +691,7 @@ export class ComputerService {
                 cwd,
                 timeoutMs: 35000,
                 signal: options.signal,
+                verified: typeof container === "string" ? undefined : container,
               })
             : await this.docker(
                 [
@@ -692,7 +700,7 @@ export class ComputerService {
                   "1000:1000",
                   "--workdir",
                   cwd,
-                  container,
+                  container as string,
                   "/usr/bin/timeout",
                   "--signal=TERM",
                   "--kill-after=2s",
@@ -739,7 +747,7 @@ export class ComputerService {
             try {
               // A lost E2B stream cannot be trusted either: pause the whole sandbox.
               if (this.desktop) await this.desktop.stop(this.labels(owner));
-              else await this.checked(["container", "stop", "--time", "2", container]);
+              else await this.checked(["container", "stop", "--time", "2", container as string]);
               await this.db.compareAndSwap(
                 owner,
                 "computer-state",
@@ -815,7 +823,13 @@ export class ComputerService {
         ? await this.desktop.run(
             this.labels(owner),
             `/usr/bin/timeout --kill-after=1s ${seconds}s /usr/bin/python3 -I /opt/openmuse/files.py`,
-            { timeoutMs: (seconds + 2) * 1000, input, maxOutputBytes, propagateAttachError: true },
+            {
+              timeoutMs: (seconds + 2) * 1000,
+              input,
+              maxOutputBytes,
+              propagateAttachError: true,
+              verified: typeof container === "string" ? undefined : container,
+            },
           )
         : await this.docker(
             [
@@ -823,7 +837,7 @@ export class ComputerService {
               "-i",
               "--user",
               "1000:1000",
-              container,
+              container as string,
               "/usr/bin/timeout",
               "--kill-after=1s",
               "8s",

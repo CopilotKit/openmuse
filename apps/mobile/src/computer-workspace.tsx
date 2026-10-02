@@ -69,13 +69,33 @@ export function LinuxWorkspace({
       if (AppState.currentState !== "active") return;
       void refresh();
     };
-    poll();
-    const interval = setInterval(poll, 5000);
+    void refresh();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") poll();
+    });
+    const watching = tab === "Desktop" && Platform.OS === "web" && snapshot?.status === "running";
+    const active =
+      executing || busy || snapshot?.commands.some((item) => item.status === "running");
+    const interval = watching || active ? setInterval(poll, 5000) : undefined;
     return () => {
-      version.current++;
       clearInterval(interval);
+      subscription.remove();
     };
-  }, [refresh]);
+  }, [
+    refresh,
+    tab,
+    executing,
+    busy,
+    snapshot?.status,
+    snapshot?.commands.some((item) => item.status === "running"),
+  ]);
+
+  useEffect(
+    () => () => {
+      version.current++;
+    },
+    [refresh],
+  );
 
   async function control(action: "start" | "stop") {
     if (busy) return;

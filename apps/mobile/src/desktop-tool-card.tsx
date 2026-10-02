@@ -65,7 +65,8 @@ export function DesktopToolCard({
       }
     };
     void refresh();
-    const interval = setInterval(() => void refresh(), 5000);
+    const watching = Platform.OS === "web" && snapshot?.status === "running";
+    const interval = loading || watching ? setInterval(() => void refresh(), 5000) : undefined;
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") void refresh();
     });
@@ -74,7 +75,7 @@ export function DesktopToolCard({
       clearInterval(interval);
       subscription.remove();
     };
-  }, [api, latest, loading, starting]);
+  }, [api, latest, loading, starting, snapshot?.status]);
   const running = snapshot?.status === "running";
   async function start() {
     setStarting(true);

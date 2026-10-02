@@ -378,7 +378,7 @@ export class E2BDesktopComputer {
   }
   // Fail-closed analog of the Docker inspection: refuse to attach to anything this
   // deployment did not create. Sandbox.list omits lifecycle, so getInfo checks it.
-  private async find(labels: Record<string, string>) {
+  async inspect(labels: Record<string, string>) {
     const ids = await this.control(() => this.driver.list(labels));
     if (!ids.length) return undefined;
     const refuse = () =>
@@ -406,7 +406,7 @@ export class E2BDesktopComputer {
     return info;
   }
   async state(labels: Record<string, string>): Promise<ComputerState> {
-    const info = await this.find(labels);
+    const info = await this.inspect(labels);
     return !info ? "missing" : info.state === "running" ? "running" : "stopped";
   }
   // The service lease serializes timeout updates across API and worker processes.
@@ -418,11 +418,11 @@ export class E2BDesktopComputer {
     this.handles.delete(id);
   }
   async start(labels: Record<string, string>) {
-    const existing = await this.find(labels);
+    const existing = await this.inspect(labels);
     const id = existing
       ? existing.sandboxId
       : await this.control(() => this.driver.create(this.template(), labels));
-    const info = await this.find(labels); // re-check before start, including the shared deadline
+    const info = await this.inspect(labels); // re-check before start, including the shared deadline
     if (existing?.state !== "running") this.forget(id);
     const cached = this.handles.get(id);
     const box =
@@ -444,7 +444,7 @@ export class E2BDesktopComputer {
     });
   }
   async stop(labels: Record<string, string>) {
-    const info = await this.find(labels);
+    const info = await this.inspect(labels);
     if (info?.state === "running") {
       this.forget(info.sandboxId);
       await this.control(() => this.driver.pause(info.sandboxId));
@@ -454,8 +454,9 @@ export class E2BDesktopComputer {
     labels: Record<string, string>,
     keepMs = idleMs,
     firstConnect?: (work: () => Promise<Handle>) => Promise<Handle>,
+    verified?: DesktopInfo,
   ) {
-    const info = await this.find(labels);
+    const info = verified ?? (await this.inspect(labels));
     if (info?.state !== "running") throw stopped();
     const id = info.sandboxId;
     const cached = this.handles.get(id);
@@ -463,7 +464,7 @@ export class E2BDesktopComputer {
       try {
         await cached.box.keepAlive(this.awake(info, keepMs));
       } catch (error) {
-        const current = await this.find(labels);
+        const current = await this.inspect(labels);
         if (current?.state !== "running") {
           this.forget(id);
           throw stopped();
@@ -478,7 +479,7 @@ export class E2BDesktopComputer {
       this.connecting.get(id) ??
       (firstConnect
         ? firstConnect(async () => {
-            const current = await this.find(labels);
+            const current = await this.inspect(labels);
             if (current?.state !== "running") throw stopped();
             return this.connect(id, current, keepMs);
           })
@@ -557,6 +558,7 @@ export class E2BDesktopComputer {
       signal?: AbortSignal;
       maxOutputBytes?: number;
       propagateAttachError?: boolean;
+      verified?: DesktopInfo;
     },
   ): Promise<DockerResult> {
     const limit = Math.min(options.maxOutputBytes ?? outputLimit, 15 * 1024 * 1024);
@@ -594,7 +596,7 @@ export class E2BDesktopComputer {
     const { CommandExitError, InvalidArgumentError, TimeoutError } = await sdk();
     let box: DesktopBox;
     try {
-      ({ box } = await this.attach(labels));
+      ({ box } = await this.attach(labels, idleMs, undefined, options.verified));
     } catch (error) {
       if (options.propagateAttachError) throw error;
       // Nothing started, so this is a plain failure and the box keeps running.
