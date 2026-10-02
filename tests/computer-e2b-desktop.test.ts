@@ -905,3 +905,17 @@ test("a logged-out desktop is unavailable without pausing running apps", async (
   assert.deepEqual(f.calls.pause, []);
   assert.equal(f.boxes.get("sbx-1")?.state, "running");
 });
+
+test("PDF exports budget for the response size as well as the small request", async () => {
+  const f = fake({
+    boxes: [{}],
+    run: (_command, options) => {
+      options.onStdout(JSON.stringify({ path: "/workspace/doc.pdf", base64: "JVBERi0=" }));
+      return 0;
+    },
+  });
+  const { computer, owner } = service(f);
+  await computer.pdfBytes(owner, "/workspace/doc.pdf");
+  assert.match(f.calls.run[0].command, /23s/);
+  assert.equal(f.calls.run[0].options.timeoutMs, 25000);
+});

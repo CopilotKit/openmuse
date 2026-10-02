@@ -808,8 +808,9 @@ export class ComputerService {
       const input = JSON.stringify({ operation, path, text, base64 });
       const maxOutputBytes = operation === "read_pdf" ? 15 * 1024 * 1024 : 2 * 1024 * 1024;
       // On E2B the request crosses the network on stdin after the process starts, so
-      // the in-box limit grows by a second per MB (a 10 MB PDF is about 14 MB of JSON).
-      const seconds = 8 + Math.ceil(input.length / (1024 * 1024));
+      // the limit accounts for upload and expected download (PDF JSON can reach 14 MB).
+      const expectedOutput = operation === "read_pdf" ? maxOutputBytes : 0;
+      const seconds = 8 + Math.ceil(Math.max(input.length, expectedOutput) / (1024 * 1024));
       const result = this.desktop
         ? await this.desktop.run(
             this.labels(owner),
