@@ -861,7 +861,7 @@ export class ComputerService {
     };
   }
   /** One screenshot, click, key or typing action on the running desktop, recorded as a
-   * receipt next to the commands. A stopped computer fails; it is never resumed here. */
+   * receipt in a separate action history. A stopped computer fails; it is never resumed here. */
   async desktopAction(owner: string, raw: unknown) {
     const desktop = this.desktopOnly();
     const action = desktopActionSchema.parse(raw);
@@ -878,7 +878,7 @@ export class ComputerService {
       };
       try {
         const shot = await desktop.act(this.labels(owner), action);
-        const saved = await this.db.put(owner, this.receipts, {
+        const saved = await this.db.put(owner, "computer-desktop-actions", {
           ...receipt,
           exitCode: 0,
           stdout: `Screenshot ${shot.width}x${shot.height}`,
@@ -897,7 +897,7 @@ export class ComputerService {
       } catch (error) {
         // A stopped computer did nothing, so it leaves no receipt.
         if (!(error instanceof AppError && error.status === 409))
-          await this.db.put(owner, this.receipts, {
+          await this.db.put(owner, "computer-desktop-actions", {
             ...receipt,
             status: "failed",
             stderr: error instanceof Error ? error.message : "Desktop action failed",

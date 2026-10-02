@@ -21,6 +21,7 @@ import { computerInstructions, computerTools } from "../apps/server/src/computer
 import type { Config } from "../apps/server/src/config.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
 import { tanstackAgent } from "../apps/server/src/engine/tanstack-agent.ts";
+import type { ComputerCommand } from "../packages/domain/src/computer.ts";
 import { config as base } from "./helpers/computer.ts";
 import { modelFixture } from "./helpers/model.ts";
 
@@ -713,9 +714,9 @@ test("a desktop action runs with a screenshot after it, leaves a receipt and kee
   assert.deepEqual([shot.width, shot.height], [1280, 800]);
   assert.equal(shot.receipt.command, "desktop left_click (640, 400)");
   assert.equal(shot.receipt.status, "succeeded");
-  const snapshot = await computer.snapshot(owner);
+  assert.deepEqual((await computer.snapshot(owner)).commands, []);
   assert.deepEqual(
-    snapshot.commands.map((c) => c.id),
+    (await db.list<ComputerCommand>(owner, "computer-desktop-actions")).map((c) => c.id),
     [shot.receipt.id],
   );
   assert.deepEqual((await computer.latestScreenshot(owner)).bytes, Buffer.from(jpeg));
@@ -730,7 +731,10 @@ test("a failed desktop action is reported and recorded; a stopped box is never r
   await assert.rejects(computer.desktopAction(owner, { action: "key", text: "Return" }), {
     message: "The desktop action failed",
   });
-  assert.equal((await computer.snapshot(owner)).commands[0]?.status, "failed");
+  assert.equal(
+    (await db.list<ComputerCommand>(owner, "computer-desktop-actions"))[0]?.status,
+    "failed",
+  );
   const g = fake({ boxes: [{ state: "paused" }] });
   const paused = service(g);
   await assert.rejects(paused.computer.desktopAction(paused.owner, { action: "screenshot" }), {
