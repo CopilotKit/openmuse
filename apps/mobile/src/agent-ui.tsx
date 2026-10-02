@@ -213,6 +213,8 @@ export function AgentActivityScreen() {
     </View>
   );
 }
+const mailId = (item: Evidence) => item.provenance?.sourceId ?? item.id;
+
 export function EvidenceList({ items }: { items: Evidence[] }) {
   const { workspace, open } = useWorkspace();
   const [error, setError] = useState("");
@@ -237,11 +239,11 @@ export function EvidenceList({ items }: { items: Evidence[] }) {
               Open source
             </Button>
           )}
-          {item.kind === "mail" && workspace.mail.some((mail) => mail.id === item.id) && (
+          {item.kind === "mail" && workspace.mail.some((mail) => mail.id === mailId(item)) && (
             <Button
               small
               onPress={() => {
-                const mail = workspace.mail.find((m) => m.id === item.id);
+                const mail = workspace.mail.find((m) => m.id === mailId(item));
                 if (mail) open({ type: "mail", mail });
               }}
             >
