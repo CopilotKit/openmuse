@@ -704,11 +704,11 @@ test("a desktop action runs with a screenshot after it, leaves a receipt and kee
     action: "left_click",
     coordinate: [640, 400],
   });
-  const script = f.calls.setup.at(-1);
+  const script = f.calls.setup.find((call) => call.command.includes("click 1"));
   assert.equal(script?.user, "user");
   assert.match(
     script?.command ?? "",
-    /^xdotool keyup Shift_L .*\nxdotool mousemove --sync 640 400 click 1 \|\| exit 3\nsleep 0\.5\nscrot --pointer/,
+    /^xdotool keyup Shift_L .*\nxdotool mousemove --sync 640 400 click 1 \|\| exit 3$/,
   );
   assert.deepEqual(f.calls.reads, ["/tmp/openmuse-screenshot.jpg"]);
   assert.equal(shot.mimeType, "image/jpeg");
@@ -941,4 +941,17 @@ test("file attachment failures retain their provider error instead of a path err
   await computer.start(owner);
   await assert.rejects(computer.read(owner, "/workspace/doc.txt"), { status: 503 });
   assert.equal(f.calls.run.length, 0);
+});
+
+test("delivered input remains succeeded when the screenshot fails", async () => {
+  const f = fake({ boxes: [{}], setupExit: (command) => (command.includes("scrot") ? 4 : 0) });
+  const { computer, owner } = service(f);
+  const shot = await computer.desktopAction(owner, { action: "key", text: "Return" });
+  assert.equal(shot.receipt.status, "succeeded");
+  assert.equal(shot.data, "");
+  assert.match(shot.warning ?? "", /Action performed.*before retrying/);
+  assert.equal(
+    (await db.list<ComputerCommand>(owner, "computer-desktop-actions"))[0].status,
+    "succeeded",
+  );
 });

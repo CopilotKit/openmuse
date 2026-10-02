@@ -876,26 +876,10 @@ export class ComputerService {
         truncated: false,
         startedAt: new Date().toISOString(),
       };
+      let shot: Awaited<ReturnType<typeof desktop.act>>;
       try {
-        const shot = await desktop.act(this.labels(owner), action);
-        const saved = await this.db.put(owner, "computer-desktop-actions", {
-          ...receipt,
-          exitCode: 0,
-          stdout: `Screenshot ${shot.width}x${shot.height}`,
-          completedAt: new Date().toISOString(),
-        });
-        const data = Buffer.from(shot.image).toString("base64");
-        // Only the latest screenshot is kept, for the chat card on native.
-        await this.db.put<Screen>(owner, "computer-desktop-screens", {
-          id: "latest",
-          receiptId: saved.id,
-          mimeType: shot.mimeType,
-          data,
-          takenAt: saved.completedAt,
-        });
-        return { receipt: saved, ...shot, data };
+        shot = await desktop.act(this.labels(owner), action);
       } catch (error) {
-        // A stopped computer did nothing, so it leaves no receipt.
         if (!(error instanceof AppError && error.status === 409))
           await this.db.put(owner, "computer-desktop-actions", {
             ...receipt,
@@ -905,6 +889,29 @@ export class ComputerService {
           });
         throw error;
       }
+      const saved: ComputerCommand = {
+        ...receipt,
+        exitCode: 0,
+        stdout: shot.warning ?? `Screenshot ${shot.width}x${shot.height}`,
+        completedAt: new Date().toISOString(),
+      };
+      const data = Buffer.from(shot.image).toString("base64");
+      let warning = shot.warning;
+      try {
+        await this.db.put(owner, "computer-desktop-actions", saved);
+        if (data)
+          await this.db.put<Screen>(owner, "computer-desktop-screens", {
+            id: "latest",
+            receiptId: saved.id,
+            mimeType: shot.mimeType,
+            data,
+            takenAt: saved.completedAt,
+          });
+      } catch {
+        warning =
+          "Action performed; its receipt or screenshot could not be saved. Take a screenshot before retrying the action.";
+      }
+      return { receipt: saved, ...shot, data, warning };
     });
   }
   /** The latest desktop screenshot, or the one `receiptId` took if it is still the latest. */

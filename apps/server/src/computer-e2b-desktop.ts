@@ -518,15 +518,34 @@ export class E2BDesktopComputer {
    * that Sandbox.create puts in the sandbox env, and a resumed box no longer has it. */
   async act(labels: Record<string, string>, action: DesktopAction) {
     const { box } = await this.attach(labels);
-    const code = await this.control(() => box.setup(actionScript(desktopInput(action)), user));
-    if (code !== 0)
-      throw new AppError(
-        code === 3 ? "The desktop action failed" : "The desktop screenshot failed",
-        502,
+    const input = desktopInput(action);
+    if (input) {
+      const script = [
+        ...(input.startsWith("xdotool ") ? [releaseModifiers] : []),
+        `${input} || exit 3`,
+      ].join("\n");
+      if ((await this.control(() => box.setup(script, user))) !== 0)
+        throw new AppError("The desktop action failed", 502);
+    }
+    const screen = { mimeType: "image/jpeg" as const, width: resolution[0], height: resolution[1] };
+    try {
+      const code = await this.control(() =>
+        box.setup(actionScript(input ? "sleep 0.5" : undefined), user),
       );
-    const image = await this.control(() => box.readFile(screenshotFile));
-    return { image, mimeType: "image/jpeg" as const, width: resolution[0], height: resolution[1] };
+      if (code !== 0) throw new AppError("The desktop screenshot failed", 502);
+      const image = await this.control(() => box.readFile(screenshotFile));
+      return { ...screen, image, warning: undefined as string | undefined };
+    } catch (error) {
+      if (!input) throw error;
+      return {
+        ...screen,
+        image: new Uint8Array(),
+        warning:
+          "Action performed; the screenshot could not be taken. Take a screenshot before retrying the action.",
+      };
+    }
   }
+
   /** Same contract as DockerRunner: command outcomes are results, never exceptions. */
   async run(
     labels: Record<string, string>,

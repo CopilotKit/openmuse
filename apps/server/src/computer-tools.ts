@@ -128,13 +128,24 @@ export function computerTools(
                     action: shot.receipt.command,
                     receiptId: shot.receipt.id,
                     screen: { width: shot.width, height: shot.height },
-                    screenshot: "attached as an image for this step only",
+                    screenshot: shot.data
+                      ? "attached as an image for this step only"
+                      : "unavailable",
+                    warning: shot.warning,
                   }),
                 },
-                {
-                  type: "image" as const,
-                  source: { type: "data" as const, value: shot.data, mimeType: shot.mimeType },
-                },
+                ...(shot.data
+                  ? [
+                      {
+                        type: "image" as const,
+                        source: {
+                          type: "data" as const,
+                          value: shot.data,
+                          mimeType: shot.mimeType,
+                        },
+                      },
+                    ]
+                  : []),
               ];
             },
           ),
