@@ -224,13 +224,29 @@ export class McpService {
       });
       return { client, transport };
     }
+    // Configured headers are credentials for the MCP server only. The SDK reuses this fetch
+    // for OAuth discovery, registration and token requests, so decide per request URL:
+    // only the configured origin gets them, never a /.well-known/ discovery document, and a
+    // request that carries them is not allowed to follow a redirect anywhere.
+    const origin = new URL(input.url).origin;
     const headers = input.headers ?? {};
-    const fetchWithHeaders: typeof fetch = (url, init) => {
+    const fetchWithHeaders: typeof fetch = async (url, init) => {
+      const target = new URL(url instanceof Request ? url.url : url);
+      if (target.origin !== origin || target.pathname.startsWith("/.well-known/"))
+        return fetch(url, init);
       const merged = new Headers(headers);
       new Headers(init?.headers).forEach((value, key) => {
         merged.set(key, value);
       });
-      return fetch(url, { ...init, headers: merged });
+      const response = await fetch(url, { ...init, headers: merged, redirect: "manual" });
+      if (response.status >= 300 && response.status < 400) {
+        await response.body?.cancel();
+        throw new AppError(
+          `MCP server redirected to ${response.headers.get("location") ?? "another address"}. Configure that URL directly.`,
+          502,
+        );
+      }
+      return response;
     };
     const provider = await this.provider(owner, id, state, redirect);
     const transport =

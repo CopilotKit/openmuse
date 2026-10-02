@@ -11,9 +11,11 @@ Set `TOKEN_ENCRYPTION_KEY` to 32 random bytes encoded as base64 and restart the 
 3. Select **Add and connect**. For OAuth servers, finish sign-in in the browser, then refresh the list.
 4. Review the discovered tools and enable only the read-only tools you want the agent to use.
 
-Local commands run with the server user's privileges and a small inherited environment. Add only programs you trust. Remote server URLs and custom headers are stored server-side. MCP output may contain instructions from third parties; the agent must treat them as data.
+Enabling a local command server grants that program local command execution as the server user, with a small inherited environment, every time the agent calls one of its tools. Add only programs you trust. Remote server URLs and custom headers are stored server-side. MCP output may contain instructions from third parties; the agent must treat them as data.
 
-Read-only labels come from each MCP server's tool annotations. OpenMuse also requires the owner to enable a tool, but it cannot prove that a third-party server's implementation has no side effects. Connect trusted servers and prefer HTTPS when sending credentials to remote endpoints.
+Read-only labels come from each remote MCP server's tool annotations and are advisory: OpenMuse requires the owner to enable a tool, but it cannot prove that a third-party server's implementation has no side effects. Connect trusted servers and prefer HTTPS when sending credentials to remote endpoints.
+
+Custom headers are sent only to the configured server origin. They are never attached to OAuth discovery documents under `/.well-known/`, to a separate authorization server, or to a request that would follow a redirect: a remote server that redirects an MCP request is refused, and the error names the address to configure instead.
 
 ## Hosted OAuth and ElevenLabs
 

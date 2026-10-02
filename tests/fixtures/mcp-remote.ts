@@ -1,5 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { createServer } from "node:http";
+import {
+  createServer,
+  type IncomingHttpHeaders,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import type { AddressInfo } from "node:net";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
@@ -110,6 +115,35 @@ export async function startRemoteMcp(): Promise<RemoteMcpFixture> {
     httpUrl: `${base}/mcp`,
     sseUrl: `${base}/sse`,
     readOnly,
+    close: () =>
+      new Promise<void>((resolve) => {
+        http.closeAllConnections();
+        http.close(() => resolve());
+      }),
+  };
+}
+
+export interface RecordedRequest {
+  method: string;
+  path: string;
+  headers: IncomingHttpHeaders;
+}
+
+/** A plain HTTP origin that records every request it receives before `handle` answers it. */
+export async function startRecordingOrigin(
+  handle: (req: IncomingMessage, res: ServerResponse, origin: string) => void,
+) {
+  const requests: RecordedRequest[] = [];
+  let origin = "";
+  const http = createServer((req, res) => {
+    requests.push({ method: req.method ?? "", path: req.url ?? "/", headers: req.headers });
+    handle(req, res, origin);
+  });
+  await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
+  origin = `http://127.0.0.1:${(http.address() as AddressInfo).port}`;
+  return {
+    origin,
+    requests,
     close: () =>
       new Promise<void>((resolve) => {
         http.closeAllConnections();
