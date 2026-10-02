@@ -106,6 +106,7 @@ The E2B desktop provider differs from Docker in these ways:
 
 - **Network access is on.** The desktop's browsers need it, so commands can reach the internet too, and the app reports `network: enabled`. Treat anything downloaded as untrusted. This is also an outbound path the app does not review: the agent could post a file from `/workspace` or submit a form in Firefox, and only the app's own tools (`prepare_email`, `prepare_event`) require approval. The agent is told never to send, post or submit from the computer without an explicit request; that is an instruction, not an enforced boundary.
 - **Isolation comes from the VM.** Each owner gets a dedicated VM instead of a container on a shared kernel. Inside it there is no read-only root filesystem, capability drop or pids limit, and the template's `user` account has passwordless sudo.
+- **Every listening port is public.** Public traffic is enabled for the direct desktop iframe. Any service listening in the VM is reachable without app authentication at `https://<port>-<sandboxId>.e2b.app`; the sandbox ID is visible in the stream URL. Running `python3 -m http.server 8000` from `/workspace` exposes workspace files. Do not leave servers running, and stop temporary services as soon as they are no longer needed. The VNC password protects VNC only, not other services.
 - **Files live with E2B.** Workspace files are stored with E2B, outside your host. Your E2B plan's runtime limits apply.
 
 The E2B API key stays on the API host.
