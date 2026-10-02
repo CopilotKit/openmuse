@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { Config } from "../apps/server/src/config.ts";
 import { createStore } from "../apps/server/src/db.ts";
 import { McpService } from "../apps/server/src/mcp.ts";
-import { REMOTE_TOKEN, startRemoteMcp } from "./fixtures/mcp-remote.ts";
+import { REMOTE_TOKEN, startRecordingOrigin, startRemoteMcp } from "./fixtures/mcp-remote.ts";
 
 const config: Config = {
   mode: "sample",
@@ -101,5 +101,84 @@ test("remote MCP over Streamable HTTP and legacy SSE honors headers and the read
   } finally {
     await db.close();
     await remote.close();
+  }
+});
+
+const SECRET = "mcp-only-secret";
+const json = (res: import("node:http").ServerResponse, status: number, body: unknown) =>
+  res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
+
+test("configured MCP headers never reach a separate OAuth origin or discovery documents", async () => {
+  const auth = await startRecordingOrigin((req, res, origin) => {
+    if (req.url === "/.well-known/oauth-authorization-server")
+      return json(res, 200, {
+        issuer: origin,
+        authorization_endpoint: `${origin}/authorize`,
+        token_endpoint: `${origin}/token`,
+        registration_endpoint: `${origin}/register`,
+        response_types_supported: ["code"],
+        code_challenge_methods_supported: ["S256"],
+      });
+    if (req.url === "/register" && req.method === "POST")
+      return json(res, 201, { client_id: "test-client", redirect_uris: [] });
+    res.writeHead(404).end();
+  });
+  const server = await startRecordingOrigin((req, res, origin) => {
+    if (req.url?.startsWith("/.well-known/oauth-protected-resource"))
+      return json(res, 200, { resource: `${origin}/mcp`, authorization_servers: [auth.origin] });
+    res
+      .writeHead(401, {
+        "www-authenticate": `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`,
+      })
+      .end();
+  });
+  const db = await createStore();
+  const mcp = new McpService(db, config);
+  try {
+    const added = await mcp.add("owner", {
+      name: "OAuth remote",
+      transport: "http",
+      url: `${server.origin}/mcp`,
+      headers: { "X-Api-Key": SECRET },
+    });
+    const connected = await mcp.connect("owner", added.id);
+    assert.match(connected.authorizationUrl ?? "", new RegExp(`^${auth.origin}/authorize`));
+    const mcpRequests = server.requests.filter((r) => r.path === "/mcp");
+    assert.ok(mcpRequests.length > 0);
+    assert.ok(mcpRequests.every((r) => r.headers["x-api-key"] === SECRET));
+    const discovery = server.requests.filter((r) => r.path.startsWith("/.well-known/"));
+    assert.ok(discovery.length > 0);
+    assert.ok(discovery.every((r) => !("x-api-key" in r.headers)));
+    assert.ok(auth.requests.some((r) => r.path === "/register"));
+    assert.ok(auth.requests.every((r) => !("x-api-key" in r.headers)));
+  } finally {
+    await db.close();
+    await server.close();
+    await auth.close();
+  }
+});
+
+test("a redirected MCP request is refused instead of carrying configured headers elsewhere", async () => {
+  const elsewhere = await startRecordingOrigin((_req, res) => res.writeHead(404).end());
+  const server = await startRecordingOrigin((req, res) =>
+    res.writeHead(307, { location: `${elsewhere.origin}${req.url}` }).end(),
+  );
+  const db = await createStore();
+  const mcp = new McpService(db, config);
+  try {
+    for (const input of [
+      { name: "Redirecting HTTP", transport: "http" as const, url: `${server.origin}/mcp` },
+      { name: "Redirecting SSE", transport: "sse" as const, url: `${server.origin}/sse` },
+    ]) {
+      const added = await mcp.add("owner", { ...input, headers: { "X-Api-Key": SECRET } });
+      await assert.rejects(mcp.connect("owner", added.id), /redirected/);
+    }
+    assert.ok(server.requests.length >= 2);
+    assert.ok(server.requests.every((r) => r.headers["x-api-key"] === SECRET));
+    assert.equal(elsewhere.requests.length, 0);
+  } finally {
+    await db.close();
+    await server.close();
+    await elsewhere.close();
   }
 });
