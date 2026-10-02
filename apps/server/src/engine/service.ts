@@ -619,6 +619,28 @@ export class AgentService {
         { status: "dismissed" },
       );
     if (idea.status === "new") {
+      // A task already working on (or done with) the same email is opened instead of copied.
+      const { kind, input } = idea;
+      const handling =
+        typeof input.messageId === "string"
+          ? (await this.db.list<AgentTask>(owner, "tasks")).find(
+              (task) =>
+                task.kind === kind &&
+                task.input.messageId === input.messageId &&
+                task.status !== "failed" &&
+                task.status !== "cancelled",
+            )
+          : undefined;
+      if (handling)
+        return (
+          (await this.db.compareAndSwap<Idea>(
+            owner,
+            "ideas",
+            id,
+            { status: "new" },
+            { status: "accepted", taskId: handling.id },
+          )) ?? this.db.get<Idea>(owner, "ideas", id)
+        );
       const claimed = await this.db.compareAndSwap<Idea>(
         owner,
         "ideas",
@@ -633,6 +655,7 @@ export class AgentService {
       idea = claimed ?? (await this.db.get<Idea>(owner, "ideas", id));
       if (idea?.status !== "accepted") return idea;
     }
+    if (idea.taskId && (await this.db.get(owner, "tasks", idea.taskId))) return idea;
     const goal = await this.createGoal(
       owner,
       { title: idea.title, description: idea.reason },
