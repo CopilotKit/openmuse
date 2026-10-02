@@ -67,9 +67,13 @@ export interface Config {
   computerEnabled?: boolean;
   computerImage?: string;
   computerDeploymentId?: string;
+  computerProvider?: ComputerProvider;
+  computerE2bTemplate?: string;
+  e2bApiKey?: string;
   allowedOrigins: string[];
 }
 
+export type ComputerProvider = "docker" | "e2b-desktop"; (Run the agent computer on an E2B Desktop sandbox (#133))
 export const intelligenceKeyRequiredMessage =
   "OpenMuse requires CPK_INTELLIGENCE_API_KEY. " +
   "Run `npx copilotkit@latest login` and `npx copilotkit@latest project select`, " +
@@ -115,6 +119,21 @@ export function readConfig(): Config {
     throw new Error("AGENT_BACKEND must be sample, model or agui");
   if (mode === "live" && backend === "sample")
     throw new Error("Live workspaces cannot use the sample agent");
+  const computerProvider = process.env.COMPUTER_PROVIDER?.trim() || "docker";
+  if (computerProvider !== "docker" && computerProvider !== "e2b-desktop")
+    throw new Error("COMPUTER_PROVIDER must be docker or e2b-desktop");
+  const e2bApiKey = process.env.E2B_API_KEY?.trim();
+  if (process.env.COMPUTER_ENABLED === "true" && computerProvider === "e2b-desktop") {
+    if (!e2bApiKey)
+      throw new Error("COMPUTER_PROVIDER=e2b-desktop requires a nonblank E2B_API_KEY");
+    // Sandboxes are matched by metadata across the whole E2B team, and every default
+    // install would otherwise derive the same deployment label from localhost:8787.
+    if (!process.env.COMPUTER_DEPLOYMENT_ID?.trim())
+      throw new Error(
+        "COMPUTER_PROVIDER=e2b-desktop requires a unique COMPUTER_DEPLOYMENT_ID, e.g. from `openssl rand -hex 12`",
+      );
+  }
+
   const port = Number(process.env.PORT ?? 8787);
   const publicUrl = process.env.PUBLIC_API_URL ?? `http://localhost:${port}`;
   const config: Config = {
@@ -156,6 +175,9 @@ export function readConfig(): Config {
     computerEnabled: process.env.COMPUTER_ENABLED === "true",
     computerImage: process.env.COMPUTER_IMAGE ?? "openmuse-computer:local",
     computerDeploymentId: process.env.COMPUTER_DEPLOYMENT_ID,
+    computerProvider,
+    computerE2bTemplate: process.env.COMPUTER_E2B_TEMPLATE?.trim() || "desktop",
+    e2bApiKey,
     allowedOrigins: (
       process.env.ALLOWED_ORIGINS ?? "http://localhost:8081,http://127.0.0.1:8081"
     ).split(","),
