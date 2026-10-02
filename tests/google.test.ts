@@ -719,6 +719,34 @@ test("calendar discovery follows pagination and retains names, zones, and access
   ]);
 });
 
+test("bounded calendar pages retain completeness independently of item count", async () => {
+  for (const [count, nextPageToken, truncated] of [
+    [0, "next-page", true],
+    [0, undefined, false],
+    [100, undefined, false],
+    [101, undefined, true],
+  ] as const) {
+    let reads = 0;
+    const client = clientWith(() => {
+      reads++;
+      return json({
+        items: Array.from({ length: count }, (_, index) => ({
+          ...eventResponse,
+          id: `event-${index}`,
+        })),
+        nextPageToken,
+      });
+    });
+    const page = await client.listEventsPage({
+      timeMin: "2026-10-01T00:00:00Z",
+      timeMax: "2026-11-01T00:00:00Z",
+    });
+    assert.equal(page.events.length, Math.min(count, 100));
+    assert.equal(page.truncated, truncated);
+    assert.equal(reads, 1);
+  }
+});
+
 test("recurring masters and occurrences are rejected from fresh Google data before updates or deletes", async () => {
   for (const recurrence of [
     { recurrence: ["RRULE:FREQ=WEEKLY"] },

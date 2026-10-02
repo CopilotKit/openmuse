@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { localDateTime } from "../../../packages/domain/src/date-time.ts";
 import type {
   ActionProposal,
   ActivityEntry,
@@ -69,17 +70,42 @@ export class WorkspaceService {
     owner: string,
     options: { calendarId?: string; timeMin?: string; timeMax?: string } = {},
   ) {
+    return (await this.eventsPage(owner, options))?.events ?? [];
+  }
+  /** A missing connection is distinct from a connected calendar with no events. */
+  async eventsPage(
+    owner: string,
+    options: { calendarId?: string; timeMin?: string; timeMax?: string } = {},
+  ) {
     const connection = await this.connection(owner);
-    if (!connection) return [];
-    if (this.config.mode === "live") return this.google(owner, connection.id).listEvents(options);
-    return (await this.db.list<CalendarEvent>(owner, "events"))
-      .filter(
-        (event) =>
-          event.calendarId === (options.calendarId ?? "primary") &&
+    if (!connection) return null;
+    if (this.config.mode === "live")
+      return this.google(owner, connection.id).listEventsPage(options);
+    const lastIncluded = options.timeMax
+      ? new Date(Date.parse(options.timeMax) - 1).toISOString()
+      : undefined;
+    const events = (await this.db.list<CalendarEvent>(owner, "events"))
+      .filter((event) => event.calendarId === (options.calendarId ?? "primary"))
+      .filter((event) => {
+        // All-day events cover local dates, including days whose midnight is skipped.
+        // Inspect the last included instant for the exclusive upper boundary.
+        // Numeric civil-date keys also preserve ordering across expanded ISO years.
+        if (event.allDay)
+          return (
+            (!lastIncluded ||
+              Date.parse(event.start) <=
+                Date.parse(localDateTime(lastIncluded, event.timeZone).date)) &&
+            (!options.timeMin ||
+              Date.parse(event.end) >
+                Date.parse(localDateTime(options.timeMin, event.timeZone).date))
+          );
+        return (
           (!options.timeMax || Date.parse(event.start) < Date.parse(options.timeMax)) &&
-          (!options.timeMin || Date.parse(event.end) > Date.parse(options.timeMin)),
-      )
+          (!options.timeMin || Date.parse(event.end) > Date.parse(options.timeMin))
+        );
+      })
       .sort((a, b) => a.start.localeCompare(b.start));
+    return { events, truncated: false };
   }
   private async cacheMail(owner: string, mail: Mail[], connectionId: string) {
     const imports = await this.db.list<{ id: string; artifactId: string; connectionId?: string }>(

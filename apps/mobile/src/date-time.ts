@@ -1,24 +1,7 @@
-/** Format a timed event in its calendar's named time zone. */
-export function localDateTime(value: string, timeZone: string): { date: string; time: string } {
-  const instant = new Date(value);
-  if (!Number.isFinite(instant.getTime()))
-    return { date: value.slice(0, 10), time: value.slice(11, 16) };
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(instant);
-  const part = (name: Intl.DateTimeFormatPartTypes) =>
-    parts.find((p) => p.type === name)?.value || "";
-  return {
-    date: `${part("year")}-${part("month")}-${part("day")}`,
-    time: `${part("hour")}:${part("minute")}`,
-  };
-}
+import { localDateTime } from "../../../packages/domain/src/date-time.ts";
+
+export { localDateTime };
+
 /** Resolve a local wall-clock time, rejecting gaps at daylight-saving transitions. */
 export function zonedInstant(date: string, time: string, timeZone: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time))
