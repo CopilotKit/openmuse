@@ -145,8 +145,9 @@ function headers(part?: GmailPart): Map<string, string> {
   return new Map((part?.headers ?? []).map(({ name, value }) => [name.toLowerCase(), value]));
 }
 function decodeHeader(value: string): string {
+  // RFC 2047: ignore linear whitespace, including folding, between encoded words.
   return value
-    .replace(/(\?=)[ \t]+(?==\?)/g, "$1")
+    .replace(/(\?=)(?:[ \t]|\r\n[ \t])+(?==\?)/g, "$1")
     .replace(
       /=\?([^?]+)\?([bq])\?([^?]*)\?=/gi,
       (original, charset: string, encoding: string, text: string) => {

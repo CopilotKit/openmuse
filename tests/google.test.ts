@@ -88,6 +88,57 @@ test("mail reads nested plain text and attachment references over authenticated 
   assert.deepEqual(mail.attachments, ["msg1:attach1:Permission%3A%20form.pdf"]);
 });
 
+test("mail decodes folded adjacent encoded words without inserting header whitespace", async () => {
+  const encodedWord = (value: string) => `=?UTF-8?B?${Buffer.from(value).toString("base64")}?=`;
+  for (const separator of [" ", "\t", "\r\n ", "\r\n\t", " \r\n \t"]) {
+    const client = clientWith(() =>
+      json({
+        id: "thread1",
+        messages: [
+          {
+            id: "msg1",
+            threadId: "thread1",
+            payload: {
+              headers: [
+                {
+                  name: "Subject",
+                  value: `${encodedWord("Visit résumé")}${separator}${encodedWord(" details")}`,
+                },
+                {
+                  name: "From",
+                  value: `${encodedWord("Community")}${separator}${encodedWord(" Museum")} <museum@example.com>`,
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+    const [mail] = await client.getThread("thread1");
+    assert.equal(mail.subject, "Visit résumé details", JSON.stringify(separator));
+    assert.equal(mail.sender, "Community Museum", JSON.stringify(separator));
+    assert.equal(mail.from, "museum@example.com");
+  }
+});
+
+test("header decoding preserves spaces encoded inside words and next to plain text", async () => {
+  const client = clientWith(() =>
+    json({
+      id: "thread1",
+      messages: [
+        {
+          id: "msg1",
+          threadId: "thread1",
+          payload: {
+            headers: [{ name: "Subject", value: "Re: =?UTF-8?Q?Visit_r=C3=A9sum=C3=A9?= notes" }],
+          },
+        },
+      ],
+    }),
+  );
+  assert.equal((await client.getThread("thread1"))[0].subject, "Re: Visit résumé notes");
+});
+
 test("HTML-only messages expose complete plain text while removing active and non-content elements", async () => {
   let reads = 0;
   const fullText = "Complete museum itinerary. ".repeat(4500);
