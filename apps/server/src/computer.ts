@@ -851,11 +851,13 @@ export class ComputerService {
     return this.desktop;
   }
   /** Desktop stream URL for the owner's running E2B desktop (e2b-desktop provider only).
-   * Viewing never takes the lease: it only checks or restarts the VNC stream, which
-   * neither commands nor actions depend on, so a watcher never blocks the agent. */
+   * The first connection takes the lifecycle lease so it cannot race startup or Stop.
+   * Cached viewers only check the stream and never block commands or actions. */
   async desktopUrl(owner: string) {
     const desktop = this.desktopOnly();
-    return { url: await desktop.desktopUrl(this.labels(owner)) };
+    return {
+      url: await desktop.desktopUrl(this.labels(owner), (work) => this.exclusive(owner, work)),
+    };
   }
   /** One screenshot, click, key or typing action on the running desktop, recorded as a
    * receipt next to the commands. A stopped computer fails; it is never resumed here. */

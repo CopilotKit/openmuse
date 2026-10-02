@@ -131,7 +131,8 @@ function fake(
     async setup(command, user) {
       calls.setup.push({ command, user });
       if (command.includes("startxfce4")) desktops.set(id, true);
-      if (command === "pgrep -x xfce4-session >/dev/null") return desktops.get(id) ? 0 : 1;
+      if (command === "pgrep -x xfce4-session >/dev/null")
+        return options.setupExit?.(command) ?? (desktops.get(id) ? 0 : 1);
       return options.setupExit?.(command) ?? 0;
     },
     async writeRootFile(path) {
@@ -525,7 +526,7 @@ test("a Stop between find and use fails the operation instead of resuming the bo
   assert.equal(f.calls.connect.length, 2);
 });
 
-test("a fresh process connects once; a box it resumed by accident is paused again", async () => {
+test("a fresh process connects once and never pauses a missing desktop session", async () => {
   const f = fake({ boxes: [{}] });
   const { computer, owner, restarted } = service(f);
   await computer.start(owner);
@@ -545,8 +546,8 @@ test("a fresh process connects once; a box it resumed by accident is paused agai
   });
   const raced = service(g);
   await assert.rejects(raced.computer.desktopUrl(raced.owner), /Start the computer/);
-  assert.equal(g.calls.connect.length, 1);
-  assert.deepEqual(g.calls.pause, ["sbx-1", "sbx-1"]);
+  assert.equal(g.calls.connect.length, 0);
+  assert.deepEqual(g.calls.pause, ["sbx-1"]);
   assert.equal(g.boxes.get("sbx-1")?.state, "paused");
 });
 
@@ -601,6 +602,7 @@ test("the desktop URL is served while a command runs and never takes the lease",
       }),
   });
   const { computer, owner } = service(f);
+  await computer.desktopUrl(owner);
   const pending = computer.execute(owner, { command: "sleep 5" });
   while (!release) await new Promise((resolve) => setImmediate(resolve));
   assert.match((await computer.desktopUrl(owner)).url, /password=/);
@@ -876,4 +878,30 @@ test("a desktop action runs while a stream refresh is in flight", async () => {
   assert.equal(action.receipt.status, "succeeded");
   release?.();
   assert.match((await url).url, /password=/);
+});
+
+test("a fresh desktop viewer cannot connect during another process's startup", async () => {
+  const f = fake({ boxes: [{}] });
+  const { owner, restarted } = service(f);
+  await db.put(owner, "computer-state", {
+    id: "lease",
+    token: "starting",
+    expiresAt: Date.now() + 60000,
+    stopping: false,
+    operation: "operation",
+  });
+  await assert.rejects(restarted().desktopUrl(owner), /Computer is busy/);
+  assert.equal(f.calls.connect.length, 0);
+  assert.deepEqual(f.calls.pause, []);
+});
+
+test("a logged-out desktop is unavailable without pausing running apps", async () => {
+  const f = fake({
+    boxes: [{}],
+    setupExit: (command) => (command === "pgrep -x xfce4-session >/dev/null" ? 1 : 0),
+  });
+  const { computer, owner } = service(f);
+  await assert.rejects(computer.desktopUrl(owner), /desktop session is unavailable/);
+  assert.deepEqual(f.calls.pause, []);
+  assert.equal(f.boxes.get("sbx-1")?.state, "running");
 });

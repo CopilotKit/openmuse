@@ -450,7 +450,11 @@ export class E2BDesktopComputer {
       await this.control(() => this.driver.pause(info.sandboxId));
     }
   }
-  private async attach(labels: Record<string, string>, keepMs = idleMs) {
+  private async attach(
+    labels: Record<string, string>,
+    keepMs = idleMs,
+    firstConnect?: (work: () => Promise<Handle>) => Promise<Handle>,
+  ) {
     const info = await this.find(labels);
     if (info?.state !== "running") throw stopped();
     const id = info.sandboxId;
@@ -469,18 +473,26 @@ export class E2BDesktopComputer {
     // desktop viewers) share one connect, so the box never gets two stream starts.
     const pending =
       this.connecting.get(id) ??
-      this.connect(id, info, keepMs).finally(() => this.connecting.delete(id));
+      (firstConnect
+        ? firstConnect(async () => {
+            const current = await this.find(labels);
+            if (current?.state !== "running") throw stopped();
+            return this.connect(id, current, keepMs);
+          })
+        : this.connect(id, info, keepMs)
+      ).finally(() => this.connecting.delete(id));
     this.connecting.set(id, pending);
     return pending;
   }
-  // If the box paused since find(), connect has just resumed it cold, without its
-  // desktop: pause it again instead of handing out a desktop-less box.
+  // Missing Xfce can mean startup or logout; never pause a VM based on that probe.
   private async connect(id: string, info: DesktopInfo, keepMs: number): Promise<Handle> {
     const box = await this.control(() => this.driver.connect(id, this.awake(info, keepMs)));
     if ((await this.control(() => box.setup("pgrep -x xfce4-session >/dev/null", user))) !== 0) {
       this.forget(id);
-      await this.control(() => this.driver.pause(id));
-      throw stopped();
+      throw new AppError(
+        "The desktop session is unavailable. Start the computer to restore it.",
+        409,
+      );
     }
     const handle: Handle = { box };
     this.handles.set(id, handle);
@@ -488,8 +500,11 @@ export class E2BDesktopComputer {
   }
   /** The stream URL, shared by every viewer: concurrent requests join one stream check
    * or restart, so two viewers never race to restart it with different passwords. */
-  async desktopUrl(labels: Record<string, string>) {
-    const handle = await this.attach(labels, desktopIdleMs);
+  async desktopUrl(
+    labels: Record<string, string>,
+    firstConnect?: (work: () => Promise<Handle>) => Promise<Handle>,
+  ) {
+    const handle = await this.attach(labels, desktopIdleMs, firstConnect);
     handle.streaming ??= this.control(() => handle.box.stream(handle.url))
       .then((url) => (handle.url = url))
       .finally(() => (handle.streaming = undefined));
