@@ -11,7 +11,7 @@ import type { Config } from "../apps/server/src/config.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
 import { ConversationAgent } from "../apps/server/src/engine/conversation.ts";
 import type { AgentService } from "../apps/server/src/engine/service.ts";
-import { Files } from "../apps/server/src/files.ts";
+import { deterministicFileId, Files } from "../apps/server/src/files.ts";
 import type { ActionProposal, Artifact, Workspace } from "../packages/domain/src/index.ts";
 import { createSamplePdf } from "../packages/integrations/src/pdf.ts";
 
@@ -135,6 +135,51 @@ test("file operation identity isolates owners, inputs and independent requests",
     (await agent.files.import(owner, "sample.pdf", bytes, "fixture", undefined, "owner-scoped")).id,
     otherOwner.id,
   );
+});
+
+test("keyed file IDs are UUIDs that work through lookup, content reads and attachments", async () => {
+  const owner = "local-user";
+  const sample = await createSamplePdf();
+  const source = await agent.files.import(owner, "form.pdf", sample, "test");
+  const fields = { participant_name: "Sample Student", permission_granted: true };
+  const filled = await agent.files.fill(owner, source.id, fields, "task-1:fill_pdf");
+  const imported = await agent.files.import(
+    owner,
+    "a.pdf",
+    sample,
+    "test",
+    undefined,
+    "attachment:1",
+  );
+  assert.equal((await agent.files.fill(owner, source.id, fields, "task-1:fill_pdf")).id, filled.id);
+  for (const id of [filled.id, imported.id]) {
+    assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    assert.equal((await agent.files.get(owner, id)).id, id);
+    const content = await app.request(`/api/files/${id}/content`, { headers: headers() });
+    assert.equal(content.status, 200);
+    assert.equal(
+      Buffer.from(await content.arrayBuffer())
+        .subarray(0, 5)
+        .toString(),
+      "%PDF-",
+    );
+    const proposal = await app.request("/api/actions", {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({
+        kind: "email.send",
+        data: {
+          to: ["sample@example.com"],
+          subject: "Attached",
+          body: "See attached.",
+          attachmentIds: [id],
+        },
+      }),
+    });
+    assert.equal(proposal.status, 201);
+  }
+  assert.equal(deterministicFileId(owner, "x"), deterministicFileId(owner, "x"));
+  assert.notEqual(deterministicFileId(owner, "x"), deterministicFileId("other", "x"));
 });
 
 test("sample workspace serves a real PDF and filling creates a new version", async () => {
