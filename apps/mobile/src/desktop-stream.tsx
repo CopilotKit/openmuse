@@ -72,21 +72,38 @@ export const DesktopStream = memo(function DesktopStream({
   /** False shows only the Open desktop button, also on web. */
   embed?: boolean;
 }) {
-  const { url, error, setError } = useDesktopStream(running);
+  const embedded = embed && Platform.OS === "web";
+  const { api } = useWorkspace();
+  const { url, error, setError } = useDesktopStream(running && embedded);
+  const [opening, setOpening] = useState(false);
+  async function open() {
+    setOpening(true);
+    setError("");
+    try {
+      const target =
+        embedded && url ? url : (await api.request<{ url: string }>("/api/computer/desktop")).url;
+      await Linking.openURL(target);
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setOpening(false);
+    }
+  }
   return (
     <View style={{ gap: 12 }}>
       <ErrorNotice error={error} />
-      {!url && !error && <ActivityIndicator color={colors.blueDark} />}
+      {embedded && !url && !error && <ActivityIndicator color={colors.blueDark} />}
       {!!url && embed && Platform.OS === "web" && (
         <BrowserConsole url={url} title="Computer desktop" sandboxed />
       )}
-      {!!url && (
+      {running && (!embedded || !!url) && (
         <Button
           icon={ExternalLink}
           primary={Platform.OS !== "web"}
-          onPress={() => void Linking.openURL(url).catch((e) => setError(message(e)))}
+          disabled={opening}
+          onPress={() => void open()}
         >
-          Open desktop
+          {opening ? "Opening…" : "Open desktop"}
         </Button>
       )}
     </View>
