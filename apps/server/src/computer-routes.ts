@@ -18,11 +18,11 @@ export function computerRoutes(computer: ComputerService, files: Files) {
   app.get("/desktop", async (c) => c.json(await computer.desktopUrl(c.get("owner"))));
   // The same actions as the agent's use_desktop tool; the response omits the image.
   app.post("/desktop/actions", async (c) => {
-    const { receipt, width, height } = await computer.desktopAction(
+    const { receipt, width, height, warning } = await computer.desktopAction(
       c.get("owner"),
       await c.req.json(),
     );
-    return c.json({ receipt, width, height });
+    return c.json({ receipt, width, height, warning });
   });
   // `?receipt=` names the action whose screenshot the client expects; a newer one is a 404.
   app.get("/desktop/screenshot", async (c) => {

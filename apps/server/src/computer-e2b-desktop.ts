@@ -525,17 +525,33 @@ export class E2BDesktopComputer {
   /** Perform one GUI action and return the screenshot taken after it. Every X11 call
    * sets DISPLAY itself: the SDK's screenshot and input helpers rely on the DISPLAY
    * that Sandbox.create puts in the sandbox env, and a resumed box no longer has it. */
-  async act(labels: Record<string, string>, action: DesktopAction) {
+  async act(
+    labels: Record<string, string>,
+    action: DesktopAction,
+    beforeInput?: () => Promise<void>,
+  ) {
     const { box } = await this.attach(labels);
     const input = desktopInput(action);
+    let uncertain = false;
     if (input) {
+      await beforeInput?.();
       const script = [
         ...(input.startsWith("xdotool ") ? [releaseModifiers] : []),
         `${input} || exit 3`,
       ].join("\n");
-      if ((await this.control(() => box.setup(script, user))) !== 0)
-        throw new AppError("The desktop action failed", 502);
+      let code: number | undefined;
+      try {
+        code = await box.setup(script, user);
+      } catch {
+        // A lost response cannot tell us whether xdotool delivered the input.
+        // Capture a screenshot if possible, but never replay the input here.
+        uncertain = true;
+      }
+      if (code !== undefined && code !== 0) throw new AppError("The desktop action failed", 502);
     }
+    const warning = uncertain
+      ? "The desktop input outcome is unknown: it may already have been performed. Inspect a fresh screenshot before repeating the action; do not automatically retry it."
+      : undefined;
     const screen = { mimeType: "image/jpeg" as const, width: resolution[0], height: resolution[1] };
     try {
       const code = await this.control(() =>
@@ -543,13 +559,15 @@ export class E2BDesktopComputer {
       );
       if (code !== 0) throw new AppError("The desktop screenshot failed", 502);
       const image = await this.control(() => box.readFile(screenshotFile));
-      return { ...screen, image, warning: undefined as string | undefined };
+      return { ...screen, image, uncertain, warning };
     } catch (error) {
       if (!input) throw error;
       return {
         ...screen,
         image: new Uint8Array(),
+        uncertain,
         warning:
+          warning ??
           "Action performed; the screenshot could not be taken. Take a screenshot before retrying the action.",
       };
     }

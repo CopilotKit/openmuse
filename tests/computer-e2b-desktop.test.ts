@@ -52,6 +52,8 @@ function fake(
     afterInfo?: (id: string) => void;
     /** Exit code for a setup command, e.g. a failing xdotool call. */
     setupExit?: (command: string) => number | undefined;
+    /** Applies an input before simulating a lost setup response. */
+    setupEffect?: (command: string) => Promise<void> | void;
     /** Holds every stream (re)start until it resolves. */
     streamGate?: () => Promise<void>;
   } = {},
@@ -137,6 +139,7 @@ function fake(
     },
     async setup(command, user) {
       calls.setup.push({ command, user });
+      await options.setupEffect?.(command);
       if (command.includes("startxfce4")) desktops.set(id, true);
       if (command === "pgrep -x xfce4-session >/dev/null")
         return options.setupExit?.(command) ?? (desktops.get(id) ? 0 : 1);
@@ -966,6 +969,57 @@ test("delivered input remains succeeded when the screenshot fails", async () => 
     (await db.list<ComputerCommand>(owner, "computer-desktop-actions"))[0].status,
     "succeeded",
   );
+});
+
+test("a delivered input with a lost response returns a durable uncertain receipt without replay", async () => {
+  for (const action of [{ action: "left_click" }, { action: "key", text: "Return" }]) {
+    for (const error of [
+      new Error("transport disconnected"),
+      new TimeoutError("deadline exceeded"),
+    ]) {
+      let applied = 0;
+      let owner: string;
+      const f = fake({
+        boxes: [{}],
+        setupEffect: async (command) => {
+          if (!command.startsWith("xdotool ") || !command.includes("|| exit 3")) return;
+          const [intent] = await db.list<ComputerCommand>(owner, "computer-desktop-actions");
+          assert.equal(intent.status, "interrupted", "uncertain intent is durable before dispatch");
+          applied++;
+          throw error;
+        },
+      });
+      const serviceUnderTest = service(f);
+      owner = serviceUnderTest.owner;
+      const tool = computerTools(
+        serviceUnderTest.computer,
+        {} as Parameters<typeof computerTools>[1],
+        owner,
+        "scope",
+      ).find((candidate) => candidate.name === "use_desktop");
+      const execute = tool?.execute as (
+        args: unknown,
+      ) => Promise<{ type: string; content?: string }[]>;
+      const result = await execute(action);
+      const text = JSON.parse(result[0].content ?? "{}");
+      assert.equal(applied, 1, "the provider must never replay uncertain input");
+      assert.equal(text.status, "interrupted");
+      assert.equal(text.error, undefined);
+      assert.match(
+        text.warning,
+        /outcome is unknown.*before repeating.*do not automatically retry/,
+      );
+      const receipt = await db.get<ComputerCommand>(
+        owner,
+        "computer-desktop-actions",
+        text.receiptId,
+      );
+      assert.equal(receipt?.status, "interrupted");
+      assert.equal(receipt?.exitCode, undefined);
+      assert.match(receipt?.stderr ?? "", /outcome is unknown/);
+      assert.equal(f.calls.reads.length, 1, "only a fresh screenshot follows uncertain input");
+    }
+  }
 });
 
 test("commands and files reuse the verified inspection instead of finding twice", async () => {

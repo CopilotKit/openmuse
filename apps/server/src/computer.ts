@@ -618,7 +618,15 @@ export class ComputerService {
       };
       let shot: Awaited<ReturnType<typeof desktop.act>>;
       try {
-        shot = await desktop.act(this.labels(owner), action);
+        shot = await desktop.act(this.labels(owner), action, async () => {
+          // Save intent before dispatch: a process crash must not erase uncertain input.
+          await this.db.put(owner, "computer-desktop-actions", {
+            ...receipt,
+            status: "interrupted",
+            stderr:
+              "Desktop input is being dispatched; its outcome is unknown until confirmed. Inspect a fresh screenshot before repeating the action; do not automatically retry it.",
+          });
+        });
       } catch (error) {
         if (!(error instanceof AppError && error.status === 409))
           await this.db.put(owner, "computer-desktop-actions", {
@@ -631,8 +639,10 @@ export class ComputerService {
       }
       const saved: ComputerCommand = {
         ...receipt,
-        exitCode: 0,
+        status: shot.uncertain ? "interrupted" : "succeeded",
+        ...(shot.uncertain ? {} : { exitCode: 0 }),
         stdout: shot.warning ?? `Screenshot ${shot.width}x${shot.height}`,
+        stderr: shot.uncertain ? (shot.warning ?? "Desktop input outcome is unknown") : "",
         completedAt: new Date().toISOString(),
       };
       const data = Buffer.from(shot.image).toString("base64");
@@ -659,8 +669,9 @@ export class ComputerService {
           });
         }
       } catch {
-        warning =
-          "Action performed; its receipt or screenshot could not be saved. Take a screenshot before retrying the action.";
+        warning = shot.uncertain
+          ? `${shot.warning} Its final receipt or screenshot could not be saved.`
+          : "Action performed; its receipt or screenshot could not be saved. Take a screenshot before retrying the action.";
       }
       return { receipt: saved, ...shot, data, warning };
     });
