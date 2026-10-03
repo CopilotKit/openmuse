@@ -72,7 +72,7 @@ function fake(
     setup: [] as { command: string; user: string }[],
     files: [] as string[],
     reads: [] as string[],
-    stdin: [] as string[],
+    stdin: [] as Uint8Array[],
     closed: 0,
     kills: 0,
     streams: [] as (string | undefined)[],
@@ -130,7 +130,7 @@ function fake(
           return true;
         },
         async sendStdin(data) {
-          calls.stdin.push(data);
+          calls.stdin.push(Buffer.from(data));
         },
         async closeStdin() {
           calls.closed++;
@@ -473,7 +473,34 @@ test("file operations send their request on stdin in chunks, never in argv or /w
   assert.equal(call.options.timeoutMs, 15000);
   assert.equal(call.options.stdin, true);
   assert.ok(f.calls.stdin.length > 1);
-  assert.equal(JSON.parse(f.calls.stdin.join("")).path, "/workspace/doc.pdf");
+  assert.equal(
+    JSON.parse(Buffer.concat(f.calls.stdin).toString("utf8")).path,
+    "/workspace/doc.pdf",
+  );
+  assert.equal(f.calls.closed, 1);
+});
+
+test("chunked file writes preserve Unicode across stdin boundaries", async () => {
+  const path = "/workspace/report.txt";
+  const f = fake({
+    boxes: [{}],
+    run: (_command, options) => {
+      options.onStdout(JSON.stringify({ path }));
+      return 0;
+    },
+  });
+  const { computer, owner } = service(f);
+  // JSON escaping can make a valid sub-256 KiB text file span multiple stdin chunks.
+  const boundary = 1024 * 1024;
+  const prefix = JSON.stringify({ operation: "write", path, text: "" }).length - 2;
+  const padding = boundary - 1 - prefix;
+  const text = `${"\u0001".repeat(Math.floor(padding / 6))}${"a".repeat(padding % 6)}😀中文`;
+  assert.ok(Buffer.byteLength(text) < 256 * 1024);
+  await computer.write(owner, path, text);
+  const request = JSON.parse(Buffer.concat(f.calls.stdin).toString("utf8"));
+  assert.ok(request.text === text, "stdin encoding corrupted the file's Unicode content");
+  assert.equal(f.calls.stdin.length, 2);
+  assert.ok(f.calls.stdin.every((chunk) => chunk.byteLength <= boundary));
   assert.equal(f.calls.closed, 1);
 });
 
