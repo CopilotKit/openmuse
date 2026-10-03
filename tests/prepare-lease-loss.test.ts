@@ -57,6 +57,7 @@ async function setup() {
     {} as never,
     {} as never,
   );
+  await db.put(owner, "tasks", baseTask());
   return { root, db, actions, service };
 }
 
@@ -68,17 +69,21 @@ const context = (overrides: Partial<TaskContext> = {}): TaskContext => ({
   ...overrides,
 });
 
-test("lease loss between propose and checkpoint leaves the proposal awaiting review", async () => {
+test("lease loss with an aborted worker signal leaves the proposal awaiting review", async () => {
   const { root, db, service } = await setup();
   try {
     const controller = new AbortController();
+    controller.abort();
     const ctx = context({
       signal: controller.signal,
       checkpoint: async () => {
-        throw new Error("simulated lease loss");
+        throw new LostLeaseError();
       },
     });
-    await assert.rejects(service.prepare(owner, baseTask(), input, "k1", ctx), /lease loss/);
+    await assert.rejects(
+      service.prepare(owner, baseTask(), input, "k1", ctx),
+      LostLeaseError,
+    );
     const proposals = await db.list<{ id: string; status: string }>(owner, "actions");
     assert.equal(proposals.length, 1);
     assert.equal(
@@ -111,22 +116,32 @@ test("the taking-over worker reuses the surviving proposal instead of failing", 
   }
 });
 
-test("an aborted task still auto-denies its orphaned proposal", async () => {
-  const { root, db, service } = await setup();
-  try {
-    const controller = new AbortController();
-    controller.abort();
-    const ctx = context({
-      signal: controller.signal,
-      checkpoint: async () => {
-        throw new LostLeaseError();
-      },
-    });
-    await assert.rejects(service.prepare(owner, baseTask(), input, "k3", ctx), LostLeaseError);
-    const proposals = await db.list<{ status: string }>(owner, "actions");
-    assert.equal(proposals[0]?.status, "denied", "cancel/pause path must still clean up");
-  } finally {
-    await db.close();
-    await rm(root, { recursive: true, force: true });
-  }
-});
+for (const status of ["paused", "cancelled"] as const) {
+  test(`a durably ${status} task auto-denies its orphaned proposal`, async () => {
+    const { root, db, service } = await setup();
+    try {
+      await db.put(owner, "tasks", { ...baseTask(), status });
+      const controller = new AbortController();
+      controller.abort();
+      const ctx = context({
+        signal: controller.signal,
+        checkpoint: async () => {
+          throw new LostLeaseError();
+        },
+      });
+      await assert.rejects(
+        service.prepare(owner, baseTask(), input, `k3-${status}`, ctx),
+        LostLeaseError,
+      );
+      const proposals = await db.list<{ status: string }>(owner, "actions");
+      assert.equal(
+        proposals[0]?.status,
+        "denied",
+        "a real pause/cancel must still clean up the orphaned review",
+      );
+    } finally {
+      await db.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
