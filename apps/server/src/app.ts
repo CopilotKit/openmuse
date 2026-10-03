@@ -19,6 +19,7 @@ import { AgentService } from "./engine/service.ts";
 import { AppError } from "./errors.ts";
 import { Files } from "./files.ts";
 import { GoogleAuth } from "./google-auth.ts";
+import { rateLimit } from "./rate-limit.ts";
 import { WorkspaceService } from "./workspace.ts";
 
 export async function createApp(
@@ -69,20 +70,7 @@ export async function createApp(
       onError: (c) => c.json({ error: "Request is too large; PDFs must be 10 MB or smaller" }, 413),
     }),
   );
-  const rateLimits = new Map<string, { window: number; count: number }>();
-  app.use("/api/*", async (c, next) => {
-    const key = c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? "unknown";
-    const now = Date.now();
-    const entry = rateLimits.get(key) ?? { window: now, count: 0 };
-    if (now - entry.window > 60000) {
-      entry.window = now;
-      entry.count = 0;
-    }
-    entry.count += 1;
-    rateLimits.set(key, entry);
-    if (entry.count > 120) throw new AppError("Too many requests. Try again in a minute.", 429);
-    await next();
-  });
+  app.use("/api/*", rateLimit(Boolean(config.trustProxy)));
   app.onError((error, c) => {
     if (error instanceof z.ZodError)
       return c.json({ error: error.issues.map((i) => i.message).join("; ") }, 422);

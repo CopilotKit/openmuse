@@ -53,6 +53,7 @@ export interface Config {
   computerImage?: string;
   computerDeploymentId?: string;
   allowedOrigins: string[];
+  trustProxy?: boolean;
 }
 
 /** Pinned so live rankings do not shift when TypeSafe moves the `jev-latest` alias. */
@@ -140,6 +141,9 @@ export function readConfig(): Config {
     allowedOrigins: (
       process.env.ALLOWED_ORIGINS ?? "http://localhost:8081,http://127.0.0.1:8081"
     ).split(","),
+    // Only trust X-Forwarded-For/X-Real-IP when the deployment is known to sit
+    // behind a proxy that sets them; otherwise a direct caller can spoof them.
+    trustProxy: process.env.TRUST_PROXY === "true",
   };
   if (
     mode === "live" &&
