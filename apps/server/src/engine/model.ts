@@ -322,6 +322,9 @@ export async function executeModelTask(
     "identity",
   );
   const memories = await service.db.list<{ text: string; source: string }>(owner, "memories");
+  // The abort listener below cannot fire for an already-aborted signal. A task
+  // paused or cancelled during these reads must not start a model run.
+  ctx.signal.throwIfAborted();
   const agent = tanstackAgent({
     model: config.model,
     maxSteps: 16,

@@ -291,3 +291,46 @@ test("browser reads keep observation identity distinct while reusing one session
   assert.equal(sessionIds.size, 1, "both reads should reuse the same browser session");
   assert.equal(new Set(webEvidence.map((item) => item.id)).size, 2);
 });
+
+test("a task cancelled while the model run is being prepared never calls the provider", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "openmuse-model-cancel-"));
+  const db = await createStore();
+  const { requests } = await modelFixture(t, () => undefined);
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const get = db.get.bind(db);
+  db.get = async (owner, kind, id) => {
+    if (kind === "agent-settings" && id === "identity") await delay(100);
+    return get(owner, kind, id);
+  };
+  const server = await createApp(db, {
+    mode: "sample",
+    port: 8787,
+    host: "127.0.0.1",
+    publicUrl: "http://localhost:8787",
+    dataDir: directory,
+    agentBackend: "model",
+    intelligenceApiKey: "test-project-key-never-sent",
+    model: "openai/fixture",
+    googleRedirectUri: "http://localhost:8787/api/google/callback",
+    allowedOrigins: [],
+  });
+  try {
+    const task = await server.agent.createTask("owner", { prompt: "Plan my week in detail" });
+    const tick = server.agent.worker.tick();
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if ((await server.agent.getTask("owner", task.id)).status === "running") break;
+      await delay(5);
+    }
+    assert.equal((await server.agent.getTask("owner", task.id)).status, "running");
+    await server.agent.control("owner", task.id, "pause");
+    await tick;
+
+    const saved = await server.agent.getTask("owner", task.id);
+    assert.equal(saved.status, "paused");
+    assert.equal(requests.length, 0);
+  } finally {
+    await server.agent.stop();
+    await db.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
