@@ -108,17 +108,7 @@ export async function executeModelTask(
       "read_workspace",
       "Read the authorized workspace sources",
       z.object({ section: z.enum(["mail", "calendar", "files", "all"]) }),
-      async ({ section }) => {
-        const w = await service.workspace.snapshot(owner);
-        return {
-          mail: section === "mail" || section === "all" ? w.mail : undefined,
-          events: section === "calendar" || section === "all" ? w.events : undefined,
-          files:
-            section === "files" || section === "all"
-              ? w.files.map(({ url, ...file }) => file)
-              : undefined,
-        };
-      },
+      async ({ section }) => service.workspace.sectionSnapshot(owner, section),
     ),
     tool(
       "read_mail_thread",
