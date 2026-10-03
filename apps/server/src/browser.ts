@@ -233,6 +233,9 @@ export class BrowserService {
     });
   }
   async imports(owner: string, id: string) {
+    return this.serial(id, () => this.importsOwned(owner, id));
+  }
+  private async importsOwned(owner: string, id: string) {
     await this.get(owner, id);
     const { downloads, failures } = z
       .object({
