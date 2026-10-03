@@ -153,6 +153,51 @@ test("unsubscribing from chat stops queued browser navigation and further model 
   assert.equal(requests.length, 1);
 });
 
+test("unsubscribing from chat aborts an in-flight computer command", async (t) => {
+  await modelFixture(t, (index) =>
+    index === 0
+      ? {
+          name: "run_computer_command",
+          arguments: { operationId: "slow", command: "sleep 30" },
+        }
+      : undefined,
+  );
+  const fixture = await chatFixture(t);
+  let started!: () => void;
+  const commandStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let release!: () => void;
+  let signal: AbortSignal | undefined;
+  fixture.computer.execute = async (_owner, args, options) => {
+    signal = options?.signal;
+    started();
+    await new Promise<void>((resolve) => {
+      release = resolve;
+      signal?.addEventListener("abort", () => resolve(), { once: true });
+    });
+    return {
+      id: "slow",
+      command: (args as { command: string }).command,
+      cwd: "/workspace",
+      status: "interrupted",
+      stdout: "",
+      stderr: "Stopped by user",
+      truncated: false,
+      startedAt: new Date().toISOString(),
+    };
+  };
+  const subscription = fixture.conversation.run(runInput()).subscribe();
+  try {
+    await commandStarted;
+    subscription.unsubscribe();
+    assert.equal(signal?.aborted, true, "Stop must reach the running computer command");
+  } finally {
+    subscription.unsubscribe();
+    release?.();
+  }
+});
+
 test("chat searches and reads actual owner mail without creating a task or sending", async (t) => {
   const { requests } = await modelFixture(t, (index) =>
     index === 0
