@@ -16,3 +16,6 @@ minimumReleaseAgeExclude:
 
 overrides:
   'image-size': '2.0.3'
+
+patchedDependencies:
+  metro@0.83.3: patches/metro@0.83.3.patch

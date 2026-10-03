@@ -7,6 +7,9 @@ settings:
 overrides:
   image-size: 2.0.3
 
+patchedDependencies:
+  metro@0.83.3: 9ff078d9c4cca5ebb54c5b9603aa59b7de48cbac1f547ffb1adb87b66e5c2e3f
+
 importers:
 
   .:
@@ -7864,7 +7867,7 @@ snapshots:
 
   '@expo/metro@54.2.0(supports-color@8.1.1)':
     dependencies:
-      metro: 0.83.3(supports-color@8.1.1)
+      metro: 0.83.3(patch_hash=9ff078d9c4cca5ebb54c5b9603aa59b7de48cbac1f547ffb1adb87b66e5c2e3f)(supports-color@8.1.1)
       metro-babel-transformer: 0.83.3(supports-color@8.1.1)
       metro-cache: 0.83.3(supports-color@8.1.1)
       metro-cache-key: 0.83.3
@@ -11746,7 +11749,7 @@ snapshots:
       connect: 3.7.0(supports-color@8.1.1)
       flow-enums-runtime: 0.0.6
       jest-validate: 29.7.0
-      metro: 0.83.3(supports-color@8.1.1)
+      metro: 0.83.3(patch_hash=9ff078d9c4cca5ebb54c5b9603aa59b7de48cbac1f547ffb1adb87b66e5c2e3f)(supports-color@8.1.1)
       metro-cache: 0.83.3(supports-color@8.1.1)
       metro-core: 0.83.3
       metro-runtime: 0.83.3
@@ -11919,7 +11922,7 @@ snapshots:
       '@babel/parser': 7.29.8
       '@babel/types': 7.29.8
       flow-enums-runtime: 0.0.6
-      metro: 0.83.3(supports-color@8.1.1)
+      metro: 0.83.3(patch_hash=9ff078d9c4cca5ebb54c5b9603aa59b7de48cbac1f547ffb1adb87b66e5c2e3f)(supports-color@8.1.1)
       metro-babel-transformer: 0.83.3(supports-color@8.1.1)
       metro-cache: 0.83.3(supports-color@8.1.1)
       metro-cache-key: 0.83.3
@@ -11952,7 +11955,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  metro@0.83.3(supports-color@8.1.1):
+  metro@0.83.3(patch_hash=9ff078d9c4cca5ebb54c5b9603aa59b7de48cbac1f547ffb1adb87b66e5c2e3f)(supports-color@8.1.1):
     dependencies:
       '@babel/code-frame': 7.29.7
       '@babel/core': 7.29.7(supports-color@8.1.1)
