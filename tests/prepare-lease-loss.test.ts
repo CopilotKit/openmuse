@@ -80,10 +80,7 @@ test("lease loss with an aborted worker signal leaves the proposal awaiting revi
         throw new LostLeaseError();
       },
     });
-    await assert.rejects(
-      service.prepare(owner, baseTask(), input, "k1", ctx),
-      LostLeaseError,
-    );
+    await assert.rejects(service.prepare(owner, baseTask(), input, "k1", ctx), LostLeaseError);
     const proposals = await db.list<{ id: string; status: string }>(owner, "actions");
     assert.equal(proposals.length, 1);
     assert.equal(
