@@ -13,6 +13,7 @@ import type { BrowserSession } from "../../../packages/domain/src";
 import type { ComputerSnapshot } from "../../../packages/domain/src/computer";
 import { browserAddress } from "./browser-address";
 import { useComputerDraft } from "./computer-drafts";
+import { computerStatus } from "./computer-status";
 import { LinuxWorkspace } from "./computer-workspace";
 import { Button, Card, colors, ErrorNotice, Field, LinkRow, Sheet, s } from "./ui";
 import { useWorkspace } from "./workspace";
@@ -23,10 +24,11 @@ export function ComputerEntry() {
     (c) => c.id === "browser" && c.status === "connected",
   );
   const active = workspace.browsers.filter((b) => b.status === "active").length;
+  const status = computerStatus(available, active);
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="Agent computer — take control"
+      accessibilityLabel={`Agent computer — ${status}`}
       onPress={() => open({ type: "computer" })}
       style={[
         s.row,
@@ -41,10 +43,7 @@ export function ComputerEntry() {
       ]}
     >
       <Monitor size={13} color={colors.muted} />
-      <Text style={{ fontSize: 12, color: colors.muted }}>
-        Computer
-        {!available ? " · offline" : active ? " · take control" : " · ready"}
-      </Text>
+      <Text style={{ fontSize: 12, color: colors.muted }}>Computer · {status}</Text>
       <View
         style={{
           width: 5,
