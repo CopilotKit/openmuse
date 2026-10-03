@@ -19,7 +19,7 @@ import {
   Users,
   X,
 } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Image, Linking, Pressable, Text, View } from "react-native";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import type { Artifact, BrowserSession } from "../../../packages/domain/src";
@@ -282,6 +282,9 @@ export function TaskDetail({ taskId }: { taskId: string }) {
   const [showFieldJson, setShowFieldJson] = useState(false);
   const [fields, setFields] = useState<Record<string, string | boolean>>({});
   const task = data?.tasks.find((item) => item.id === taskId) || detail?.task;
+  const milestone = data?.goals
+    .find((goal) => goal.id === task?.goalId)
+    ?.milestones.find((item) => item.id === task?.milestoneId);
   useEffect(() => {
     let active = true;
     void api
@@ -385,6 +388,13 @@ export function TaskDetail({ taskId }: { taskId: string }) {
           <Text selectable style={s.text}>
             {task.prompt}
           </Text>
+          {task.milestoneId && data && (
+            <Text style={s.muted}>
+              {milestone?.title
+                ? `Milestone: ${milestone.title}. Completion is tracked manually in Goals.`
+                : "The linked milestone is no longer available. This task and its results are still accessible."}
+            </Text>
+          )}
           <View style={[s.row, { gap: 8, flexWrap: "wrap" }]}>
             {["queued", "running", "scheduled", "waiting_input", "waiting_approval"].includes(
               task.status,
@@ -874,28 +884,50 @@ function FinanceArtifact({ artifact }: { artifact: AgentArtifact }) {
     </Card>
   );
 }
-export function DelegateSheet() {
+export function DelegateSheet({ goalId, milestoneId }: { goalId?: string; milestoneId?: string }) {
   const { workspace, close, open } = useWorkspace();
-  const { delegate } = useAgentWorkspace();
+  const { data, delegate } = useAgentWorkspace();
+  const goal = data?.goals.find((item) => item.id === goalId);
+  const milestone = goal?.milestones.find((item) => item.id === milestoneId);
+  const submission = useRef<{ input: string; id: string } | null>(null);
+  const submitting = useRef(false);
   const [kind, setKind] = useState<AgentTask["kind"]>("plan");
-  const [prompt, setPrompt] = useState("");
+  const [title] = useState(milestone?.title);
+  const [prompt, setPrompt] = useState(
+    milestone && goal
+      ? `Help with this milestone: ${milestone.title}\nGoal: ${goal.title}\n${goal.description}`
+      : "",
+  );
   const [messageId, setMessageId] = useState("");
   const [csv, setCsv] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function submit() {
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     setError("");
     try {
-      const task = await delegate({
+      const input = {
+        title,
         prompt: prompt.trim(),
         kind,
+        goalId,
+        milestoneId,
         input: kind === "finance" ? { csv } : kind === "document" ? { messageId } : {},
-      });
+      };
+      const serialized = JSON.stringify(input);
+      if (submission.current?.input !== serialized)
+        submission.current = {
+          input: serialized,
+          id: `delegate-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        };
+      const task = await delegate(input, submission.current.id);
       open({ type: "task", taskId: task.id });
     } catch (e) {
       setError(errorText(e));
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -905,6 +937,13 @@ export function DelegateSheet() {
       subtitle="OpenMuse saves a plan and keeps working on the server."
       onClose={close}
     >
+      {milestoneId && (
+        <Text style={[s.muted, { marginBottom: 16 }]}>
+          {milestone
+            ? `${goal?.title} · ${milestone.title}. Mark this milestone complete when you are satisfied with the result.`
+            : "This milestone is no longer available."}
+        </Text>
+      )}
       <View style={[s.row, { flexWrap: "wrap", gap: 8, marginBottom: 20 }]}>
         {(["plan", "document", "finance", "agent"] as const).map((item) => (
           <Button small primary={kind === item} key={item} onPress={() => setKind(item)}>
@@ -983,6 +1022,7 @@ export function DelegateSheet() {
         primary
         busy={busy}
         disabled={
+          Boolean(milestoneId && !milestone) ||
           !prompt.trim() ||
           (kind === "document" && !messageId) ||
           (kind === "finance" && !csv.trim())
@@ -1345,11 +1385,11 @@ function GoalCard({ goal, onOpenTask }: { goal: Goal; onOpenTask?: () => void })
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const done = goal.milestones.filter((item) => item.done).length;
-  async function update(body: unknown) {
+  async function update(body: unknown, milestoneId?: string) {
     setBusy(true);
     setError("");
     try {
-      await mutate(`/goals/${goal.id}`, body);
+      await mutate(`/goals/${goal.id}${milestoneId ? `/milestones/${milestoneId}` : ""}`, body);
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -1388,19 +1428,32 @@ function GoalCard({ goal, onOpenTask }: { goal: Goal; onOpenTask?: () => void })
         {done} of {goal.milestones.length} milestones
       </Text>
       {goal.milestones.map((milestone) => (
-        <CheckRow
-          key={milestone.id}
-          checked={milestone.done}
-          label={milestone.title}
-          onPress={() => {
-            if (!busy)
-              void update({
-                milestones: goal.milestones.map((item) =>
-                  item.id === milestone.id ? { ...item, done: !item.done } : item,
-                ),
-              });
-          }}
-        />
+        <View key={milestone.id} style={{ gap: 8 }}>
+          <CheckRow
+            checked={milestone.done}
+            label={milestone.title}
+            onPress={() => {
+              if (!busy) void update({ done: !milestone.done }, milestone.id);
+            }}
+          />
+          {!milestone.done && (
+            <Button
+              small
+              disabled={goal.status !== "active"}
+              onPress={() => {
+                onOpenTask?.();
+                open({ type: "delegate", goalId: goal.id, milestoneId: milestone.id });
+              }}
+            >
+              Delegate
+            </Button>
+          )}
+          {data?.tasks
+            .filter((task) => task.goalId === goal.id && task.milestoneId === milestone.id)
+            .map((task) => (
+              <TaskCard key={task.id} task={task} compact onOpen={onOpenTask} />
+            ))}
+        </View>
       ))}
       <ErrorNotice error={error} />
       <View style={[s.row, { gap: 8, flexWrap: "wrap" }]}>
@@ -1421,7 +1474,11 @@ function GoalCard({ goal, onOpenTask }: { goal: Goal; onOpenTask?: () => void })
         </Button>
       </View>
       {data?.tasks
-        .filter((task) => task.goalId === goal.id)
+        .filter(
+          (task) =>
+            task.goalId === goal.id &&
+            (!task.milestoneId || !goal.milestones.some((m) => m.id === task.milestoneId)),
+        )
         .map((task) => (
           <TaskCard key={task.id} task={task} compact onOpen={onOpenTask} />
         ))}

@@ -5,11 +5,18 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { createApp } from "../apps/server/src/app.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
-import type { AgentNotification, AgentTask, Idea, Monitor } from "../packages/domain/src/agent.ts";
+import type {
+  AgentNotification,
+  AgentTask,
+  Goal,
+  Idea,
+  Monitor,
+} from "../packages/domain/src/agent.ts";
 import type { ActionProposal } from "../packages/domain/src/index.ts";
 
 let db: Store, server: Awaited<ReturnType<typeof createApp>>, directory: string;
 const owner = "workflow-user";
+const reconcile = () => (server.agent as unknown as { maintain(): Promise<void> }).maintain();
 before(async () => {
   directory = await mkdtemp(join(tmpdir(), "openmuse-workflows-"));
   db = await createStore({ dataDir: join(directory, "db") });
@@ -215,5 +222,146 @@ test("dismissal racing acceptance never creates work for a dismissed idea", asyn
     if (saved?.status === "dismissed")
       assert.equal(tasks.filter((t) => t.title === idea.title).length, 0);
     else assert.ok(saved?.taskId && tasks.some((t) => t.id === saved.taskId));
+  }
+});
+
+test("milestone-linked outcomes preserve manual progress and legacy goal tasks still append once", async () => {
+  const goal = await server.agent.createGoal(owner, {
+    title: "Budget",
+    milestones: ["Review spending", "Save"],
+  });
+  const input = {
+    prompt: "Review spending",
+    kind: "finance",
+    goalId: goal.id,
+    milestoneId: goal.milestones[0].id,
+    input: { csv: "date,description,amount,category\n2026-09-01,Groceries,54.20,Food" },
+  };
+  const task = await server.agent.createTask(owner, input, "linked-finance");
+  const reordered = [
+    { ...goal.milestones[1], done: true },
+    { ...goal.milestones[0], title: "Review September" },
+  ];
+  await server.agent.updateGoal(owner, goal.id, { milestones: reordered });
+  await server.agent.worker.tick();
+  const detail = await server.agent.detail(owner, task.id);
+  assert.equal(detail.task.status, "succeeded");
+  assert.equal(detail.task.milestoneId, goal.milestones[0].id);
+  assert.ok(detail.artifacts.length);
+  assert.deepEqual((await db.get<Goal>(owner, "goals", goal.id))?.milestones, reordered);
+  await server.agent.setMilestoneDone(owner, goal.id, goal.milestones[0].id, true);
+  // Startup maintenance replays durable outcomes after process interruptions.
+  await reconcile();
+  const completed = reordered.map((m) => ({ ...m, done: true }));
+  assert.deepEqual((await db.get<Goal>(owner, "goals", goal.id))?.milestones, completed);
+  await server.agent.updateGoal(owner, goal.id, { milestones: [completed[0]] });
+  await reconcile();
+  assert.deepEqual((await db.get<Goal>(owner, "goals", goal.id))?.milestones, [completed[0]]);
+  assert.ok((await server.agent.detail(owner, task.id)).artifacts.length);
+  const legacy = await server.agent.createTask(
+    owner,
+    { ...input, milestoneId: undefined },
+    "legacy-finance",
+  );
+  await server.agent.worker.tick();
+  await reconcile();
+  await reconcile();
+  const milestones = (await db.get<Goal>(owner, "goals", goal.id))?.milestones;
+  assert.equal(milestones?.length, 2);
+  assert.equal(milestones?.filter((m) => m.id === legacy.id && m.done).length, 1);
+});
+
+test("failed, cancelled and review-blocked tasks do not complete milestones", async () => {
+  const goal = await server.agent.createGoal(owner, {
+    title: "Documents",
+    milestones: ["Return form"],
+  });
+  const link = { goalId: goal.id, milestoneId: goal.milestones[0].id };
+  const failed = await server.agent.createTask(owner, {
+    ...link,
+    prompt: "Analyze invalid CSV",
+    kind: "finance",
+    input: { csv: "invalid" },
+  });
+  await server.agent.worker.tick();
+  assert.equal((await server.agent.getTask(owner, failed.id)).status, "failed");
+  const cancelled = await server.agent.createTask(owner, { ...link, prompt: "Cancelled" });
+  await server.agent.control(owner, cancelled.id, "cancel");
+  const mail = (await server.workspace.snapshot(owner)).mail.find((m) => m.attachments.length);
+  assert.ok(mail);
+  const document = await server.agent.createTask(owner, {
+    ...link,
+    prompt: "Return form",
+    kind: "document",
+    input: { messageId: mail.id },
+  });
+  await server.agent.worker.tick();
+  assert.equal((await server.agent.getTask(owner, document.id)).status, "waiting_input");
+  assert.deepEqual((await db.get<Goal>(owner, "goals", goal.id))?.milestones, goal.milestones);
+  await server.agent.answer(owner, document.id, "Fictional test values", {
+    participant_name: "Test Student",
+    guardian_name: "Test Guardian",
+    permission_granted: true,
+  });
+  await server.agent.worker.tick();
+  const waiting = await server.agent.getTask(owner, document.id);
+  assert.equal(waiting.status, "waiting_approval");
+  assert.deepEqual((await db.get<Goal>(owner, "goals", goal.id))?.milestones, goal.milestones);
+  await server.agent.updateGoal(owner, goal.id, { status: "paused" });
+  assert.ok(waiting.actionId);
+  const action = await db.get<ActionProposal>(owner, "actions", waiting.actionId);
+  assert.ok(action);
+  await assert.rejects(
+    server.actions.decide(owner, action.id, action.hash, "approve"),
+    /Resume the task/,
+  );
+  await server.agent.control(owner, document.id, "cancel");
+  await reconcile();
+  assert.deepEqual((await db.get<Goal>(owner, "goals", goal.id))?.milestones, goal.milestones);
+});
+
+test("linked task results and manual completion survive a database restart", async () => {
+  const root = await mkdtemp(join(tmpdir(), "openmuse-milestone-restart-"));
+  const config = { ...server.agent.config, dataDir: root };
+  let store = await createStore({ dataDir: join(root, "db") });
+  let app = await createApp(store, config);
+  try {
+    const goal = await app.agent.createGoal(owner, {
+      title: "Budget",
+      milestones: ["Review spending"],
+    });
+    const task = await app.agent.createTask(
+      owner,
+      {
+        prompt: "Review spending",
+        kind: "finance",
+        goalId: goal.id,
+        milestoneId: goal.milestones[0].id,
+        input: { csv: "date,description,amount,category\n2026-09-01,Groceries,54.20,Food" },
+      },
+      "restart-delegation",
+    );
+    await app.agent.worker.tick();
+    assert.equal((await app.agent.getTask(owner, task.id)).status, "succeeded");
+    await app.agent.stop();
+    await store.close();
+    store = await createStore({ dataDir: join(root, "db") });
+    app = await createApp(store, config);
+    app.agent.start();
+    await app.agent.stop();
+    assert.deepEqual((await store.get<Goal>(owner, "goals", goal.id))?.milestones, goal.milestones);
+    const restored = await app.agent.detail(owner, task.id);
+    assert.equal(restored.task.milestoneId, goal.milestones[0].id);
+    assert.ok(restored.artifacts.length);
+    await app.agent.setMilestoneDone(owner, goal.id, goal.milestones[0].id, true);
+    app.agent.start();
+    await app.agent.stop();
+    assert.deepEqual((await store.get<Goal>(owner, "goals", goal.id))?.milestones, [
+      { ...goal.milestones[0], done: true },
+    ]);
+  } finally {
+    await app.agent.stop();
+    await store.close();
+    await rm(root, { recursive: true, force: true });
   }
 });

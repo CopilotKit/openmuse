@@ -182,11 +182,14 @@ export class AgentService {
   }
   async createTask(owner: string, raw: unknown, idempotencyKey?: string, held = false) {
     const input = createTaskSchema.parse(raw);
-    if (input.goalId && !(await this.db.get(owner, "goals", input.goalId)))
-      throw new AppError("Goal not found", 404);
     const id = idempotencyKey ? hash(`task:${idempotencyKey}`) : randomUUID();
     const existing = await this.db.get<AgentTask>(owner, "tasks", id);
     if (existing) return existing;
+    if (input.milestoneId && !input.goalId) throw new AppError("A milestone requires a goal", 422);
+    const goal = input.goalId ? await this.db.get<Goal>(owner, "goals", input.goalId) : null;
+    if (input.goalId && !goal) throw new AppError("Goal not found", 404);
+    if (input.milestoneId && !goal?.milestones.some((m) => m.id === input.milestoneId))
+      throw new AppError("Milestone not found in this goal", 404);
     if (
       (await this.db.list<AgentTask>(owner, "tasks")).filter((t) => !terminal.has(t.status))
         .length >= 100
@@ -212,7 +215,8 @@ export class AgentService {
       prompt: input.prompt,
       kind: input.kind,
       goalId: input.goalId,
-      status: held ? "paused" : "queued",
+      milestoneId: input.milestoneId,
+      status: held || goal?.status === "paused" ? "paused" : "queued",
       plan: titles.map((title, i) => ({ id: String(i), title, status: "pending" })),
       evidence: [],
       input: input.input,
@@ -352,13 +356,17 @@ export class AgentService {
     id: string,
     patch: { status?: Goal["status"]; milestones?: Goal["milestones"] },
   ) {
-    const goal = await this.db.get<Goal>(owner, "goals", id);
-    if (!goal) throw new AppError("Goal not found", 404);
-    const saved = await this.db.put(owner, "goals", { ...goal, ...patch });
+    const saved = await this.db.compareAndSwap<Goal>(owner, "goals", id, {}, patch);
+    if (!saved) throw new AppError("Goal not found", 404);
     if (patch.status === "paused")
       for (const task of await this.db.list<AgentTask>(owner, "tasks"))
         if (task.goalId === id && !terminal.has(task.status) && task.status !== "paused")
           await this.control(owner, task.id, "pause");
+    return saved;
+  }
+  async setMilestoneDone(owner: string, goalId: string, milestoneId: string, done: boolean) {
+    const saved = await this.db.setMilestoneDone<Goal>(owner, goalId, milestoneId, done);
+    if (!saved) throw new AppError("Goal or milestone not found", 404);
     return saved;
   }
   async createMonitor(owner: string, raw: unknown, idempotencyKey?: string) {
@@ -846,7 +854,7 @@ export class AgentService {
         task.id,
         `task-done:${task.id}`,
       );
-      if (task.goalId) {
+      if (task.goalId && !task.milestoneId) {
         for (let attempt = 0; attempt < 8; attempt++) {
           const goal = await this.db.get<Goal>(owner, "goals", task.goalId);
           if (!goal || goal.milestones.some((m) => m.id === task.id)) break;

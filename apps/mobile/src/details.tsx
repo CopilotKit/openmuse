@@ -61,7 +61,14 @@ export function Details({ detail }: { detail: Detail }) {
   const { close, navigate } = useWorkspace();
   if (detail.type === "computer") return <ComputerSheet />;
   if (detail.type === "task") return <TaskDetail taskId={detail.taskId} />;
-  if (detail.type === "delegate") return <DelegateSheet />;
+  if (detail.type === "delegate")
+    return (
+      <DelegateSheet
+        key={`${detail.goalId}:${detail.milestoneId}`}
+        goalId={detail.goalId}
+        milestoneId={detail.milestoneId}
+      />
+    );
   if (detail.type === "notifications") return <NotificationsSheet />;
   if (detail.type === "mail") return <MailDetail mail={detail.mail} />;
   if (detail.type === "email") return <EmailEditor draft={detail.draft} />;

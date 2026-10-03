@@ -20,7 +20,7 @@ interface AgentContextValue {
   error: string;
   refresh: () => Promise<void>;
   mutate: <T>(path: string, body: unknown) => Promise<T>;
-  delegate: (input: CreateTaskInput) => Promise<AgentTask>;
+  delegate: (input: CreateTaskInput, requestId?: string) => Promise<AgentTask>;
 }
 const AgentContext = createContext<AgentContextValue | null>(null);
 export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
@@ -81,7 +81,8 @@ export function AgentWorkspaceProvider({ children }: { children: ReactNode }) {
     [api, refresh],
   );
   const delegate = useCallback(
-    (input: CreateTaskInput) => mutate<AgentTask>("/tasks", input),
+    (input: CreateTaskInput, requestId?: string) =>
+      mutate<AgentTask>("/tasks", { ...input, requestId }),
     [mutate],
   );
   return (
