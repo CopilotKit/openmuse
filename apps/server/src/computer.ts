@@ -17,6 +17,7 @@ import {
   describeDesktopAction,
   desktopActionSchema,
   E2BDesktopComputer,
+  resolution,
 } from "./computer-e2b-desktop.ts";
 import type { Config } from "./config.ts";
 import type { Store } from "./db.ts";
@@ -602,13 +603,46 @@ export class ComputerService {
   }
   /** One screenshot, click, key or typing action on the running desktop, recorded as a
    * receipt in a separate action history. A stopped computer fails; it is never resumed here. */
-  async desktopAction(owner: string, raw: unknown) {
+  async desktopAction(owner: string, raw: unknown, options: { idempotencyKey?: string } = {}) {
     const desktop = this.desktopOnly();
     const action = desktopActionSchema.parse(raw);
+    const id = options.idempotencyKey
+      ? hash(`computer-desktop-action:${options.idempotencyKey}`)
+      : randomUUID();
+    // The display label truncates typed text, so bind the complete validated input.
+    const actionHash = hash(JSON.stringify(action));
     return this.exclusive(owner, async () => {
+      const previous = options.idempotencyKey
+        ? await this.db.get<ComputerCommand>(owner, "computer-desktop-actions", id)
+        : null;
+      if (previous) {
+        if (previous.actionHash !== actionHash)
+          throw new AppError(
+            "This operation ID already belongs to a different desktop action",
+            409,
+          );
+        // Only the latest image is retained. Never dispatch again just to refresh it.
+        const screen = await this.latestScreenshot(owner, id).catch(() => null);
+        const image = screen?.bytes ?? Buffer.alloc(0);
+        return {
+          receipt: previous,
+          width: resolution[0],
+          height: resolution[1],
+          image,
+          mimeType: screen?.mimeType ?? "image/jpeg",
+          data: image.toString("base64"),
+          uncertain: previous.status === "interrupted",
+          warning:
+            "This operation ID already has a receipt; no new desktop input was sent. " +
+            (screen
+              ? "The saved screenshot is attached."
+              : "Take a fresh screenshot before deciding what to do next."),
+        };
+      }
       const receipt: ComputerCommand = {
-        id: randomUUID(),
+        id,
         command: describeDesktopAction(action),
+        ...(options.idempotencyKey ? { actionHash } : {}),
         cwd: "/workspace",
         status: "succeeded",
         stdout: "",
