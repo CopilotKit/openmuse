@@ -162,12 +162,20 @@ function decodeHeader(value: string): string {
                     ),
                   "latin1",
                 );
-          return new TextDecoder(charset).decode(bytes);
+          return new TextDecoder(charset.split("*")[0]).decode(bytes);
         } catch {
           return original;
         }
       },
     );
+}
+/** Decode a message-body part; unknown or malformed charset labels fall back to UTF-8. */
+function decodeText(bytes: Buffer, charset: string): string {
+  try {
+    return new TextDecoder(charset).decode(bytes);
+  } catch {
+    return new TextDecoder("utf-8").decode(bytes);
+  }
 }
 function decodeSnippet(value: string): string {
   const entities: Record<string, string> = {
@@ -191,7 +199,13 @@ function decodeSnippet(value: string): string {
   );
 }
 function addresses(value: string): string[] {
-  return value.match(/[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+/g) ?? [];
+  // A quoted display name may itself contain an e-mail-looking string; only
+  // addresses outside display names count.
+  return (
+    value
+      .replace(/"(?:[^"\\]|\\.)*"\s*(?=<)/g, " ")
+      .match(/[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+/g) ?? []
+  );
 }
 /** Extract text from a parsed HTML tree. Nothing is rendered or fetched. */
 function htmlToPlainText(html: string): string {
@@ -277,12 +291,16 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
   const attachments: string[] = [];
   const visit = (part: GmailPart, depth: number) => {
     if (depth > 30) throw new Error("Gmail message MIME nesting exceeds the limit");
+    // Attachments carry their own content (or an attached message); never merge
+    // their parts into the parent text. A remote body has no filename: it is
+    // hydrated above and still counts as message text.
+    const attached = Boolean(part.filename) || part.mimeType === "message/rfc822";
     if (part.filename && part.body?.attachmentId)
       attachments.push(
         `${message.id}:${part.body.attachmentId}:${encodeURIComponent(part.filename)}`,
       );
     if (
-      !part.filename &&
+      !attached &&
       (part.mimeType === "text/plain" || part.mimeType === "text/html") &&
       part.body?.data
     ) {
@@ -290,18 +308,19 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
         headers(part)
           .get("content-type")
           ?.match(/charset=["']?([^;"'\s]+)/i)?.[1] ?? "utf-8";
-      const text = new TextDecoder(charset).decode(decodeBase64url(part.body.data, 1024 * 1024));
+      const text = decodeText(decodeBase64url(part.body.data, 1024 * 1024), charset);
       if (part.mimeType === "text/plain") plain.push(text);
       else html.push(htmlToPlainText(text));
     }
-    for (const child of part.parts ?? []) visit(child, depth + 1);
+    if (!attached) for (const child of part.parts ?? []) visit(child, depth + 1);
   };
   if (message.payload) visit(message.payload, 0);
   const from = decodeHeader(metadata.get("from") ?? "");
   const address = addresses(from)[0] ?? from;
-  const sender = from.includes("<")
+  const displayName = from.includes("<")
     ? from.slice(0, from.indexOf("<")).trim().replace(/^"|"$/g, "")
-    : address;
+    : "";
+  const sender = displayName || address;
   const time = message.internalDate
     ? Number(message.internalDate)
     : Date.parse(metadata.get("date") ?? "");
