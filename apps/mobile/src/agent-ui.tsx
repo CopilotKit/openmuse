@@ -1488,13 +1488,15 @@ function MonitorForm({ onDone }: { onDone: () => void }) {
       )}
       <Text style={[s.small, { marginBottom: 10 }]}>Notify me when</Text>
       <View style={[s.row, { gap: 7, flexWrap: "wrap", marginBottom: 16 }]}>
-        {(["change", "contains", "price_below"] as const).map((item) => (
+        {(["change", "contains", "price_below", "price_above"] as const).map((item) => (
           <Button small primary={condition === item} key={item} onPress={() => setCondition(item)}>
             {item === "change"
               ? "Page changes"
               : item === "contains"
                 ? "Text appears"
-                : "Price drops below"}
+                : item === "price_below"
+                  ? "Price drops below"
+                  : "Price rises above"}
           </Button>
         ))}
       </View>
@@ -1573,7 +1575,9 @@ function MonitorCard({ monitor, onOpenTask }: { monitor: Monitor; onOpenTask?: (
           ? "Watch for a page change"
           : monitor.condition === "contains"
             ? `Watch for “${monitor.value}”`
-            : `Price below ${monitor.value}`}
+            : monitor.condition === "price_below"
+              ? `Price below ${monitor.value}`
+              : `Price above ${monitor.value}`}
       </Text>
       <Text style={s.small}>
         Every {monitor.intervalMinutes} min · {monitor.checks} checks
