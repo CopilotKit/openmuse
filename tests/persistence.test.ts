@@ -31,3 +31,37 @@ test("idle Postgres client errors are logged instead of crashing the process", a
     await pool.end();
   }
 });
+
+test("countActiveTasks matches the createTask cap semantics", async () => {
+  const store = await createStore();
+  try {
+    const terminal = ["succeeded", "failed", "cancelled"];
+    const statuses = [
+      "queued",
+      "running",
+      "scheduled",
+      "waiting_input",
+      "waiting_approval",
+      "paused",
+      "succeeded",
+      "failed",
+      "cancelled",
+    ];
+    for (let i = 0; i < statuses.length; i++)
+      await store.put("owner", "tasks", { id: `t${i}`, status: statuses[i] });
+    await store.put("owner", "tasks", { id: "t-none" });
+
+    const expected = (await store.list<{ id: string; status?: string }>("owner", "tasks")).filter(
+      (item) => !terminal.includes(item.status ?? ""),
+    ).length;
+    assert.equal(await store.countActiveTasks("owner", terminal), expected);
+    assert.equal(expected, 7);
+
+    await store.put("other", "tasks", { id: "x", status: "queued" });
+    await store.put("owner", "goals", { id: "g", status: "queued" });
+    assert.equal(await store.countActiveTasks("owner", terminal), 7);
+    assert.equal(await store.countActiveTasks("nobody", terminal), 0);
+  } finally {
+    await store.close();
+  }
+});
