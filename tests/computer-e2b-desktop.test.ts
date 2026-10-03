@@ -813,7 +813,7 @@ test("use_desktop exists only on the desktop provider and returns text plus the 
   assert.ok(!names(new ComputerService(db, base)).includes("use_desktop"));
   const tool = computerTools(computer, files, owner, "scope").find((t) => t.name === "use_desktop");
   const execute = tool?.execute as (args: unknown) => Promise<unknown>;
-  const result = (await execute({ action: "screenshot" })) as {
+  const result = (await execute({ action: "screenshot", operationId: "first-screenshot" })) as {
     type: string;
     content?: string;
     source?: { type: string; value: string; mimeType: string };
@@ -825,7 +825,10 @@ test("use_desktop exists only on the desktop provider and returns text plus the 
     source: { type: "data", value: Buffer.from(jpeg).toString("base64"), mimeType: "image/jpeg" },
   });
   await computer.stop(owner);
-  assert.match(JSON.stringify(await execute({ action: "screenshot" })), /Start the computer/);
+  assert.match(
+    JSON.stringify(await execute({ action: "screenshot", operationId: "second-screenshot" })),
+    /Start the computer/,
+  );
   assert.match(computerInstructions("e2b-desktop"), /use_desktop/);
   assert.doesNotMatch(computerInstructions(), /use_desktop/);
 });
@@ -1000,11 +1003,17 @@ test("a delivered input with a lost response returns a durable uncertain receipt
       const execute = tool?.execute as (
         args: unknown,
       ) => Promise<{ type: string; content?: string }[]>;
-      const result = await execute(action);
+      const result = await execute({ ...action, operationId: "uncertain-input" });
       const text = JSON.parse(result[0].content ?? "{}");
       assert.equal(applied, 1, "the provider must never replay uncertain input");
       assert.equal(text.status, "interrupted");
       assert.equal(text.error, undefined);
+      const repeated = JSON.parse(
+        (await execute({ ...action, operationId: "uncertain-input" }))[0].content ?? "{}",
+      );
+      assert.equal(repeated.receiptId, text.receiptId);
+      assert.equal(repeated.status, "interrupted");
+      assert.equal(applied, 1, "a repeated tool call must not dispatch uncertain input again");
       assert.match(
         text.warning,
         /outcome is unknown.*before repeating.*do not automatically retry/,
@@ -1020,6 +1029,57 @@ test("a delivered input with a lost response returns a durable uncertain receipt
       assert.equal(f.calls.reads.length, 1, "only a fresh screenshot follows uncertain input");
     }
   }
+});
+
+test("repeating a desktop operation ID returns its receipt without sending the input twice", async () => {
+  let applied = 0;
+  const f = fake({
+    boxes: [{}],
+    setupEffect(command) {
+      if (command.startsWith("xdotool ") && command.includes("|| exit 3")) applied++;
+    },
+  });
+  const { computer, owner, restarted } = service(f);
+  const action = { action: "key", text: "Return", operationId: "submit-once" };
+  const tool = computerTools(
+    computer,
+    {} as Parameters<typeof computerTools>[1],
+    owner,
+    "chat:one",
+  ).find((candidate) => candidate.name === "use_desktop");
+  const execute = tool?.execute as (args: unknown) => Promise<{ type: string; content?: string }[]>;
+  const first = JSON.parse((await execute(action))[0].content ?? "{}");
+  const retry = computerTools(
+    restarted(),
+    {} as Parameters<typeof computerTools>[1],
+    owner,
+    "chat:one",
+  ).find((candidate) => candidate.name === "use_desktop");
+  const retryExecute = retry?.execute as (
+    args: unknown,
+  ) => Promise<{ type: string; content?: string }[]>;
+  const second = JSON.parse((await retryExecute(action))[0].content ?? "{}");
+  assert.equal(applied, 1, "a repeated model tool call must not press Return again");
+  assert.equal(second.receiptId, first.receiptId);
+  assert.equal(second.status, "succeeded");
+
+  const changed = await retryExecute({ action: "key", text: "space", operationId: "submit-once" });
+  assert.match(JSON.stringify(changed), /already belongs to a different desktop action/);
+  assert.equal(applied, 1);
+
+  const common = "x".repeat(205);
+  await execute({ action: "type", text: `${common}A`, operationId: "long-text" });
+  const hiddenChange = await retryExecute({
+    action: "type",
+    text: `${common}B`,
+    operationId: "long-text",
+  });
+  assert.match(JSON.stringify(hiddenChange), /already belongs to a different desktop action/);
+  assert.equal(
+    applied,
+    2,
+    "the full text must be bound even though the receipt label truncates it",
+  );
 });
 
 test("partially delivered input with a nonzero exit stays uncertain without replay", async () => {
@@ -1051,7 +1111,7 @@ test("partially delivered input with a nonzero exit stays uncertain without repl
       const execute = tool?.execute as (
         args: unknown,
       ) => Promise<{ type: string; content?: string }[]>;
-      const result = await execute(action);
+      const result = await execute({ ...action, operationId: "partial-input" });
       assert.equal(applied, 1, "partially delivered input must not be replayed");
       const [persisted] = await db.list<ComputerCommand>(owner, "computer-desktop-actions");
       assert.equal(persisted.status, "interrupted", "a nonzero exit cannot undo delivered input");
