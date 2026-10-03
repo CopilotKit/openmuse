@@ -20,6 +20,7 @@ before(async () => {
     publicUrl: "http://localhost:8787",
     dataDir: directory,
     agentBackend: "sample",
+    intelligenceUserId: "local-user",
     googleRedirectUri: "http://localhost:8787/api/google/callback",
     allowedOrigins: ["http://localhost:8081"],
     intelligenceApiKey: "test-project-key-never-sent",

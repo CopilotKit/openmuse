@@ -15,6 +15,7 @@ export class Auth {
   async session(accessKey?: string) {
     if (
       this.config.mode === "live" &&
+      !this.config.skipAccessKey &&
       (!accessKey ||
         !this.config.accessKey ||
         !timingSafeEqual(digest(accessKey), digest(this.config.accessKey)))

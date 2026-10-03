@@ -5,7 +5,9 @@ import type { TestContext } from "node:test";
 
 type ModelCall = { name: string; arguments: object };
 
-// Serve the provider protocol, leaving tool execution and AG-UI event emission to the real SDK.
+// Serve the OpenAI Chat Completions protocol — the wire format the engine's
+// adapter (openaiChatCompletions) speaks — leaving tool execution and AG-UI
+// event emission to the real SDK.
 export async function modelFixture(
   t: TestContext,
   reply: (index: number) => ModelCall | undefined | Promise<ModelCall | undefined>,
@@ -25,6 +27,8 @@ export async function modelFixture(
     requests.push({ path: request.url ?? "", body });
     const status = errorStatus?.(index);
     if (status !== undefined) {
+      // A pre-stream HTTP error. The OpenAI SDK throws APIError; it retries
+      // only 5xx/429. 400 has status !== undefined, so it must never retry.
       response.writeHead(status, { "Content-Type": "application/json" });
       response.end(
         JSON.stringify({
@@ -37,17 +41,7 @@ export async function modelFixture(
       // Deliver a valid stream start, then fail the connection before any
       // assistant output reaches the client.
       response.writeHead(200, { "Content-Type": "text/event-stream" });
-      response.write(
-        `data: ${JSON.stringify({
-          type: "response.created",
-          response: {
-            id: `drop-${index}`,
-            created_at: 1000,
-            model: "fixture",
-            status: "in_progress",
-          },
-        })}\n\n`,
-      );
+      response.write(`data: ${JSON.stringify({ id: `drop-${index}`, object: "chat.completion.chunk", created: 1000, model: "fixture", choices: [{ index: 0, delta: {}, finish_reason: null }] })}\n\n`);
       setTimeout(() => response.socket?.destroy(), 120);
       return;
     }
@@ -55,93 +49,66 @@ export async function modelFixture(
       // Deliver real assistant output, then fail the connection. A retry
       // must not replay output the client already received.
       response.writeHead(200, { "Content-Type": "text/event-stream" });
-      response.write(
-        `data: ${JSON.stringify({
-          type: "response.created",
-          response: {
-            id: `drop-text-${index}`,
-            created_at: 1000,
-            model: "fixture",
-            status: "in_progress",
-          },
-        })}\n\n`,
-      );
-      response.write(
-        `data: ${JSON.stringify({
-          type: "response.output_item.added",
-          output_index: 0,
-          item: {
-            id: `msg-${index}`,
-            type: "message",
-            role: "assistant",
-            status: "in_progress",
-            content: [],
-          },
-        })}\n\n`,
-      );
-      response.write(
-        `data: ${JSON.stringify({
-          type: "response.output_text.delta",
-          item_id: `msg-${index}`,
-          output_index: 0,
-          delta: "Hello partial ",
-        })}\n\n`,
-      );
+      response.write(`data: ${JSON.stringify({ id: `drop-text-${index}`, object: "chat.completion.chunk", created: 1000, model: "fixture", choices: [{ index: 0, delta: {}, finish_reason: null }] })}\n\n`);
+      response.write(`data: ${JSON.stringify({ id: `drop-text-${index}`, object: "chat.completion.chunk", created: 1000, model: "fixture", choices: [{ index: 0, delta: { content: "Hello partial " }, finish_reason: null }] })}\n\n`);
       setTimeout(() => response.socket?.destroy(), 120);
       return;
     }
     if (errorPart?.(index)) {
+      // An error after the stream starts: chat completions has no dedicated
+      // in-stream error event, but the OpenAI SDK throws APIError when a
+      // data chunk carries { error }. Status stays undefined, so the error is
+      // not retried — same observable behavior the Responses fixture had.
       response.writeHead(200, { "Content-Type": "text/event-stream" });
       response.write(
-        `data: ${JSON.stringify({
-          type: "response.failed",
-          sequence_number: 1,
-          response: {
-            error: { code: "server_error", message: "Provider reported response.failed" },
-          },
-        })}\n\n`,
+        `data: ${JSON.stringify({ error: { message: "Provider reported response.failed", type: "server_error" } })}\n\n`,
       );
       response.end("data: [DONE]\n\n");
       return;
     }
     const call = await reply(index);
     response.writeHead(200, { "Content-Type": "text/event-stream" });
-    const emit = (type: string, value: object) =>
-      response.write(`data: ${JSON.stringify({ type, ...value })}\n\n`);
-    const base = { id: `response-${index}`, created_at: 1000, model: "fixture" };
-    emit("response.created", { response: { ...base, status: "in_progress" } });
-    const item = call && {
-      id: `item-${index}`,
-      type: "function_call",
-      call_id: `call-${index}`,
-      name: call.name,
-      arguments: JSON.stringify(call.arguments),
-    };
-    if (item) {
-      emit("response.output_item.added", { output_index: 0, item: { ...item, arguments: "" } });
-      emit("response.function_call_arguments.delta", {
-        item_id: item.id,
-        output_index: 0,
-        delta: item.arguments,
+    const chunk = (delta: object, finish_reason: string | null = null) =>
+      response.write(
+        `data: ${JSON.stringify({
+          id: `chatcmpl-${index}`,
+          object: "chat.completion.chunk",
+          created: 1000,
+          model: "fixture",
+          choices: [{ index: 0, delta, finish_reason }],
+        })}\n\n`,
+      );
+    chunk({});
+    if (call) {
+      chunk({
+        tool_calls: [
+          {
+            index: 0,
+            id: `call-${index}`,
+            type: "function",
+            function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+          },
+        ],
       });
-      emit("response.output_item.done", {
-        output_index: 0,
-        item: { ...item, status: "completed" },
-      });
+      chunk({}, "tool_calls");
+    } else {
+      chunk({ role: "assistant", content: "Fixture reply." }, "stop");
     }
-    emit("response.completed", {
-      response: {
-        ...base,
-        status: "completed",
-        output: item ? [{ ...item, status: "completed" }] : [],
+    chunk({});
+    response.write(
+      `data: ${JSON.stringify({
+        id: `chatcmpl-${index}`,
+        object: "chat.completion.chunk",
+        created: 1000,
+        model: "fixture",
+        choices: [],
         usage: {
-          input_tokens: 10,
-          output_tokens: 5,
-          input_tokens_details: { cached_tokens: 0 },
-          output_tokens_details: { reasoning_tokens: 0 },
+          prompt_tokens: 10,
+          completion_tokens: 5,
+          total_tokens: 15,
         },
-      },
-    });
+      })}\n\n`,
+    );
     response.end("data: [DONE]\n\n");
   });
   server.listen(0, "127.0.0.1");

@@ -36,6 +36,7 @@ export async function browserFixture(
     publicUrl: "http://localhost:8787",
     dataDir: directory,
     agentBackend: "sample",
+    intelligenceUserId: "local-user",
     intelligenceApiKey: "test-project-key-never-sent",
     googleRedirectUri: "http://localhost:8787/api/google/callback",
     allowedOrigins: [],
