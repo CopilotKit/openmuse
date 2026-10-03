@@ -141,7 +141,16 @@ export class ConversationAgent extends AbstractAgent {
     const browserAbort = new AbortController();
     const browserConfigured = !!(this.config.workerUrl && this.config.workerToken);
     const tools = [
-      ...computerTools(this.service.computer, this.service.files, this.owner, `chat:${requestKey}`),
+      ...computerTools(
+        this.service.computer,
+        this.service.files,
+        this.owner,
+        `chat:${requestKey}`,
+        {
+          signal: browserAbort.signal,
+          before: async () => browserAbort.signal.throwIfAborted(),
+        },
+      ),
       ...(jev
         ? [
             presentChoicesTool(
