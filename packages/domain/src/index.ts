@@ -38,6 +38,15 @@ export interface CalendarEvent {
   description: string;
   attendees: string[];
 }
+export const calendarRangeSchema = z
+  .object({
+    timeMin: z.iso.datetime({ offset: true }),
+    timeMax: z.iso.datetime({ offset: true }),
+  })
+  .refine(({ timeMin, timeMax }) => {
+    const duration = Date.parse(timeMax) - Date.parse(timeMin);
+    return duration > 0 && duration <= 366 * 86400000;
+  }, "Calendar range must end after it starts and span at most 366 days");
 export interface Artifact {
   id: string;
   name: string;
