@@ -1248,10 +1248,16 @@ export class AgentService {
    * running is work the user never asked for, and `docs/SYNC.md` settles that the
    * agent suggests and the user confirms. Promotion is the explicit next step.
    */
-  async createNote(owner: string, raw: unknown) {
+  async createNote(owner: string, raw: unknown, idempotencyKey?: string) {
     const input = noteInputSchema.parse(raw);
+    const id = idempotencyKey ? hash(`note:${idempotencyKey}`) : randomUUID();
+    // `insertIfAbsent` rather than `put`: a replayed tool call must return the
+    // note that already exists, not overwrite it — and `put` would also bump
+    // `updatedAt`, making a retry look like a user edit.
+    const existing = await this.db.get<Note>(owner, "notes", id);
+    if (existing) return existing;
     const note: Note = {
-      id: randomUUID(),
+      id,
       title: input.title ?? "",
       body: input.body,
       status: "open",
@@ -1259,7 +1265,7 @@ export class AgentService {
       updatedAt: date(),
     };
     await this.ensure(owner);
-    return this.db.put(owner, "notes", note);
+    return (await this.db.insertIfAbsent(owner, "notes", note)) ?? note;
   }
 
   /**

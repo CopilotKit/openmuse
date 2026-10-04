@@ -14,6 +14,7 @@ import {
   goalInputSchema,
   monitorInputSchema,
 } from "../../../../packages/domain/src/agent.ts";
+import { noteInputSchema } from "../../../../packages/domain/src/note.ts";
 import type { DeviceInfo } from "../auth.ts";
 import { computerInstructions, computerTools } from "../computer-tools.ts";
 import type { Config } from "../config.ts";
@@ -290,6 +291,16 @@ export class ConversationAgent extends AbstractAgent {
           "Schedule a public-page condition check requested by the user. The worker records observations and notifies on meaningful changes. Price checks detect explicit USD or dollar prices; no booking is performed.",
         parameters: monitorInputSchema,
         execute: async (args) => this.service.createMonitor(this.owner, args, key("watch", args)),
+      }),
+      defineTool({
+        name: "capture_note",
+        description:
+          "Save something the user asked you to remember or jot down, without starting any work. Use this when they mention something worth keeping but have NOT asked you to do it now. It becomes a task only if they later confirm it on the device. Use delegate_task instead when they actually want the work done.",
+        parameters: noteInputSchema,
+        // Keyed like every other write tool here, so a retried or replayed tool
+        // call within one request converges on a single note instead of saving
+        // the same thought twice. `createNote` mints a random id without a key.
+        execute: async (args) => this.service.createNote(this.owner, args, key("note", args)),
       }),
       defineTool({
         name: "remember_fact",

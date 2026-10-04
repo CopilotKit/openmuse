@@ -19,7 +19,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO" || exit 1
 BACKUP=/tmp/om-notes-backup
 rm -rf "$BACKUP" && mkdir -p "$BACKUP"
-FILES=(packages/domain/src/note.ts apps/server/src/engine/service.ts apps/server/src/engine/routes.ts apps/mobile/src/notes-model.ts)
+FILES=(packages/domain/src/note.ts apps/server/src/engine/service.ts apps/server/src/engine/routes.ts apps/server/src/engine/conversation.ts apps/mobile/src/notes-model.ts)
 for f in "${FILES[@]}"; do cp "$f" "$BACKUP/$(basename "$f")"; done
 restore() { for f in "${FILES[@]}"; do cp "$BACKUP/$(basename "$f")" "$f"; done; }
 trap restore EXIT
@@ -69,7 +69,7 @@ PY
   fi
   local out
   out=$(npx tsx --test packages/domain/test/note.test.ts tests/notes-api.test.ts \
-          apps/mobile/test/notes-model.test.ts 2>&1)
+          tests/conversation-notes.test.ts apps/mobile/test/notes-model.test.ts 2>&1)
   # Inspect each suite's OWN `# fail` line rather than collapsing the output with
   # `tr`. Collapsing is the bug this harness exists to catch elsewhere: it hides
   # a non-zero counter behind a mangled line, so `grep '^# fail 0'` misses and
@@ -122,6 +122,16 @@ mutate "the client offers promotion on an empty note" \
   apps/mobile/src/notes-model.ts \
   'if (!note.promotable || !note.body.trim()) return null;' \
   'if (!note.promotable) return null;'
+
+mutate "capture_note drops its idempotency key" \
+  apps/server/src/engine/conversation.ts \
+  'this.service.createNote(this.owner, args, key("note", args))' \
+  'this.service.createNote(this.owner, args)'
+
+mutate "capture_note writes the note with put, overwriting a replay" \
+  apps/server/src/engine/service.ts \
+  'return (await this.db.insertIfAbsent(owner, "notes", note)) ?? note;' \
+  'return this.db.put(owner, "notes", note);'
 
 mutate "promoted notes are sorted first instead of last" \
   apps/mobile/src/notes-model.ts \

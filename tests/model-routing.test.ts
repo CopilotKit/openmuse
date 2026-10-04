@@ -197,16 +197,17 @@ const allToolNames = [
   "create_goal",
   "watch_page",
   "remember_fact",
+  "capture_note",
 ];
 
 test("filterTools: undefined allowlist returns all tools", () => {
   const tools = allToolNames.map(makeTool);
-  assert.equal(filterTools(tools, undefined).length, 17);
+  assert.equal(filterTools(tools, undefined).length, 18);
 });
 
 test("filterTools: empty allowlist returns all tools", () => {
   const tools = allToolNames.map(makeTool);
-  assert.equal(filterTools(tools, []).length, 17);
+  assert.equal(filterTools(tools, []).length, 18);
 });
 
 test("filterTools: exact names keep only matched tools", () => {

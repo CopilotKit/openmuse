@@ -37,7 +37,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-local-test}
       - CPK_INTELLIGENCE_API_KEY=${CPK_INTELLIGENCE_API_KEY:-}
       - STREAM_POLL_INTERVAL_MS=${STREAM_POLL_INTERVAL_MS:-2000}
-      - CHAT_TOOL_ALLOWLIST=${CHAT_TOOL_ALLOWLIST:-delegate_task,agent_status,remember_fact,search_mail,read_mail_thread,open_workspace}
+      - CHAT_TOOL_ALLOWLIST=${CHAT_TOOL_ALLOWLIST:-delegate_task,agent_status,remember_fact,capture_note,search_mail,read_mail_thread,open_workspace}
       - COMPUTER_ENABLED=${COMPUTER_ENABLED:-false}
       - COMPUTER_IMAGE=${COMPUTER_IMAGE:-openmuse-computer:local}
     ports:
