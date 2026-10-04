@@ -27,6 +27,8 @@ export class TaskWorker {
   private ticking = false;
   private stopping = false;
   private active = new Map<string, AbortController>();
+  /** Every run dispatched by the current tick, so it can await and await-settle. */
+  private inFlight = new Set<Promise<void>>();
   lastTickAt?: string | undefined;
   constructor(
     private readonly db: Store,
@@ -35,11 +37,16 @@ export class TaskWorker {
       now?: () => number;
       leaseMs?: number;
       pollMs?: number;
+      /** Concurrent runs per tick. Default 3, the batch size this worker always used. */
+      maxConcurrency?: number;
       settled?: (owner: string, task: AgentTask) => Promise<void>;
     } = {},
   ) {}
   private now() {
     return this.options.now?.() ?? Date.now();
+  }
+  private capacity() {
+    return Math.max(1, this.options.maxConcurrency ?? 3);
   }
   get running() {
     return Boolean(this.timer);
@@ -58,7 +65,11 @@ export class TaskWorker {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     for (const controller of this.active.values()) controller.abort();
-    while (this.active.size > 0 || this.ticking) await new Promise((r) => setTimeout(r, 10));
+    // Wait on inFlight as well as active: a run removes itself from `active`
+    // before its promise settles, so waiting on `active` alone can let stop()
+    // return while a refill is still about to be admitted.
+    while (this.active.size > 0 || this.inFlight.size > 0 || this.ticking)
+      await new Promise((r) => setTimeout(r, 10));
   }
   abort(taskId: string) {
     this.active.get(taskId)?.abort();
@@ -123,9 +134,39 @@ export class TaskWorker {
           else if (action && ["awaiting_review", "executing"].includes(action.status)) continue;
         }
         eligible.push(record);
-        if (eligible.length === 3) break;
       }
-      await Promise.all(eligible.map(({ owner, value }) => this.run(owner, value)));
+      // Pool, not batch. Awaiting `Promise.all` here would hold `ticking` for the
+      // whole duration of the slowest run, so every later poll returns early and
+      // throughput is capped at `capacity` per poll interval no matter how quickly
+      // tasks actually finish. Instead admit up to `capacity`, then admit one more
+      // each time a run settles — a 10-task backlog with 2 slots runs 2, then keeps
+      // 2 in flight for the whole batch instead of trickling 3 per second.
+      const queue = [...eligible];
+      // Loop until both the queue is drained *and* every run this tick started
+      // has settled. Returning as soon as the queue empties would abandon runs
+      // still in flight, and callers legitimately treat a resolved tick as "the
+      // work I dispatched is done" — service shutdown and the tests both close
+      // the store right after awaiting it.
+      while (queue.length > 0 || this.inFlight.size > 0) {
+        // Capacity is measured on `inFlight`, not `active`: `run()` only adds to
+        // `active` after its lease compare-and-swap resolves, so checking
+        // `active` here would see zero and admit the entire queue in one go.
+        // `inFlight` is updated synchronously at admission.
+        while (queue.length > 0 && this.inFlight.size < this.capacity()) {
+          const next = queue.shift();
+          if (!next) break;
+          const running = this.run(next.owner, next.value);
+          this.inFlight.add(running);
+          // Bookkeeping on the same promise callers await. `run` never rejects,
+          // so this cannot surface as an unhandled rejection.
+          void running.finally(() => this.inFlight.delete(running));
+        }
+        if (this.inFlight.size === 0) break;
+        // Whichever run finishes first frees a slot; never wait on the slowest.
+        await Promise.race([...this.inFlight]);
+        // biome-ignore lint/suspicious/noUnnecessaryConditions: mutable instance flag set by stop() across this await
+        if (this.stopping) break;
+      }
     } finally {
       this.ticking = false;
     }

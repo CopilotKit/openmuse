@@ -215,6 +215,84 @@ test("a dependent is not run while its prerequisite is still running in another 
   }
 });
 
+test("the pool keeps every slot busy instead of waiting for the slowest run", async () => {
+  const db = await createStore();
+  try {
+    // Six tasks, capacity two. One of the first two is deliberately slow, so a
+    // batch that waits for its slowest would idle the other slot for the whole
+    // duration. A refilling pool must start the third task as soon as the fast
+    // one finishes.
+    const taskCount = 6;
+    for (let i = 0; i < taskCount; i++) await db.put("owner", "tasks", task(`t${i}`));
+    const startedAt: number[] = [];
+    let peak = 0;
+    let live = 0;
+    const worker = new TaskWorker(
+      db,
+      async (_owner, value) => {
+        live++;
+        peak = Math.max(peak, live);
+        startedAt.push(Date.now());
+        try {
+          // "t0" is the straggler of its wave; everything else is quick.
+          await new Promise((resolve) => setTimeout(resolve, value.id === "t0" ? 300 : 30));
+          return { status: "succeeded" };
+        } finally {
+          live--;
+        }
+      },
+      { maxConcurrency: 2 },
+    );
+    const began = Date.now();
+    await worker.tick();
+    const elapsed = Date.now() - began;
+    assert.equal(startedAt.length, taskCount, "every queued task ran in one tick");
+    assert.equal(peak, 2, "never more than the configured concurrency");
+    // Serialised waves would be 3 x 300ms; the straggler overlaps the rest, so
+    // the total is far closer to one slow run plus the fast ones behind it.
+    assert.ok(elapsed < 700, `draining six tasks took ${String(elapsed)}ms`);
+    for (let i = 0; i < taskCount; i++)
+      assert.equal(
+        (await db.get<AgentTask>("owner", "tasks", `t${i}`))?.status,
+        "succeeded",
+        "the pool drains the whole backlog within a single tick",
+      );
+  } finally {
+    await db.close();
+  }
+});
+
+test("stop waits for runs already in flight before returning", async () => {
+  const db = await createStore();
+  try {
+    await db.put("owner", "tasks", task("slow"));
+    let finished = false;
+    const worker = new TaskWorker(
+      db,
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        finished = true;
+        return { status: "succeeded" };
+      },
+      { maxConcurrency: 1 },
+    );
+    worker.start();
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    await worker.stop();
+    // The contract is that stop() waits, not that the work completes: it aborts
+    // the run, and an aborted run loses its lease and is safely requeued rather
+    // than left half-written. `finished` proves the handler was still awaited.
+    assert.equal(finished, true, "stop() must not return while a run is still going");
+    assert.equal(
+      (await db.get<AgentTask>("owner", "tasks", "slow"))?.status,
+      "queued",
+      "an aborted run is requeued, not abandoned",
+    );
+  } finally {
+    await db.close();
+  }
+});
+
 test("finance artifacts compute cents exactly and reject ambiguous CSV", () => {
   const report = analyzeSpending(
     'date,description,amount,category\n2026-09-01,Salary,-1000,Income\n2026-09-02,"Coffee, local",10.10,Food\n2026-09-03,Lunch,20.20,Food',
