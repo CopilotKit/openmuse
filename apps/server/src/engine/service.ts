@@ -18,6 +18,7 @@ import {
   type RunEvent,
 } from "../../../../packages/domain/src/agent.ts";
 import {
+  BOARD_STATES,
   type BoardState,
   checkTransition,
   computeEffectiveState,
@@ -205,6 +206,45 @@ export class AgentService {
     );
     if (!moved) throw new AppError("Task changed; refresh and try again", 409);
     return this.boardStateOf(moved);
+  }
+  /**
+   * Every task with the board metadata a column view needs: its state, the
+   * legal moves from that state, and which prerequisites are still unmet.
+   *
+   * The client must not re-implement `ALLOWED_TRANSITIONS` to decide what to
+   * offer — that is the rule the API enforces, and a second copy drifts. One
+   * request also avoids the N+1 an N-task board would otherwise cause.
+   */
+  async board(owner: string) {
+    await this.ensure(owner);
+    const [tasks, prerequisites] = await Promise.all([
+      this.db.list<AgentTask>(owner, "tasks"),
+      this.db.prerequisiteStatuses(owner),
+    ]);
+    return {
+      columns: BOARD_STATES.map((boardState) => ({
+        boardState,
+        tasks: tasks
+          // Rows written before the board layer existed carry no boardState;
+          // they belong in Backlog, which is what boardStateOf already assumes.
+          .filter((task) => (task.boardState ?? DEFAULT_BOARD_STATE) === boardState)
+          .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+          .map((task) => {
+            const unmet = unmetDependencies(prerequisites.get(task.id) ?? []);
+            return {
+              id: task.id,
+              title: task.title,
+              status: task.status,
+              updatedAt: task.updatedAt,
+              allowedTransitions: validTransitionsFor(boardState),
+              dependsOn: unmet.length,
+              // Unmet dependencies are why a task is not running, so the board
+              // says so rather than showing a task that looks merely queued.
+              blocked: unmet.length > 0,
+            };
+          }),
+      })),
+    };
   }
   /** A task's dependency edges, plus which of its prerequisites are unmet. */
   async taskGraph(owner: string, id: string) {

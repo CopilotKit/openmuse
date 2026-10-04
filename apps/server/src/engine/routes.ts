@@ -47,6 +47,7 @@ export function agentRoutes(
       201,
     ),
   );
+  app.get("/tasks/board", async (c) => c.json(await service.board(c.get("owner"))));
   app.get("/tasks/:id", async (c) =>
     c.json(await service.detail(c.get("owner"), c.req.param("id"))),
   );

@@ -3,6 +3,7 @@ import { StatusBar } from "expo-status-bar";
 import {
   Bell,
   Check,
+  KanbanSquare,
   Lightbulb,
   type LucideIcon,
   Menu,
@@ -33,6 +34,7 @@ import {
 } from "./src/agent-ui";
 import { AgentWorkspaceProvider, useAgentWorkspace } from "./src/agent-workspace";
 import { API_URL, createSession, MuseApi } from "./src/api";
+import { BoardScreen } from "./src/board";
 import { ChatScreen, WorkspaceTools } from "./src/chat";
 import { ComputerEntry } from "./src/computer";
 import { ComputerDraftProvider } from "./src/computer-drafts";
@@ -46,12 +48,14 @@ import { type Detail, useWorkspace, WorkspaceContext } from "./src/workspace";
 const nav: { id: Section; label: string; icon: LucideIcon }[] = [
   { id: "chat", label: "Chat", icon: MessageCircle },
   { id: "activity", label: "Activity", icon: PanelsTopLeft },
+  { id: "board", label: "Board", icon: KanbanSquare },
   { id: "ideas", label: "Ideas", icon: Lightbulb },
   { id: "goals", label: "Goals", icon: SquareCheck },
   { id: "apps", label: "Apps", icon: Shapes },
 ];
 const titles: Partial<Record<Section, { title: string; subtitle: string }>> = {
   activity: { title: "Activity", subtitle: "Plans, progress, decisions and results." },
+  board: { title: "Board", subtitle: "Every task, and where it is right now." },
   ideas: { title: "Ideas", subtitle: "Useful next steps, grounded in your world." },
   goals: {
     title: "Goals",
@@ -284,11 +288,13 @@ function WorkspaceShell({
             ? FilesScreen
             : section === "activity"
               ? AgentActivityScreen
-              : section === "ideas"
-                ? IdeasScreen
-                : section === "goals"
-                  ? GoalsScreen
-                  : AppsScreen;
+              : section === "board"
+                ? BoardScreen
+                : section === "ideas"
+                  ? IdeasScreen
+                  : section === "goals"
+                    ? GoalsScreen
+                    : AppsScreen;
   const utility = ["mail", "calendar", "browser", "files"].includes(section);
   return (
     <>

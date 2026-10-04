@@ -269,3 +269,63 @@ test("deleting a task takes its run history with it", async () => {
 test("deleting an unknown task is a 404", async () => {
   await expectStatus("/tasks/does-not-exist", { method: "DELETE" }, 404);
 });
+
+type BoardTask = {
+  id: string;
+  title: string;
+  status: string;
+  blocked: boolean;
+  dependsOn: number;
+  allowedTransitions: BoardState[];
+};
+const board = () =>
+  read<{ columns: { boardState: BoardState; tasks: BoardTask[] }[] }>("/tasks/board");
+
+test("the board lists every column, including empty ones", async () => {
+  const { columns } = await board();
+  assert.deepEqual(
+    columns.map((column) => column.boardState),
+    ["Backlog", "InProgress", "Review", "Blocked", "Done", "Cancelled"],
+    "all six states are present so the columns do not jump around as work moves",
+  );
+});
+
+test("the board offers only the transitions the server will accept", async () => {
+  const id = await newTask("Board move source");
+  await read(`/tasks/${id}/board`, post({ to: "InProgress" }));
+  const { columns } = await board();
+  const column = columns.find((entry) => entry.boardState === "InProgress");
+  const card = column?.tasks.find((task) => task.id === id);
+  assert.ok(card, "the task appears in the column it was moved to");
+  // Mirrors ALLOWED_TRANSITIONS. If this drifts, the UI offers a move that 409s.
+  assert.deepEqual(card.allowedTransitions, ["Review", "Blocked", "Cancelled"]);
+});
+
+test("a task with an unfinished prerequisite is on the board as blocked", async () => {
+  const upstream = await newTask("Still to do");
+  const downstream = await newTask("Waiting upstream");
+  await read(`/tasks/${downstream}/dependencies`, post({ dependsOnId: upstream }), 201);
+  const blocked = (await board()).columns
+    .flatMap((column) => column.tasks)
+    .find((task) => task.id === downstream);
+  assert.ok(blocked);
+  assert.equal(blocked.blocked, true);
+  assert.equal(blocked.dependsOn, 1);
+  const upstreamCard = (await board()).columns
+    .flatMap((column) => column.tasks)
+    .find((task) => task.id === upstream);
+  assert.equal(upstreamCard?.blocked, false, "a task with no prerequisites is not blocked");
+});
+
+test("a task that predates the board layer still appears, in Backlog", async () => {
+  const id = await newTask("Legacy row");
+  const stored = await db.get<AgentTask>(OWNER, "tasks", id);
+  assert.ok(stored);
+  const { boardState: _omitted, ...legacy } = stored;
+  await db.put(OWNER, "tasks", legacy as AgentTask);
+  const backlog = (await board()).columns.find((column) => column.boardState === "Backlog");
+  assert.ok(
+    backlog?.tasks.some((task) => task.id === id),
+    "a row with no boardState falls back to Backlog rather than vanishing",
+  );
+});
