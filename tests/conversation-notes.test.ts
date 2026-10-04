@@ -6,6 +6,7 @@ import { lastValueFrom, toArray } from "rxjs";
 import { createApp } from "../apps/server/src/app.ts";
 import { ConversationAgent } from "../apps/server/src/engine/conversation.ts";
 import type { Note } from "../packages/domain/src/agent.ts";
+import type { SyncChange } from "../packages/domain/src/sync.ts";
 import { browserFixture } from "./helpers/browser.ts";
 import { modelFixture } from "./helpers/model.ts";
 
@@ -37,6 +38,26 @@ async function chatFixture(t: TestContext, body: string) {
     ...server,
     conversation: new ConversationAgent(config, server.agent, "local-user"),
   };
+}
+
+/**
+ * How many changes the note plane has announced in the sync log.
+ *
+ * Reads the log rather than counting notes: both `put` and `insertIfAbsent`
+ * leave exactly one row, so the note count cannot tell a clean replay from a
+ * noisy one.
+ */
+async function noteChangeCount(fixture: {
+  db: {
+    changesSince: (
+      owner: string,
+      since: number,
+    ) => Promise<{ changes: SyncChange[]; cursor: number; hasMore: boolean }>;
+  };
+}) {
+  const page = await fixture.db.changesSince("local-user", 0);
+  assert.equal(page.hasMore, false, "the whole log should fit in one page");
+  return page.changes.filter((change) => change.kind === "notes").length;
 }
 
 async function runChat(t: TestContext, model: string) {
@@ -118,6 +139,21 @@ test("a replayed capture_note call saves one note, not two", async (t) => {
   const notes = await fixture.db.list<Note>("local-user", "notes");
   assert.equal(notes.length, 1);
   assert.equal(notes[0]?.body, "Only save this once.");
+});
+
+test("a replayed capture_note does not announce a change to devices", async (t) => {
+  // The distinction that actually separates `insertIfAbsent` from `put`: `put`
+  // appends a change unconditionally, so a replay would tell every device to
+  // re-fetch a note that did not change. Asserting the note COUNT cannot catch
+  // this — both paths leave exactly one row. Asserting the log can.
+  const fixture = await chatFixture(t, "Do not re-announce me.");
+  const input = runInput("Jot this down.");
+  await lastValueFrom(fixture.conversation.run(input).pipe(toArray()));
+  const afterFirst = await noteChangeCount(fixture);
+  await lastValueFrom(fixture.conversation.run(input).pipe(toArray()));
+
+  assert.equal(afterFirst, 1, "the first capture should announce exactly one change");
+  assert.equal(await noteChangeCount(fixture), afterFirst);
 });
 
 test("a note captured without a title is still readable on the device", async (t) => {

@@ -1251,11 +1251,15 @@ export class AgentService {
   async createNote(owner: string, raw: unknown, idempotencyKey?: string) {
     const input = noteInputSchema.parse(raw);
     const id = idempotencyKey ? hash(`note:${idempotencyKey}`) : randomUUID();
-    // `insertIfAbsent` rather than `put`: a replayed tool call must return the
-    // note that already exists, not overwrite it — and `put` would also bump
-    // `updatedAt`, making a retry look like a user edit.
-    const existing = await this.db.get<Note>(owner, "notes", id);
-    if (existing) return existing;
+    // `insertIfAbsent` rather than `put`, and with NO preceding read: the insert
+    // itself is the check. A prior `get` would make the replay path return early
+    // and leave `put` unreachable there — two guards for one fact, which reads
+    // as defence in depth but is really one dead branch.
+    //
+    // The reason this matters is the change log. `put` appends a `put` change
+    // unconditionally, so a replayed tool call announces a note that did not
+    // change and every device re-fetches it for nothing. `insertIfAbsent` logs
+    // only a real insert.
     const note: Note = {
       id,
       title: input.title ?? "",
@@ -1265,7 +1269,10 @@ export class AgentService {
       updatedAt: date(),
     };
     await this.ensure(owner);
-    return (await this.db.insertIfAbsent(owner, "notes", note)) ?? note;
+    const inserted = await this.db.insertIfAbsent(owner, "notes", note);
+    // Falling back to the local value when the conflict path returns null: the
+    // row exists, we simply did not write it, and the caller wants the note.
+    return inserted ?? note;
   }
 
   /**

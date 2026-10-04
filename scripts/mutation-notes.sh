@@ -128,10 +128,10 @@ mutate "capture_note drops its idempotency key" \
   'this.service.createNote(this.owner, args, key("note", args))' \
   'this.service.createNote(this.owner, args)'
 
-mutate "capture_note writes the note with put, overwriting a replay" \
+mutate "capture_note writes the note with put, announcing a phantom change" \
   apps/server/src/engine/service.ts \
-  'return (await this.db.insertIfAbsent(owner, "notes", note)) ?? note;' \
-  'return this.db.put(owner, "notes", note);'
+  'const inserted = await this.db.insertIfAbsent(owner, "notes", note);' \
+  'const inserted = await this.db.put(owner, "notes", note);'
 
 mutate "promoted notes are sorted first instead of last" \
   apps/mobile/src/notes-model.ts \
