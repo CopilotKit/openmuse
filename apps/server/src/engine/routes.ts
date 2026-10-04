@@ -49,6 +49,21 @@ export function agentRoutes(
   );
   app.get("/tasks/board", async (c) => c.json(await service.board(c.get("owner"))));
   app.get("/devices", async (c) => c.json(await service.devices(c.get("owner"))));
+  /**
+   * Pull the change log. `since` is the cursor the device last saw; omit it (or
+   * pass 0) for a full rebuild. Returns the highest seq actually delivered so a
+   * device that falls behind pages forward rather than skipping what it missed.
+   */
+  app.get("/sync", async (c) => {
+    const since = Number(c.req.query("since") ?? "0");
+    if (!Number.isInteger(since) || since < 0)
+      throw new AppError("`since` must be a non-negative integer cursor", 400);
+    const limitRaw = c.req.query("limit");
+    const limit = limitRaw === undefined ? 500 : Number(limitRaw);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000)
+      throw new AppError("`limit` must be between 1 and 1000", 400);
+    return c.json(await service.db.changesSince(c.get("owner"), since, limit));
+  });
   app.post("/devices", async (c) => {
     const device = c.get("device");
     if (!device.deviceId) throw new AppError("Sign in with a device ID to register a device", 400);

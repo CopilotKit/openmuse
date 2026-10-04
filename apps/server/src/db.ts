@@ -8,6 +8,7 @@ import {
   normalizeCapabilities,
 } from "../../../packages/domain/src/capabilities.ts";
 import type { Prerequisite } from "../../../packages/domain/src/scheduler.ts";
+import type { SyncChange } from "../../../packages/domain/src/sync.ts";
 import { backgroundFailure } from "./log.ts";
 
 /** `data` is the records table's payload; the index signature covers the real tables. */
@@ -42,6 +43,12 @@ export class Store {
       "INSERT INTO records(owner,kind,id,data) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(owner,kind,id) DO UPDATE SET data=excluded.data,updated_at=now()",
       [owner, kind, value.id, JSON.stringify(value)],
     );
+    await this.appendChange(owner, {
+      kind,
+      recordId: value.id,
+      op: "put",
+      data: value as Record<string, unknown>,
+    });
     return value;
   }
   async remove(owner: string, kind: string, id: string): Promise<void> {
@@ -50,6 +57,10 @@ export class Store {
       kind,
       id,
     ]);
+    // Logged so a device's projection drops the record rather than keeping a
+    // tombstone forever. Omitting this is how "deleted on the server" turns into
+    // "reappears on the phone every time it re-syncs".
+    await this.appendChange(owner, { kind, recordId: id, op: "delete" });
   }
   /**
    * Empty every table. Only for test fixtures and destructive maintenance —
@@ -59,6 +70,11 @@ export class Store {
   async clearAll(): Promise<void> {
     await this.db.query("DELETE FROM records");
     await this.db.query("DELETE FROM task_dependencies");
+    // The log is reset too, deliberately: this is a destructive wipe used by test
+    // fixtures, so replaying it would resurrect deleted rows on any device. The
+    // cursor table is cleared rather than advanced so a device rebuilds from 0.
+    await this.db.query("DELETE FROM changes");
+    await this.db.query("DELETE FROM change_seq");
   }
   async compareAndSwap<T>(
     owner: string,
@@ -82,7 +98,18 @@ export class Store {
       "INSERT INTO records(owner,kind,id,data) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT DO NOTHING RETURNING data",
       [owner, kind, value.id, JSON.stringify(value)],
     );
-    return (result.rows[0]?.data as T | undefined) ?? null;
+    const inserted = (result.rows[0]?.data as T | undefined) ?? null;
+    // Only log an actual insert. Logging the `DO NOTHING` path would announce a
+    // change for a row that did not change, making devices re-fetch state that
+    // never moved.
+    if (inserted)
+      await this.appendChange(owner, {
+        kind,
+        recordId: value.id,
+        op: "put",
+        data: inserted as Record<string, unknown>,
+      });
+    return inserted;
   }
   async scan<T>(kind: string): Promise<{ owner: string; value: T }[]> {
     const result = await this.db.query(
@@ -275,6 +302,97 @@ export class Store {
   async removeDevice(owner: string, id: string): Promise<void> {
     await this.db.query("DELETE FROM devices WHERE owner=$1 AND id=$2", [owner, id]);
   }
+
+  /**
+   * Append to the sync log and return the assigned sequence number.
+   *
+   * The counter is bumped with `RETURNING` inside a single statement rather than
+   * a read-then-write, so two concurrent writers cannot be handed the same seq.
+   * That collision would silently drop one of them from a device's cursor.
+   */
+  async appendChange(
+    owner: string,
+    change: {
+      kind: string;
+      recordId: string;
+      op: "put" | "delete";
+      data?: Record<string, unknown> | undefined;
+      deviceId?: string | undefined;
+    },
+  ): Promise<number> {
+    const bumped = await this.db.query<{ next_seq: string }>(
+      `INSERT INTO change_seq(owner,next_seq) VALUES($1,2)
+       ON CONFLICT(owner) DO UPDATE SET next_seq=change_seq.next_seq+1
+       RETURNING next_seq-1 AS next_seq`,
+      [owner],
+    );
+    const seq = Number(bumped.rows[0]?.next_seq ?? "0");
+    await this.db.query(
+      "INSERT INTO changes(owner,seq,kind,record_id,op,data,device_id) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)",
+      [
+        owner,
+        seq,
+        change.kind,
+        change.recordId,
+        change.op,
+        change.data === undefined ? null : JSON.stringify(change.data),
+        change.deviceId ?? null,
+      ],
+    );
+    return seq;
+  }
+
+  /**
+   * Everything after the caller's cursor, oldest first, capped at `limit`.
+   *
+   * The returned `cursor` is the highest seq actually delivered — not the
+   * newest in the table — so a device that falls behind pages forward instead of
+   * skipping the batch it never received.
+   */
+  async changesSince(
+    owner: string,
+    since: number,
+    limit = 500,
+  ): Promise<{ changes: SyncChange[]; cursor: number; hasMore: boolean }> {
+    const result = await this.db.query<{
+      seq: string;
+      kind: string;
+      record_id: string;
+      op: string;
+      data?: Record<string, unknown> | null;
+      device_id?: string | null;
+      at: string;
+    }>(
+      `SELECT seq, kind, record_id, op, data, device_id,
+         to_char(at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS at
+       FROM changes WHERE owner=$1 AND seq > $2 ORDER BY seq ASC LIMIT $3`,
+      [owner, since, limit + 1],
+    );
+    const rows = result.rows.slice(0, limit);
+    const changes = rows.map((row) => ({
+      seq: Number(row.seq),
+      kind: row.kind,
+      recordId: row.record_id,
+      op: row.op as "put" | "delete",
+      data: row.data ?? undefined,
+      deviceId: row.device_id ?? undefined,
+      at: row.at,
+    }));
+    return {
+      changes,
+      cursor: changes.at(-1)?.seq ?? since,
+      hasMore: result.rows.length > limit,
+    };
+  }
+
+  /** The newest seq for an owner, or 0 when the log is empty. */
+  async latestSeq(owner: string): Promise<number> {
+    const result = await this.db.query<{ seq: string | null }>(
+      "SELECT max(seq) AS seq FROM changes WHERE owner=$1",
+      [owner],
+    );
+    return Number(result.rows[0]?.seq ?? "0");
+  }
 }
 
 /** Idle clients can be disconnected by a database restart; without a listener pg's `error` event crashes the process. */
@@ -345,5 +463,30 @@ async function migrateSchema(database: Database): Promise<void> {
   );
   await database.query(
     "CREATE INDEX IF NOT EXISTS devices_recent ON devices(owner,last_seen_at DESC)",
+  );
+  // The sync log. Append-only, ordered by a monotonic per-owner seq; a device
+  // stores the highest seq it has seen and pulls everything after it. This is
+  // Telegram's model: the server owns an ordered log, device state is a
+  // rebuildable projection of it.
+  //
+  // `seq` comes from a per-owner counter rather than a global sequence so two
+  // owners cannot interleave into each other's cursors, and so a cursor stays
+  // meaningful if rows are ever pruned per owner.
+  await database.query(
+    `CREATE TABLE IF NOT EXISTS change_seq(
+       owner text PRIMARY KEY,
+       next_seq bigint NOT NULL DEFAULT 1)`,
+  );
+  await database.query(
+    `CREATE TABLE IF NOT EXISTS changes(
+       owner text NOT NULL,
+       seq bigint NOT NULL,
+       kind text NOT NULL,
+       record_id text NOT NULL,
+       op text NOT NULL,
+       data jsonb,
+       device_id text,
+       at timestamptz NOT NULL DEFAULT now(),
+       PRIMARY KEY(owner,seq))`,
   );
 }
