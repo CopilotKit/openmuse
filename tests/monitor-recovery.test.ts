@@ -135,6 +135,54 @@ test("a page change stays alertable when the task outcome is lost after the base
   assert.match(found[0].body, /One table at 7 pm/);
 });
 
+for (const scenario of [
+  {
+    condition: "contains",
+    value: "available now",
+    pages: ["Sold out", "Available now", "Sold out", "Available now"],
+    expectedAlerts: 2,
+  },
+  {
+    condition: "price_below",
+    value: "50",
+    pages: ["Price: $80", "Price: $40", "Price: $80", "Price: $40"],
+    expectedAlerts: 2,
+  },
+]) {
+  test(`${scenario.condition} alerts on recurring changes while deduplicating outcome replay`, async () => {
+    const monitor = await read<Monitor>(
+      "/monitors",
+      {
+        title: `Recurring ${scenario.condition}`,
+        url: "sample://availability",
+        condition: scenario.condition,
+        value: scenario.value,
+        intervalMinutes: 1,
+      },
+      201,
+    );
+    const alerts = async () =>
+      (await read<AgentNotification[]>("/notifications")).filter(
+        (item) => item.taskId === monitor.taskId,
+      );
+    for (const text of scenario.pages) {
+      await read("/sample-page", { text });
+      await read(`/monitors/${monitor.id}/control`, { action: "check" });
+      await server.agent.worker.tick();
+      // A restart can publish the same saved notice again; that is not a new alert.
+      await maintain();
+      await maintain();
+    }
+    assert.equal((await alerts()).length, scenario.expectedAlerts);
+    for (let i = 0; i < 2; i++) {
+      await read(`/monitors/${monitor.id}/control`, { action: "check" });
+      await server.agent.worker.tick();
+    }
+    assert.equal((await alerts()).length, scenario.expectedAlerts, "unchanged pages stay quiet");
+    await read(`/monitors/${monitor.id}/control`, { action: "stop" });
+  });
+}
+
 test("resuming a monitor fails without activating it when the task transition does not commit", async () => {
   await read("/sample-page", { text: "No tables available" });
   const monitor = await createMonitor("Resume availability");
