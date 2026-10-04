@@ -172,6 +172,51 @@ flowchart TD
 | `packages/backends` | Optional OpenBot HTTP adapter and its identity boundary. |
 | `tests` | Workflow, runtime, persistence, provider-contract, and authorization tests. |
 
+### Two planes: central control, device execution
+
+The server owns task *identity*; the device owns task *execution*. A task's state is
+portable (it lives in jsonb and syncs through `/api/agent/sync`), but its
+*capabilities* are not — a role needing a shell cannot run on a phone with no shell.
+
+A device **pulls** work rather than being pushed it, because the phone may be asleep
+when a task is created:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/agent/device/claim` | Take the next eligible task, with a lease. |
+| `POST /api/agent/device/heartbeat` | Extend the lease this device holds. |
+| `POST /api/agent/device/report` | Close the task with an outcome. |
+
+Two gates decide whether a claim succeeds, and both are enforced in the capability
+contract (`packages/domain/src/capabilities.ts`) rather than in individual routes:
+
+- **Pairing.** A paired device may claim and execute; an unpaired device may only
+  read. A device cannot pair itself — minting a code requires an already-paired
+  caller — and the first device bootstraps with the account access key, once only.
+- **Form factor.** A handheld never takes `destructive` work (send, delete, pay),
+  *even if it declares the capability*. The approval gate is the only thing between an
+  irreversible action and the world, and a phone left face up on a desk makes that
+  approval a single stray thumb. Both gates fail closed: an undeclared or
+  unrecognised form factor is treated as a handheld.
+
+Claims are leases, and an expired lease **returns the task to the queue**. That is the
+property that makes the two-plane split safe: a phone that dies mid-task does not
+strand the work, because every other device would otherwise decline a dead lease
+forever. The claim itself is a compare-and-swap, so two devices racing for one task
+produce exactly one winner.
+
+Execution is foreground-while-open, plus background continuation for work the user
+started on that device. Nothing depends on a device staying awake: losing a lease just
+requeues the task. See [docs/SYNC.md](docs/SYNC.md) for the full reasoning.
+
+### On-device models: `meaty`
+
+`meaty` is a **separate project** that provides on-device LLMs to other applications.
+OpenMuse does not embed it and has no code-level dependency on it. OpenMuse consumes
+on-device models the way it consumes any other model source — as a
+provider — and falls back per the model policy when no local endpoint is present.
+The contract OpenMuse expects is an OpenAI-compatible endpoint on the device.
+
 ### OpenBot compatibility
 
 OpenMuse's native client and personal-agent workflows are independent of OpenBot. The disabled OpenBot adapter is pinned and contract-tested against upstream interfaces. Live user/session bridging, routine mapping, and computer backend wiring remain future work. OpenBot's Intelligence runtime is not a raw AG-UI endpoint. [Integration contract](docs/OPENBOT-INTEGRATION.md).

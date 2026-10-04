@@ -10,6 +10,16 @@ The release is a personal-agent alpha: delegate a job, inspect its plan, supply 
 - Persistent Chromium sessions, public-page reading, screenshots, manual interaction, and PDF downloads.
 - A private Docker Linux computer with bounded terminal commands, persistent workspace files, a text editor, PDF import/export, command receipts, and stop/restart recovery. Terminal networking is disabled.
 - PDF viewing and supported form filling, reviewed Gmail/Calendar adapters, CSV spending artifacts, identity, and editable memory.
+- Outbound URL guard and a host-execution gate keyed by surface, with DNS re-validated per request.
+- Device pairing: a device may read without pairing, but claiming, heartbeating, or reporting work all require it. A device cannot pair itself; the first device bootstraps with the account access key, once only.
+- Device work loop (server side): `claim`/`heartbeat`/`report` with compare-and-swap leases, so a lost lease returns the task to the queue instead of stranding it. Two devices racing for one task produce exactly one winner.
+- Form factor as a capability-contract rule: a handheld never takes `destructive` work, even when it declares the capability, and an undeclared or unrecognised form factor is treated as a handheld.
+
+## Device plane: the remaining half
+
+- [ ] **Mobile client for the device work loop.** The server can claim, lease, and report on a device's behalf, but nothing in `apps/mobile` drives those endpoints yet, so a phone cannot actually run work. Foreground-while-open, plus background continuation for tasks the user started on that device.
+- [ ] Device-side pairing UX: read the code from an already-paired machine and redeem it on the phone.
+- [ ] On-device model provider. `meaty` is a **separate project** providing on-device LLMs to other applications; OpenMuse consumes it as one optional model source and must fall back cleanly when its endpoint is absent. Not a code-level dependency.
 
 ## Integration acceptance next
 

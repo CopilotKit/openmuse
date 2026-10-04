@@ -28,6 +28,39 @@ the phone controls the phone — which is the stated requirement.
 A device may run a local LLM or an API model. The choice is per-device configuration,
 not per-task.
 
+**Shipped (server side, 2026-10-04).** Three endpoints make the pull real:
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/agent/device/claim` | Take the next eligible task. Returns `{task, lease}` or `{task: null, reason: "no-eligible-work"}`. |
+| `POST /api/agent/device/heartbeat` | Extend the lease this device holds. |
+| `POST /api/agent/device/report` | Close the task with `succeeded`/`failed` and a result. |
+
+A claim is a **lease, not a status flip**, and that distinction is the whole design:
+
+- The claim is a compare-and-swap on the task's prior status, so two devices racing
+  for one task produce exactly one winner. The loser is told there is nothing rather
+  than handed work another device already holds.
+- Leases expire, and an expired lease **recovers** the task to `queued`. Without that,
+  a phone that loses network mid-task leaves work `running` forever: every other
+  device declines a dead lease, so the work is **lost, not delayed**. Recovery runs
+  before each claim.
+- The lease id is the **bearer capability** — CSPRNG-generated, returned only to the
+  winner, and never sent to the server again by anyone else. Heartbeat and report
+  match on it, so there is deliberately no second factor: possession of the lease is
+  possession of the task.
+- A malformed lease timestamp reads as **dead**, never live. Failing the other way
+  would strand a task permanently behind an unparseable date.
+
+Selection (`packages/domain/src/device-work.ts`) is deterministic by task id, so two
+devices agree on which task is first and work does not migrate between identically
+capable machines on clock skew. The `deviceId` on a task is a *preference*, not an
+entitlement: work never sits idle waiting for a creator that is unpaired or gone.
+
+**Not yet built:** the mobile client. Nothing on-device drives claim/heartbeat/report
+yet, so a phone cannot actually run work. Until it does, this section describes the
+server contract the client will meet.
+
 ## Placement: a running task stays put
 
 If a task is running on a device, it **continues on that device**. Handoff is never
@@ -73,6 +106,67 @@ This also keeps a **role** distinct from a **device**: a role says what work it 
 done, a device says what it can do here, and pairing says whether it is trusted to
 act at all.
 
+**Shipped (2026-10-04)** as `packages/domain/src/pairing.ts`. The lifted state machine
+is intact; the server-specific adaptation adds three rules the lift did not have:
+
+- **A device cannot pair itself.** Minting a code requires an already-paired caller,
+  so approval authority never sits with the device asking to be approved.
+- **The first device bootstraps with the account access key**
+  (`POST /pairing/bootstrap`), and only the first — after that it returns 409.
+  Otherwise holding the access key would silently add devices forever, and the OTP
+  path would be optional. `Auth.verifyAccessKey` is deliberately separate from
+  `Auth.session`: this checks a key without minting another session for it.
+- **`deviceId` always comes from the session, never the request body**, so one device
+  cannot redeem a code minted for another.
+
+Pairing is **account-wide**, which is a real constraint on tests: a suite sharing one
+owner can bootstrap exactly one device, and later devices must redeem a code the
+first one minted.
+
+The gate covers **every write** in the device loop, not just claiming — an unpaired
+device may not heartbeat or report either. A gate on `/device/claim` alone would still
+let an unpaired device keep a lease alive and close a task it was never allowed to
+start.
+
+## Devices: a phone never takes destructive work
+
+Decided 2026-10-04. A task requiring `destructive` (send, delete, pay) is **never**
+claimed by a handheld — a phone or tablet — *even when the device advertises the
+capability*.
+
+Rationale: the approval gate is the only thing between an irreversible action and the
+world, and the realistic failure is a phone left face up on a desk. "The user approved
+this earlier" does not survive the task being queued, migrated, and run minutes later
+on a device they are not looking at. One thumb on an unattended phone is a far weaker
+consent check than one click on a laptop the user is sitting at.
+
+This is why **form factor is a field on the device, not a capability**. A phone that
+declares `screen` is still a phone; a client that can claim a capability can also claim
+a form factor, and only one of those two claims is worth believing. So the restriction
+follows the device.
+
+Enforcement lives in one function, `formFactorAllows` in
+`packages/domain/src/capabilities.ts`, applied at all three decision points —
+`claimEligibility`, `selectDeviceForTask`, and `checkMigration`. It has to be in the
+capability contract rather than in each route, because a rule applied per-route is one
+omission away from not existing. (`runnable-on` consults `checkMigration` too; without
+it the UI would keep offering a phone for work it can never claim.)
+
+The whole rule fails **closed**:
+
+- An undeclared form factor is `handheld`. Rows written before the column existed
+  cannot claim destructive work by omission.
+- An unrecognised form factor degrades to `handheld` rather than being rejected. A 422
+  would be friendlier, but the route is the only caller, so validating there would
+  leave the normalisation in `Store.registerDevice` as dead code — asserted directly
+  at the store layer instead.
+- The refusal **outranks the capability gap** in the reported reason: a phone that is
+  missing nothing must never be told it lacks something, or the operator chases the
+  wrong problem.
+
+Note the boundary: the form-factor rule *removes* a restriction, it never grants a
+capability. A desktop still has to offer `destructive` to take destructive work.
+
 ## Platform: Android primary, iOS deferred
 
 Decided 2026-10-04. **Android is the primary target; iOS is a deferred sprint.**
@@ -85,6 +179,21 @@ rather than only while the app is open.
 
 Deferred means deferred: do not add iOS-specific workarounds, and do not let an
 iOS constraint drive a design decision.
+
+**Refined 2026-10-04.** The execution model is now explicit, and it is narrower than
+"continuous":
+
+- **Foreground while the app is open.** The agent loop claims and runs work whenever
+  the app is in the foreground. This is the default and the only guaranteed path.
+- **Background only for work the user started on that device.** A task the user
+  explicitly launches on a phone may continue while the app is backgrounded.
+
+What this buys, stated honestly: the lease and heartbeat protocol already tolerate a
+device going away — an expired lease requeues the task rather than stranding it — so
+background execution is an *optimisation*, never a correctness requirement. There is no
+work that can only ever be done on a device that will be backgrounded, and nothing in
+the server assumes a device stays awake. A phone that is suspended mid-task simply
+loses its lease and the task returns to the queue for another device.
 
 ## On-device AI: `meaty` is the reference, not yet a provider
 
