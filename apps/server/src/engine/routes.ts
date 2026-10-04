@@ -48,6 +48,30 @@ export function agentRoutes(
     ),
   );
   app.get("/tasks/board", async (c) => c.json(await service.board(c.get("owner"))));
+  app.get("/devices", async (c) => c.json(await service.devices(c.get("owner"))));
+  app.post("/devices", async (c) => {
+    const device = c.get("device");
+    if (!device.deviceId) throw new AppError("Sign in with a device ID to register a device", 400);
+    const body = z
+      .object({
+        name: z.string().min(1).max(120),
+        capabilities: z.array(z.string().min(1)).max(32),
+      })
+      .parse(await c.req.json());
+    return c.json(await service.registerDevice(c.get("owner"), device.deviceId, body), 201);
+  });
+  app.delete("/devices/:id", async (c) => {
+    await service.db.removeDevice(c.get("owner"), c.req.param("id"));
+    return c.json({ ok: true });
+  });
+  /**
+   * Where can this task run? The answer drives cross-device resumption, so it
+   * names the missing capabilities and the viable alternatives rather than
+   * just refusing — "this device lacks shell" is actionable, "no" is not.
+   */
+  app.get("/tasks/:id/runnable-on", async (c) =>
+    c.json(await service.runnableOn(c.get("owner"), c.req.param("id"))),
+  );
   app.get("/tasks/:id", async (c) =>
     c.json(await service.detail(c.get("owner"), c.req.param("id"))),
   );

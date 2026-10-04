@@ -26,6 +26,13 @@ import {
   type TransitionRejection,
   validTransitionsFor,
 } from "../../../../packages/domain/src/board.ts";
+import {
+  type Capability,
+  checkMigration,
+  isDeviceAvailable,
+  normalizeCapabilities,
+  selectDeviceForTask,
+} from "../../../../packages/domain/src/capabilities.ts";
 import type {
   ActionProposal,
   Artifact,
@@ -208,6 +215,64 @@ export class AgentService {
     return this.boardStateOf(moved);
   }
   /**
+   * Devices in the per-device execution plane, with liveness resolved.
+   */
+  async devices(owner: string) {
+    const now = Date.now();
+    const list = await this.db.listDevices(owner);
+    return list.map((device) => ({ ...device, available: isDeviceAvailable(device, now) }));
+  }
+
+  /**
+   * Register this device and declare what it can do.
+   *
+   * Capabilities the caller claims but this build does not know are dropped by
+   * `registerDevice` and reported back as `unsupported`, so a client can detect
+   * that it is newer than the server rather than silently getting a weaker
+   * device than it asked for.
+   */
+  async registerDevice(
+    owner: string,
+    deviceId: string,
+    body: { name: string; capabilities: string[] },
+  ) {
+    const device = await this.db.registerDevice(owner, deviceId, body.name, body.capabilities);
+    const unsupported = body.capabilities.filter((c) => !device.capabilities.includes(c as never));
+    return { ...device, unsupported };
+  }
+
+  /**
+   * Which devices can run this task, and why not the others.
+   *
+   * A task's requirements come from its `requiredCapabilities`, defaulting to
+   * the identity requirement implied by the device that created it: work started
+   * on a desktop and handed to a phone should be refused unless it genuinely
+   * needs nothing device-local.
+   */
+  async runnableOn(owner: string, taskId: string) {
+    const task = await this.db.get<AgentTask>(owner, "tasks", taskId);
+    if (!task) throw new AppError("Task not found", 404);
+    const required = requiredCapabilitiesOf(task);
+    const now = Date.now();
+    const all = await this.db.listDevices(owner);
+    const selected = selectDeviceForTask(required, all, now, task.deviceId);
+    return {
+      taskId,
+      required,
+      selected: selected ? { id: selected.id, name: selected.name } : null,
+      devices: all.map((device) => {
+        const check = checkMigration(device, required, now, all);
+        return {
+          id: device.id,
+          name: device.name,
+          ok: check.ok,
+          ...(check.ok ? {} : { reason: check.reason, missing: check.gap.missing }),
+        };
+      }),
+    };
+  }
+
+  /**
    * Every task with the board metadata a column view needs: its state, the
    * legal moves from that state, and which prerequisites are still unmet.
    *
@@ -341,6 +406,11 @@ export class AgentService {
       prompt: input.prompt,
       kind: input.kind,
       goalId: input.goalId,
+      // Where the task would prefer to run. Execution is per-device, so this is a
+      // hint for the scheduler, not ownership: the task travels with the user and
+      // `runnableOn` decides where it can actually go.
+      deviceId: device?.deviceId ?? undefined,
+      requiredCapabilities: input.requiredCapabilities ?? [],
       status: held ? "paused" : "queued",
       boardState: DEFAULT_BOARD_STATE,
       plan: titles.map((title, i) => ({ id: String(i), title, status: "pending" })),
@@ -1266,4 +1336,16 @@ export class AgentService {
     const matches = [...text.matchAll(/(?:\$|USD\s*)(\d+(?:,\d{3})*(?:\.\d{1,2})?)/g)];
     return matches.some((m) => Number(m[1]!.replace(/,/g, "")) < threshold);
   }
+}
+
+/**
+ * What a task needs from a device to run.
+ *
+ * Read through `normalizeCapabilities` because this comes out of a jsonb column
+ * that predates the capability layer and can hold anything: a row written by an
+ * older build, or hand-edited. Unknown entries are dropped rather than honoured,
+ * so a task can never claim a capability this build cannot actually satisfy.
+ */
+export function requiredCapabilitiesOf(task: AgentTask): Capability[] {
+  return normalizeCapabilities(task.requiredCapabilities ?? []);
 }

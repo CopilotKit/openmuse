@@ -216,4 +216,14 @@ export {
   isTerminal as isBoardTerminal,
   validTransitionsFor as validBoardTransitionsFor,
 } from "./board.ts";
+export type { Capability, CapabilityGap, DeviceProfile } from "./capabilities.ts";
+export {
+  CAPABILITIES,
+  checkMigration,
+  DEVICE_STALE_MS,
+  isCapability,
+  isDeviceAvailable,
+  normalizeCapabilities,
+  selectDeviceForTask,
+} from "./capabilities.ts";
 export type { ComputerCommand, ComputerDirectory, ComputerSnapshot } from "./computer.ts";

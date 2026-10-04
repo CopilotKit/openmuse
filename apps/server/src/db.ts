@@ -3,6 +3,10 @@ import { dirname } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
 import type { TaskStatus } from "../../../packages/domain/src/agent.ts";
+import {
+  type DeviceProfile,
+  normalizeCapabilities,
+} from "../../../packages/domain/src/capabilities.ts";
 import type { Prerequisite } from "../../../packages/domain/src/scheduler.ts";
 import { backgroundFailure } from "./log.ts";
 
@@ -217,6 +221,60 @@ export class Store {
     }
     return edges;
   }
+
+  /**
+   * Register or refresh a device in the per-device execution plane.
+   *
+   * Capabilities are normalized on the way in: a client claiming a capability we
+   * do not know about is filtered out rather than stored, so a task can never be
+   * dispatched against a capability this build cannot honour.
+   */
+  async registerDevice(
+    owner: string,
+    id: string,
+    name: string,
+    capabilities: readonly string[],
+  ): Promise<DeviceProfile> {
+    const normalized = normalizeCapabilities(capabilities);
+    const result = await this.db.query<DeviceProfile>(
+      `INSERT INTO devices(owner,id,name,capabilities,last_seen_at)
+       VALUES($1,$2,$3,$4::jsonb,now())
+       ON CONFLICT(owner,id) DO UPDATE
+         SET name=EXCLUDED.name, capabilities=EXCLUDED.capabilities, last_seen_at=now()
+       RETURNING id, name, capabilities,
+         to_char(last_seen_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastSeenAt"`,
+      [owner, id, name, JSON.stringify(normalized)],
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("device registration returned no row");
+    return { ...row, capabilities: normalizeCapabilities(row.capabilities ?? []) };
+  }
+
+  /** Heartbeat only. Does not change declared capabilities. */
+  async touchDevice(owner: string, id: string): Promise<void> {
+    await this.db.query("UPDATE devices SET last_seen_at=now() WHERE owner=$1 AND id=$2", [
+      owner,
+      id,
+    ]);
+  }
+
+  /** Most-recently-seen first, so callers can stop once they have enough. */
+  async listDevices(owner: string): Promise<DeviceProfile[]> {
+    const result = await this.db.query<DeviceProfile>(
+      `SELECT id, name, capabilities,
+         to_char(last_seen_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastSeenAt"
+       FROM devices WHERE owner=$1 ORDER BY last_seen_at DESC`,
+      [owner],
+    );
+    return result.rows.map((row) => ({
+      ...row,
+      capabilities: normalizeCapabilities(row.capabilities ?? []),
+    }));
+  }
+
+  async removeDevice(owner: string, id: string): Promise<void> {
+    await this.db.query("DELETE FROM devices WHERE owner=$1 AND id=$2", [owner, id]);
+  }
 }
 
 /** Idle clients can be disconnected by a database restart; without a listener pg's `error` event crashes the process. */
@@ -272,5 +330,20 @@ async function migrateSchema(database: Database): Promise<void> {
   // Reverse lookups ("what unblocks this task?") are the scheduler's hot path.
   await database.query(
     "CREATE INDEX IF NOT EXISTS task_dependencies_dependant ON task_dependencies(owner,depends_on_id)",
+  );
+  // Devices for the per-device execution plane. A table rather than jsonb rows
+  // because the scheduler's hot path is "which devices are live right now",
+  // which needs a query across owners' devices ordered by heartbeat.
+  await database.query(
+    `CREATE TABLE IF NOT EXISTS devices(
+       owner text NOT NULL,
+       id text NOT NULL,
+       name text NOT NULL,
+       capabilities jsonb NOT NULL DEFAULT '[]'::jsonb,
+       last_seen_at timestamptz NOT NULL DEFAULT now(),
+       PRIMARY KEY(owner,id))`,
+  );
+  await database.query(
+    "CREATE INDEX IF NOT EXISTS devices_recent ON devices(owner,last_seen_at DESC)",
   );
 }

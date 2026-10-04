@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { BoardState } from "./board.ts";
+import { CAPABILITIES, type Capability } from "./capabilities.ts";
 
 /** Board state for a task that has never been moved on the board. */
 export const DEFAULT_BOARD_STATE: BoardState = "Backlog";
@@ -47,6 +48,20 @@ export interface AgentTask {
   state: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  /**
+   * The device that created this task. Execution is per-device, so this is the
+   * scheduler's preferred home for the task, not an ownership marker: the task
+   * travels with the user and may be resumed elsewhere if a capable device is
+   * live (see `capabilities.ts`).
+   */
+  deviceId?: string | undefined;
+  /**
+   * What this task needs from a device to run. Optional so tasks written before
+   * the capability layer existed still load; an absent value means "needs
+   * nothing device-local", which is deliberately the most permissive reading —
+   * refusing those would strand every existing task.
+   */
+  requiredCapabilities?: Capability[] | undefined;
   nextRunAt?: string | undefined;
   leaseId?: string | null | undefined;
   leaseUntil?: string | null | undefined;
@@ -172,6 +187,16 @@ export const createTaskSchema = z.object({
   kind: z.enum(["agent", "document", "monitor", "finance", "plan"]).default("agent"),
   goalId: z.string().optional(),
   input: z.record(z.string(), z.unknown()).default({}),
+  /**
+   * What the task needs from a device to run it. Validated against the known
+   * capability vocabulary rather than taken on trust: a task must not be able to
+   * declare a requirement the server cannot evaluate.
+   */
+  requiredCapabilities: z
+    .array(z.enum(CAPABILITIES))
+    .max(CAPABILITIES.length)
+    .default([])
+    .optional(),
 });
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 export const monitorInputSchema = z
