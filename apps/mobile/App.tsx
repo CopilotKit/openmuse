@@ -8,6 +8,7 @@ import {
   type LucideIcon,
   Menu,
   MessageCircle,
+  NotebookPen,
   PanelsTopLeft,
   Shapes,
   SquareCheck,
@@ -40,6 +41,7 @@ import { ComputerEntry } from "./src/computer";
 import { ComputerDraftProvider } from "./src/computer-drafts";
 import { Details } from "./src/details";
 import { deviceInfo } from "./src/device";
+import { NotesScreen } from "./src/notes";
 import { BrowserScreen, CalendarScreen, FilesScreen, MailScreen } from "./src/screens";
 import { ThreadsProvider, ThreadsSheet, useMuseThread } from "./src/threads";
 import { Button, Card, colors, ErrorNotice, Field, IconButton, Mascot, s } from "./src/ui";
@@ -48,6 +50,7 @@ import { type Detail, useWorkspace, WorkspaceContext } from "./src/workspace";
 const nav: { id: Section; label: string; icon: LucideIcon }[] = [
   { id: "chat", label: "Chat", icon: MessageCircle },
   { id: "activity", label: "Activity", icon: PanelsTopLeft },
+  { id: "notes", label: "Notes", icon: NotebookPen },
   { id: "board", label: "Board", icon: KanbanSquare },
   { id: "ideas", label: "Ideas", icon: Lightbulb },
   { id: "goals", label: "Goals", icon: SquareCheck },
@@ -56,6 +59,10 @@ const nav: { id: Section; label: string; icon: LucideIcon }[] = [
 const titles: Partial<Record<Section, { title: string; subtitle: string }>> = {
   activity: { title: "Activity", subtitle: "Plans, progress, decisions and results." },
   board: { title: "Board", subtitle: "Every task, and where it is right now." },
+  notes: {
+    title: "Notes",
+    subtitle: "Things worth holding onto. Promote the ones that should become work.",
+  },
   ideas: { title: "Ideas", subtitle: "Useful next steps, grounded in your world." },
   goals: {
     title: "Goals",
@@ -290,11 +297,13 @@ function WorkspaceShell({
               ? AgentActivityScreen
               : section === "board"
                 ? BoardScreen
-                : section === "ideas"
-                  ? IdeasScreen
-                  : section === "goals"
-                    ? GoalsScreen
-                    : AppsScreen;
+                : section === "notes"
+                  ? NotesScreen
+                  : section === "ideas"
+                    ? IdeasScreen
+                    : section === "goals"
+                      ? GoalsScreen
+                      : AppsScreen;
   const utility = ["mail", "calendar", "browser", "files"].includes(section);
   return (
     <>

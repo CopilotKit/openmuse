@@ -10,6 +10,7 @@ export type Section =
   | "files"
   | "activity"
   | "board"
+  | "notes"
   | "connections"
   | "ideas"
   | "goals"
@@ -227,5 +228,23 @@ export {
   selectDeviceForTask,
 } from "./capabilities.ts";
 export type { ComputerCommand, ComputerDirectory, ComputerSnapshot } from "./computer.ts";
+export type {
+  Note,
+  NoteStatus,
+  PromotionAcceptance,
+  PromotionDecision,
+  PromotionRejection,
+} from "./note.ts";
+export {
+  checkPromotion,
+  isNoteStatus,
+  isPromotable,
+  NOTE_BODY_MAX,
+  NOTE_STATUSES,
+  NOTE_TITLE_MAX,
+  noteInputSchema,
+  promotionTaskId,
+  promotionTitle,
+} from "./note.ts";
 export type { StepPlacement, SyncChange, SyncPage } from "./sync.ts";
 export { applyChange, changeKey, foldChanges } from "./sync.ts";

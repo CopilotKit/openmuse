@@ -15,6 +15,17 @@ The release is a personal-agent alpha: delegate a job, inspect its plan, supply 
 - Device work loop (server side): `claim`/`heartbeat`/`report` with compare-and-swap leases, so a lost lease returns the task to the queue instead of stranding it. Two devices racing for one task produce exactly one winner.
 - Form factor as a capability-contract rule: a handheld never takes `destructive` work, even when it declares the capability, and an undeclared or unrecognised form factor is treated as a handheld.
 
+## Notes: capture and promotion
+
+- [x] **Notes, with deliberate promotion into tasks** (shipped 2026-10-04). Vision
+  requirement 1 asks for notes and tasks in one store, not two systems, so a note
+  is a row in the same `records` table as a task and syncs through the existing
+  change log. Saving a note starts no work; promotion is an explicit request, the
+  task id is derived from the note id so a repeated or concurrent promotion yields
+  one task, and a promoted note cannot be deleted while its task is live. Mobile
+  screen in `apps/mobile/src/notes.tsx`, rules in `notes-model.ts`. See
+  [docs/SYNC.md](docs/SYNC.md).
+
 ## Device plane: the remaining half
 
 - [x] **Mobile client for the device work loop** (shipped 2026-10-04). `apps/mobile/src/device-agent-loop.ts` drives claim/heartbeat/report, aborts and stays silent when it loses a lease, retries through a network blip instead of abandoning live work, and keeps the run in hand going when the app is backgrounded. Off by default; turned on from Apps. Device work runs through the same agent as chat. See [docs/SYNC.md](docs/SYNC.md).

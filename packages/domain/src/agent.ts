@@ -117,6 +117,23 @@ export interface Idea {
   taskId?: string | undefined;
   createdAt: string;
 }
+/**
+ * A captured note.
+ *
+ * Deliberately in `agent.ts` rather than `note.ts`: like `Idea` and `Goal` this
+ * is a persisted record, and the store layer keeps record shapes together. The
+ * promotion *rules* live in `note.ts`, which stays pure.
+ */
+export interface Note {
+  id: string;
+  title: string;
+  body: string;
+  status: "open" | "promoted";
+  /** Set when promoted. Absent while the note is still open. */
+  taskId?: string | undefined;
+  createdAt: string;
+  updatedAt: string;
+}
 export interface AgentMemory {
   id: string;
   text: string;

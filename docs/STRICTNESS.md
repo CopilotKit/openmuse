@@ -43,8 +43,11 @@ re-widens the keys.
 ## Biome
 
 80 rules are pinned to `error` across `correctness`, `suspicious`, `style` and
-`complexity`, well past the `recommended` preset (9 more are explicitly `off`).
-Count them from `biome.json` rather than trusting this line — it has drifted before.
+`complexity`, well past the `recommended` preset; 15 more are explicitly `off`
+(9 of those are the deliberate omissions named below, the rest are
+formatter/layout keys rather than checks). Count them from `biome.json` rather
+than trusting this line — it has drifted before, and the `off` count here was
+wrong until it was recounted.
 Notably:
 `noExplicitAny`, `noShadow`, `noUnnecessaryConditions`, `noEvolvingTypes`,
 noDoubleEquals, `noUnusedTemplateLiteral`, `noUnusedFunctionParameters`,

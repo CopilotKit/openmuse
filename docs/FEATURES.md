@@ -16,6 +16,7 @@ The native and web agent core runs locally. This inventory describes the current
 | Generated results | Plans/reports/comparisons, finance CSV metrics, and scripts in the private Linux workspace | Managed tool installation/versioning and image/audio generation |
 | Notifications | Durable in-app inbox, source-linked change alerts, restart reconciliation | APNs/FCM/device push delivery |
 | Connectors | Searchable capability/status catalogue, Google connection, browser worker | Plaid, health, Instagram, WhatsApp and partner APIs |
+| Notes | Notes in the same store as tasks, with server-resolved promotion, a derived task id so a repeated promotion yields one task, a delete guard on promoted work, and a mobile capture-and-promote screen | Rich text, attachments, search, and note-to-note linking |
 | Device plane | Device registration with capability and form-factor contracts, pairing gate (OTP + access-key bootstrap), `claim`/`heartbeat`/`report` with compare-and-swap leases and lapsed-lease recovery, a phone-side agent loop (off by default, Apps → This device), and pairing from the app on both sides | Push delivery, background continuation when the app is killed, step placement, on-device model execution |
 | OpenBot | Disabled adapter with pinned protocol/identity tests | Live session bridge, routines and computer backend wiring |
 

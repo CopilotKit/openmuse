@@ -10,6 +10,7 @@ import type {
   DeviceModelRouting,
   RunEvent,
 } from "../../../../packages/domain/src/agent.ts";
+import { createTaskSchema } from "../../../../packages/domain/src/agent.ts";
 import type { Auth, DeviceInfo } from "../auth.ts";
 import { AppError } from "../errors.ts";
 import type { AgentService } from "./service.ts";
@@ -379,6 +380,31 @@ export function agentRoutes(
       await service.decideIdea(c.get("owner"), c.req.param("id"), body.action, body.prompt),
     );
   });
+  /**
+   * Notes, and their promotion into tasks.
+   *
+   * The note plane is a read for everyone and a write for the session's device,
+   * like the board: capturing a thought is not executing anything, but promotion
+   * creates real work, so it records which device asked.
+   */
+  app.get("/notes", async (c) => c.json(await service.notes(c.get("owner"))));
+  app.post("/notes", async (c) =>
+    c.json(await service.createNote(c.get("owner"), await c.req.json()), 201),
+  );
+  app.post("/notes/:id/promote", async (c) => {
+    // The kind is taken from the same schema `createTask` validates against,
+    // rather than a second literal list that could drift from it. Promotion may
+    // legitimately be a no-body call, so a missing body is not an error.
+    const body = z
+      .object({ kind: createTaskSchema.shape.kind.optional() })
+      .parse(await c.req.json().catch(() => ({})));
+    return c.json(
+      await service.promoteNote(c.get("owner"), c.req.param("id"), body.kind, c.get("device")),
+    );
+  });
+  app.delete("/notes/:id", async (c) =>
+    c.json(await service.deleteNote(c.get("owner"), c.req.param("id"))),
+  );
   app.post("/memories", async (c) => {
     const body = memorySchema.parse(await c.req.json());
     const memory: AgentMemory = {

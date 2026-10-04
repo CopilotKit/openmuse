@@ -310,6 +310,34 @@ The agent **suggests**; the user **confirms**. Not automatic. A note promoted
 without asking is work the user never asked for, and on a single-user agent that
 is the difference between a tool and a nuisance.
 
+**Shipped 2026-10-04.** `packages/domain/src/note.ts` holds the rules (pure, no
+I/O, like `board.ts`); `Note` is a record in `agent.ts` beside `Idea`.
+
+Vision requirement 1 asks for notes and tasks in **one** store with deliberate
+promotion, not two systems. That is literal here: a note is a row in the same
+owner-scoped `records` table as a task, so it syncs and deletes through the
+existing `changes` log with no new transport. Promotion is an ordinary
+`createTask` call that also records where the note went.
+
+Four decisions, each avoiding work the user did not ask for:
+
+- **Saving a note starts nothing.** There is no path from `POST /notes` to the
+  worker. Promotion is a separate, explicit request.
+- **The promoted task id is derived from the note id**, so a repeated or
+  concurrent promotion converges on one task. This is the note plane's version of
+  the claim CAS, and it is why promotion is safe to retry from two devices.
+- **The note is claimed before the task is created, and the task id is recorded
+  after.** So exactly one caller wins, and a failure between the two leaves the
+  note `open` for a retry rather than `promoted` pointing at work that does not
+  exist.
+- **A promoted note cannot be deleted** while its task is live (409). Deleting
+  the note would not delete the task, so the board would keep a card whose origin
+  the user can no longer see. Cancelling the task is the honest way to retire it.
+
+`promotable` is resolved on the server and shipped to the client, so the phone
+never offers a promotion the API would refuse — and the client does not keep a
+second copy of the rule to drift.
+
 ## Security lift order
 
 SSRF guard and host-exec gate first: they protect execution paths that already

@@ -48,6 +48,13 @@ import type {
   ProposalInput,
 } from "../../../../packages/domain/src/index.ts";
 import {
+  checkPromotion,
+  isPromotable,
+  type Note,
+  noteInputSchema,
+  promotionTaskId,
+} from "../../../../packages/domain/src/note.ts";
+import {
   mintChallenge,
   PAIRING_OTP_LENGTH,
   type PairingState,
@@ -1222,6 +1229,128 @@ export class AgentService {
       { status: "accepted", taskId: task.id },
     );
     return this.db.get<Idea>(owner, "ideas", id);
+  }
+
+  /**
+   * Notes, newest first, with their promotion state resolved.
+   *
+   * `promotable` is computed here rather than left to the client so the UI cannot
+   * offer a promotion the server will refuse — the same rule lives in
+   * `isPromotable`, and this is where it is applied.
+   */
+  async notes(owner: string) {
+    const notes = await this.db.list<Note>(owner, "notes");
+    return notes.map((note) => ({ ...note, promotable: isPromotable(note) }));
+  }
+
+  /**
+   * Capture a note. Deliberately *not* a task: an unconfirmed note that starts
+   * running is work the user never asked for, and `docs/SYNC.md` settles that the
+   * agent suggests and the user confirms. Promotion is the explicit next step.
+   */
+  async createNote(owner: string, raw: unknown) {
+    const input = noteInputSchema.parse(raw);
+    const note: Note = {
+      id: randomUUID(),
+      title: input.title ?? "",
+      body: input.body,
+      status: "open",
+      createdAt: date(),
+      updatedAt: date(),
+    };
+    await this.ensure(owner);
+    return this.db.put(owner, "notes", note);
+  }
+
+  /**
+   * Promote a note into a task, on request and exactly once.
+   *
+   * The ordering matters and is the reason this is not two independent writes:
+   *
+   *   1. Claim the note with a compare-and-swap on `status: "open"`. Two devices
+   *      promoting the same note produce exactly one winner; the loser is told the
+   *      note is already a task rather than creating a second one.
+   *   2. Create the task under the id derived from the note id, so even a
+   *      request that raced past the CAS converges on one task (`createTask`
+   *      returns the existing row for a known idempotency key).
+   *   3. Only then record `taskId` on the note.
+   *
+   * A promotion that fails at step 2 leaves the note `open`, so the user can
+   * retry — the alternative, marking it promoted first, would strand the note in
+   * a state where it claims to be work that does not exist.
+   */
+  async promoteNote(owner: string, id: string, kind?: AgentTask["kind"], device?: DeviceInfo) {
+    const note = await this.db.get<Note>(owner, "notes", id);
+    if (!note) throw new AppError("Note not found", 404);
+    const decision = checkPromotion(note, hash);
+    if (!decision.ok) {
+      // Already-promoted is a success from the caller's point of view — the work
+      // they asked for exists — so it answers 200 with the task rather than a
+      // conflict they can only retry into the same answer.
+      if (decision.reason === "already-promoted")
+        return { note, taskId: this.noteTaskId(note), alreadyPromoted: true };
+      throw new AppError(decision.message, 422);
+    }
+    const claimed = await this.db.compareAndSwap<Note>(
+      owner,
+      "notes",
+      id,
+      { status: "open" },
+      { status: "promoted", updatedAt: date() },
+    );
+    // Lost the race. The winner may not have written `taskId` yet — it sets it
+    // after creating the task — so reading the note here can legitimately find
+    // no id at all. Falling back to the derived one is what makes the loser
+    // agree with the winner instead of reporting `null` for work that exists.
+    if (!claimed) return { note, taskId: this.noteTaskId(note), alreadyPromoted: true };
+    // The idempotency key is `note:<id>`, which `createTask` hashes as
+    // `task:note:<id>` — the exact value `promotionTaskId` derives. That equality
+    // is load-bearing: it is what makes a repeated or concurrent promotion land
+    // on one task instead of minting a fresh id each time.
+    const task = await this.createTask(
+      owner,
+      { title: decision.title, prompt: decision.prompt, kind: kind ?? "agent" },
+      `note:${id}`,
+      false,
+      device,
+    );
+    const settled = await this.db.compareAndSwap<Note>(
+      owner,
+      "notes",
+      id,
+      { status: "promoted" },
+      { taskId: task.id, updatedAt: date() },
+    );
+    return {
+      note: settled ?? { ...claimed, taskId: task.id },
+      taskId: task.id,
+      alreadyPromoted: false,
+    };
+  }
+
+  /**
+   * The task a note became, or null when it is still a note.
+   *
+   * Kept beside `promoteNote` because the promoted id is derivable, and deriving
+   * it is what makes a promotion racing across two devices resolve to one task
+   * even if the note write has not landed yet.
+   */
+  noteTaskId(note: Note): string {
+    return note.taskId ?? promotionTaskId(note.id, hash);
+  }
+
+  /** Delete a note. Refuses while its task is still open — see `deleteNote`. */
+  async deleteNote(owner: string, id: string) {
+    const note = await this.db.get<Note>(owner, "notes", id);
+    if (!note) throw new AppError("Note not found", 404);
+    if (note.status === "promoted") {
+      // Deleting the note would not delete the task, so the board would keep a
+      // card whose origin the user can no longer see. Cancelling is the honest
+      // way to retire promoted work; an unpromoted note has nothing to unwind.
+      throw new AppError("This note is a task now; cancel the task instead.", 409);
+    }
+    await this.db.remove(owner, "notes", id);
+    return { deleted: true };
   }
   async notify(owner: string, title: string, body: string, taskId?: string, key?: string) {
     const value: AgentNotification = {
