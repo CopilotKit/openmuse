@@ -4,9 +4,10 @@ import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
 import { backgroundFailure } from "./log.ts";
 
-type Row = { data: Record<string, unknown> };
+/** `data` is the records table's payload; the index signature covers the real tables. */
+type Row = { data: Record<string, unknown>; [column: string]: unknown };
 interface Database {
-  query: (sql: string, params?: unknown[]) => Promise<{ rows: Row[] }>;
+  query: <T = Row>(sql: string, params?: unknown[]) => Promise<{ rows: T[] }>;
   close: () => Promise<void>;
 }
 
@@ -110,6 +111,73 @@ export class Store {
     );
     return result.rows.length === 1;
   }
+  /** Tasks that `taskId` waits on. */
+  async dependencies(owner: string, taskId: string): Promise<string[]> {
+    const result = await this.db.query<{ depends_on_id: string }>(
+      "SELECT depends_on_id FROM task_dependencies WHERE owner=$1 AND task_id=$2 ORDER BY depends_on_id",
+      [owner, taskId],
+    );
+    return result.rows.map((row) => row.depends_on_id);
+  }
+  /** Tasks waiting on `taskId` — the reverse edge, for "what just unblocked?". */
+  async dependents(owner: string, taskId: string): Promise<string[]> {
+    const result = await this.db.query<{ task_id: string }>(
+      "SELECT task_id FROM task_dependencies WHERE owner=$1 AND depends_on_id=$2 ORDER BY task_id",
+      [owner, taskId],
+    );
+    return result.rows.map((row) => row.task_id);
+  }
+  /**
+   * Declare that `taskId` depends on `dependsOnId`.
+   *
+   * Returns false rather than throwing for the three rejections a caller can
+   * act on: a self-edge, a duplicate edge, and any edge that would close a
+   * cycle. A cycle is unrecoverable once written — the scheduler would simply
+   * never make progress — so it is refused at the only place that can see the
+   * whole graph. Concurrency is safe because two edges that each look acyclic
+   * alone cannot together close a cycle in opposite directions.
+   */
+  async addDependency(owner: string, taskId: string, dependsOnId: string): Promise<boolean> {
+    if (taskId === dependsOnId) return false;
+    const existing = await this.dependencies(owner, taskId);
+    if (existing.includes(dependsOnId)) return false;
+    // A cycle appears if dependsOnId already (transitively) depends on taskId.
+    if (await this.reaches(owner, dependsOnId, taskId)) return false;
+    const result = await this.db.query(
+      "INSERT INTO task_dependencies(owner,task_id,depends_on_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING depends_on_id",
+      [owner, taskId, dependsOnId],
+    );
+    return result.rows.length === 1;
+  }
+  async removeDependency(owner: string, taskId: string, dependsOnId: string): Promise<void> {
+    await this.db.query(
+      "DELETE FROM task_dependencies WHERE owner=$1 AND task_id=$2 AND depends_on_id=$3",
+      [owner, taskId, dependsOnId],
+    );
+  }
+  /** Remove every edge into or out of a task; used when the task itself is deleted. */
+  async removeDependenciesFor(owner: string, taskId: string): Promise<void> {
+    await this.db.query(
+      "DELETE FROM task_dependencies WHERE owner=$1 AND (task_id=$2 OR depends_on_id=$2)",
+      [owner, taskId],
+    );
+  }
+  /** Does `from` transitively depend on `target`? Breadth-first over the edges. */
+  private async reaches(owner: string, from: string, target: string): Promise<boolean> {
+    const seen = new Set<string>([from]);
+    const queue = [from];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (current === undefined) break;
+      for (const next of await this.dependencies(owner, current)) {
+        if (next === target) return true;
+        if (seen.has(next)) continue;
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+    return false;
+  }
 }
 
 /** Idle clients can be disconnected by a database restart; without a listener pg's `error` event crashes the process. */
@@ -125,18 +193,45 @@ export async function createStore(
   let database: Database;
   if (options.databaseUrl) {
     const pool = createPool(options.databaseUrl);
-    database = { query: async (sql, params) => pool.query(sql, params), close: () => pool.end() };
+    database = {
+      query: async <T,>(sql: string, params?: unknown[]) =>
+        (await pool.query(sql, params)) as unknown as { rows: T[] },
+      close: () => pool.end(),
+    };
   } else {
     if (options.dataDir) await mkdir(dirname(options.dataDir), { recursive: true, mode: 0o700 });
     const embedded = new PGlite(options.dataDir);
     await embedded.waitReady;
     database = {
-      query: (sql, params) => embedded.query<Row>(sql, params),
+      query: async <T,>(sql: string, params?: unknown[]) =>
+        (await embedded.query(sql, params)) as { rows: T[] },
       close: () => embedded.close(),
     };
   }
   await database.query(
     "CREATE TABLE IF NOT EXISTS records(owner text NOT NULL,kind text NOT NULL,id text NOT NULL,data jsonb NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(owner,kind,id))",
   );
+  await migrateSchema(database);
   return new Store(database);
+}
+
+/**
+ * Real (non-KV) tables. `records` is a generic jsonb store and cannot express
+ * a join, so anything relational — currently only the task dependency DAG —
+ * gets a table here. Schema is applied idempotently on every open; there are no
+ * migration files yet, so keep additions forward-only and idempotent.
+ */
+async function migrateSchema(database: Database): Promise<void> {
+  await database.query(
+    `CREATE TABLE IF NOT EXISTS task_dependencies(
+       owner text NOT NULL,
+       task_id text NOT NULL,
+       depends_on_id text NOT NULL,
+       created_at timestamptz NOT NULL DEFAULT now(),
+       PRIMARY KEY(owner,task_id,depends_on_id))`,
+  );
+  // Reverse lookups ("what unblocks this task?") are the scheduler's hot path.
+  await database.query(
+    "CREATE INDEX IF NOT EXISTS task_dependencies_dependant ON task_dependencies(owner,depends_on_id)",
+  );
 }
