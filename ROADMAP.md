@@ -17,7 +17,8 @@ The release is a personal-agent alpha: delegate a job, inspect its plan, supply 
 
 ## Device plane: the remaining half
 
-- [ ] **Mobile client for the device work loop.** The server can claim, lease, and report on a device's behalf, but nothing in `apps/mobile` drives those endpoints yet, so a phone cannot actually run work. Foreground-while-open, plus background continuation for tasks the user started on that device.
+- [x] **Mobile client for the device work loop** (shipped 2026-10-04). `apps/mobile/src/device-agent-loop.ts` drives claim/heartbeat/report, aborts and stays silent when it loses a lease, retries through a network blip instead of abandoning live work, and keeps the run in hand going when the app is backgrounded. Off by default; turned on from Apps. Device work runs through the same agent as chat. See [docs/SYNC.md](docs/SYNC.md).
+- [ ] Background continuation when the app is killed, not just backgrounded. The lease already recovers the task, so this is an optimisation rather than a correctness fix.
 - [ ] Device-side pairing UX: read the code from an already-paired machine and redeem it on the phone.
 - [ ] On-device model provider. `meaty` is a **separate project** providing on-device LLMs to other applications; OpenMuse consumes it as one optional model source and must fall back cleanly when its endpoint is absent. Not a code-level dependency.
 

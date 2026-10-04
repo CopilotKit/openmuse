@@ -205,6 +205,13 @@ strand the work, because every other device would otherwise decline a dead lease
 forever. The claim itself is a compare-and-swap, so two devices racing for one task
 produce exactly one winner.
 
+The **client half ships too**: `apps/mobile` drives those three endpoints, so a phone
+can actually run work. It runs one task at a time, aborts and reports *nothing* when it
+loses a lease, treats a refused report as a clean handover rather than a failure, and
+retries through a network blip instead of abandoning live work. It is **off until the
+user turns it on** (Apps → This device), because a phone that silently drained the queue
+on launch would be acting for a user who never asked.
+
 Execution is foreground-while-open, plus background continuation for work the user
 started on that device. Nothing depends on a device staying awake: losing a lease just
 requeues the task. See [docs/SYNC.md](docs/SYNC.md) for the full reasoning.

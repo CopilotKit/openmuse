@@ -57,9 +57,52 @@ devices agree on which task is first and work does not migrate between identical
 capable machines on clock skew. The `deviceId` on a task is a *preference*, not an
 entitlement: work never sits idle waiting for a creator that is unpaired or gone.
 
-**Not yet built:** the mobile client. Nothing on-device drives claim/heartbeat/report
-yet, so a phone cannot actually run work. Until it does, this section describes the
-server contract the client will meet.
+### The client half (shipped 2026-10-04)
+
+`apps/mobile/src/device-agent-loop.ts` holds the device side: claim, heartbeat, run,
+report. The transport, executor, clock and timers are all injected, so the state
+machine is tested with a hand-driven clock rather than a simulator — the behaviour
+worth testing here is all timing.
+
+The rules it enforces, and why each is a rule rather than a detail:
+
+- **One task at a time.** A device-local role needs the screen, the files and the
+  user's attention. Two concurrent runs on one phone is not more throughput, it is
+  two half-attentions.
+- **A lost lease aborts the work, not just the reporting.** `heartbeat` resolving
+  `ok: false` means the server has handed the task to someone else. The executor is
+  aborted and **nothing is reported**: a late report would overwrite the result of
+  whoever took over.
+- **A refused report is not a failed task.** The report is a CAS on a lease that may
+  already have lapsed, and the server answers `409` in exactly that case. It is a
+  clean handover, so it is neither counted as a completion nor shown as an error.
+- **A network error does not abandon live work.** A failed heartbeat is not proof the
+  lease is gone, so the beat is retried on the same schedule. Stopping the heartbeat
+  on the first socket error is precisely the failure that loses the task.
+- **The heartbeat interval is derived from the expiry the server last granted**, not
+  from a constant and not from the window the claim returned. Measuring against the
+  original window would shorten the interval on every pass, because that window only
+  ever shrinks.
+- **Backgrounding stops claiming, not the run in hand.** Work this device started keeps
+  running and keeps heartbeating; only new claims wait for the app to come back.
+
+The loop is **off until the user turns it on** (`Apps → This device`). A phone that
+started claiming tasks the moment the app opened would drain the queue for a user who
+never asked.
+
+A device-claimed task runs through **the same agent the chat screen uses**, in its own
+thread. That is deliberate: if device work ran some other way, "resumable on another
+device" would be a claim about a second private executor rather than about the agent.
+
+Evidence: `apps/mobile/test/device-agent-loop.test.ts` (11 tests, fake clock) and
+`tests/device-loop-e2e.test.ts` (the same client code against a real `createApp`, so
+the paths, payload shapes, pairing gate, lease CAS and the `409` are all proven to
+agree). `scripts/mutation-device-loop.sh` removes each control in turn and requires
+the suite to fail.
+
+Still not built: background continuation when the app is **killed** (only backgrounding
+is handled), on-device model execution, and the pairing UX for entering a code on a
+second phone.
 
 ## Placement: a running task stays put
 
