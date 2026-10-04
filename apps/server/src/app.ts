@@ -75,7 +75,8 @@ export async function createApp(
   app.onError((error, c) => {
     if (error instanceof z.ZodError)
       return c.json({ error: error.issues.map((i) => i.message).join("; ") }, 422);
-    if (error instanceof AppError) return c.json({ error: error.message }, error.status);
+    if (error instanceof AppError)
+      return c.json({ error: error.message, ...error.details }, error.status);
     if (error.name === "PdfError" || error.name === "RecurringEventError")
       return c.json({ error: error.message }, 422);
     if (error instanceof SyntaxError) return c.json({ error: "Invalid request data" }, 400);

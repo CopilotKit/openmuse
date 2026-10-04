@@ -8,6 +8,7 @@ import {
   type AgentTask,
   type AgentWorkspace,
   createTaskSchema,
+  DEFAULT_BOARD_STATE,
   type Evidence,
   type Goal,
   goalInputSchema,
@@ -15,7 +16,16 @@ import {
   type Monitor,
   monitorInputSchema,
   type RunEvent,
+  type TaskStatus,
 } from "../../../../packages/domain/src/agent.ts";
+import {
+  type BoardState,
+  checkTransition,
+  computeEffectiveState,
+  isBoardState,
+  type TransitionRejection,
+  validTransitionsFor,
+} from "../../../../packages/domain/src/board.ts";
 import type {
   ActionProposal,
   Artifact,
@@ -40,6 +50,8 @@ import { LostLeaseError, type TaskContext, TaskWorker } from "./worker.ts";
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const date = () => new Date().toISOString();
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
+/** A dependency is satisfied once it can never run again, successfully or not. */
+const isClosedStatus = (status: TaskStatus) => terminal.has(status);
 export class AgentService {
   readonly worker: TaskWorker;
   private maintenance?: ReturnType<typeof setInterval>;
@@ -160,6 +172,77 @@ export class AgentService {
     if (!task) throw new AppError("Task not found", 404);
     return task;
   }
+  /**
+   * Where the task sits on the board, with the legal next moves. Derived from
+   * `boardState` and never from `status`: an execution state is the worker's
+   * business and tells you nothing about what the user should see.
+   */
+  async boardStateOf(task: AgentTask) {
+    const boardState = task.boardState ?? DEFAULT_BOARD_STATE;
+    return { boardState, allowedTransitions: validTransitionsFor(boardState) };
+  }
+  /**
+   * Move a task on the board. Illegal transitions are a 409 carrying the legal
+   * alternatives, so a client can recover without guessing.
+   */
+  async moveTask(owner: string, id: string, to: BoardState, validationPassed?: boolean) {
+    const task = await this.getTask(owner, id);
+    const from = task.boardState ?? DEFAULT_BOARD_STATE;
+    const check = checkTransition(from, to);
+    if (!check.ok) {
+      const rejection: TransitionRejection = check;
+      throw new AppError(rejection.message, 409, {
+        allowedTransitions: rejection.allowedTransitions,
+      });
+    }
+    // A failed validation gate cannot be outvoted by the requested state.
+    const boardState = computeEffectiveState(to, validationPassed);
+    const moved = await this.db.compareAndSwap<AgentTask>(
+      owner,
+      "tasks",
+      id,
+      { ...(task.boardState === undefined ? {} : { boardState: task.boardState }) },
+      { boardState, updatedAt: date() },
+    );
+    if (!moved) throw new AppError("Task changed; refresh and try again", 409);
+    return this.boardStateOf(moved);
+  }
+  /** A task's dependency edges, plus which of its prerequisites are unmet. */
+  async taskGraph(owner: string, id: string) {
+    const [dependsOn, dependents] = await Promise.all([
+      this.db.dependencies(owner, id),
+      this.db.dependents(owner, id),
+    ]);
+    const unmet: string[] = [];
+    for (const dependencyId of dependsOn) {
+      const dependency = await this.db.get<AgentTask>(owner, "tasks", dependencyId);
+      if (!dependency || !isClosedStatus(dependency.status)) unmet.push(dependencyId);
+    }
+    return { dependsOn, dependents, unmet };
+  }
+  /**
+   * Declare that `id` waits on `dependsOnId`. Both tasks must exist: an edge to
+   * a task that was never created would silently block the dependent forever.
+   */
+  async addTaskDependency(owner: string, id: string, dependsOnId: string) {
+    await this.getTask(owner, id);
+    await this.getTask(owner, dependsOnId);
+    if (!(await this.db.addDependency(owner, id, dependsOnId)))
+      throw new AppError("That dependency already exists or would create a cycle", 409, {
+        dependsOnId,
+      });
+    return this.taskGraph(owner, id);
+  }
+  async removeTaskDependency(owner: string, id: string, dependsOnId: string) {
+    await this.getTask(owner, id);
+    await this.db.removeDependency(owner, id, dependsOnId);
+    return this.taskGraph(owner, id);
+  }
+  /** Board state for a caller-supplied value; throws a 400 on an unknown state. */
+  parseBoardState(value: unknown): BoardState {
+    if (!isBoardState(value)) throw new AppError("Unknown board state", 400);
+    return value;
+  }
   async detail(owner: string, id: string) {
     const task = await this.getTask(owner, id);
     const files = (await this.db.list<Artifact>(owner, "files")).filter((file) =>
@@ -170,6 +253,8 @@ export class AgentService {
     );
     return {
       task,
+      board: await this.boardStateOf(task),
+      dependencies: await this.taskGraph(owner, id),
       files: files.map((file) => this.files.signed(owner, file)),
       browsers: browsers.map((browser) => this.browser.decorate(owner, browser)),
       events: (await this.db.list<RunEvent>(owner, "run-events"))
@@ -219,6 +304,7 @@ export class AgentService {
       kind: input.kind,
       goalId: input.goalId,
       status: held ? "paused" : "queued",
+      boardState: DEFAULT_BOARD_STATE,
       plan: titles.map((title, i) => ({ id: String(i), title, status: "pending" })),
       evidence: [],
       input: input.input,

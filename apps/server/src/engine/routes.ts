@@ -56,6 +56,43 @@ export function agentRoutes(
       .parse(await c.req.json());
     return c.json(await service.control(c.get("owner"), c.req.param("id"), action));
   });
+  app.post("/tasks/:id/board", async (c) => {
+    const body = z
+      .object({
+        to: z.string(),
+        validationPassed: z.boolean().optional(),
+      })
+      .parse(await c.req.json());
+    return c.json(
+      await service.moveTask(
+        c.get("owner"),
+        c.req.param("id"),
+        service.parseBoardState(body.to),
+        body.validationPassed,
+      ),
+    );
+  });
+  app.get("/tasks/:id/dependencies", async (c) =>
+    c.json(await service.taskGraph(c.get("owner"), c.req.param("id"))),
+  );
+  app.post("/tasks/:id/dependencies", async (c) => {
+    const { dependsOnId } = z
+      .object({ dependsOnId: z.string().trim().min(1).max(200) })
+      .parse(await c.req.json());
+    return c.json(
+      await service.addTaskDependency(c.get("owner"), c.req.param("id"), dependsOnId),
+      201,
+    );
+  });
+  app.delete("/tasks/:id/dependencies/:dependsOnId", async (c) =>
+    c.json(
+      await service.removeTaskDependency(
+        c.get("owner"),
+        c.req.param("id"),
+        c.req.param("dependsOnId"),
+      ),
+    ),
+  );
   app.post("/tasks/:id/input", async (c) => {
     const body = z
       .object({
