@@ -31,7 +31,12 @@
  */
 
 import type { TaskStatus } from "./agent.js";
-import { type Capability, type DeviceProfile, isDeviceAvailable } from "./capabilities.js";
+import {
+  type Capability,
+  type DeviceProfile,
+  formFactorAllows,
+  isDeviceAvailable,
+} from "./capabilities.js";
 
 /** A task as the claim logic sees it: the fields that decide eligibility. */
 export interface ClaimableTask {
@@ -59,6 +64,7 @@ export const CLAIM_LEASE_MS = 120_000;
 export type IneligibleReason =
   | "not-paired"
   | "capability-gap"
+  | "handheld-destructive"
   | "stale-device"
   | "not-queued"
   | "leased";
@@ -110,8 +116,15 @@ export function claimEligibility(
       reason: task.status === "running" && leaseIsLive(task, now) ? "leased" : "not-queued",
     };
   if (leaseIsLive(task, now)) return { eligible: false, reason: "leased" };
+  const required = task.requiredCapabilities ?? [];
+  // Form factor outranks capabilities: a handheld is refused destructive work
+  // even when it offers every required capability, so this must be checked
+  // BEFORE the capability gap or the reason would report a shortfall that does
+  // not exist and send the operator chasing the wrong thing.
+  if (!formFactorAllows(device, required))
+    return { eligible: false, reason: "handheld-destructive" };
   const offered = new Set(device.capabilities);
-  const missing = (task.requiredCapabilities ?? []).filter((c) => !offered.has(c));
+  const missing = required.filter((c) => !offered.has(c));
   if (missing.length > 0) return { eligible: false, reason: "capability-gap", missing };
   return { eligible: true };
 }

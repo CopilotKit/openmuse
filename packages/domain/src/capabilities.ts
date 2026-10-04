@@ -57,6 +57,67 @@ export interface DeviceProfile {
   capabilities: Capability[];
   /** ISO timestamp of the last heartbeat; a silent device is not a migratable one. */
   lastSeenAt: string;
+  /**
+   * Physical class. Not a capability: a phone may declare `screen` and still be
+   * a phone, and the destructive-work exclusion below is about holding the
+   * device in one hand while acting irreversibly — something capability
+   * declarations cannot express and a client could therefore lie about.
+   *
+   * Absent means `handheld`, the fail-closed default.
+   */
+  formFactor?: FormFactor | undefined;
+}
+
+/**
+ * What a device physically is.
+ *
+ * `handheld` is a phone or tablet — something acted on with one hand and no
+ * easy abort. `desktop` is a machine with a keyboard and a screen the user is
+ * sitting at.
+ */
+export const FORM_FACTORS = ["handheld", "desktop"] as const;
+
+export type FormFactor = (typeof FORM_FACTORS)[number];
+
+export function isFormFactor(value: unknown): value is FormFactor {
+  return typeof value === "string" && (FORM_FACTORS as readonly string[]).includes(value);
+}
+
+export function normalizeFormFactor(value: unknown): FormFactor | undefined {
+  return isFormFactor(value) ? value : undefined;
+}
+
+/** The form factor a device is treated as when it has not declared one. */
+export const DEFAULT_FORM_FACTOR: FormFactor = "handheld";
+
+export function formFactorOf(device: Pick<DeviceProfile, "formFactor">): FormFactor {
+  return device.formFactor ?? DEFAULT_FORM_FACTOR;
+}
+
+/**
+ * May a device of this form factor take work requiring `required`?
+ *
+ * A HANDHELD may never take destructive work, even when it declares the
+ * capability. The approval gate is what stops a send, delete, or payment from
+ * firing unattended, and the realistic failure is a phone left face-up on a
+ * desk: an approval prompt is one tap away on a device already in the user's
+ * hands, and "the user approved this earlier" does not survive the task being
+ * queued, migrated, and run minutes later on a device they are not looking at.
+ *
+ * The decision therefore lives here, in the capability contract, rather than in
+ * each route — otherwise it is one omission away from not existing.
+ *
+ * This is about the DEVICE, not the capability set: a phone declaring
+ * `destructive` is refused anyway, because a client that can claim a capability
+ * can also claim a form factor, and only one of those two claims is worth
+ * believing.
+ */
+export function formFactorAllows(
+  device: Pick<DeviceProfile, "formFactor">,
+  required: readonly Capability[],
+): boolean {
+  if (formFactorOf(device) === "desktop") return true;
+  return !required.includes("destructive");
 }
 
 /** A device is only a valid target if it has checked in recently. */
@@ -85,11 +146,22 @@ export function checkMigration(
   required: readonly Capability[],
   now: number,
   allDevices: readonly DeviceProfile[] = [],
-): { ok: true } | { ok: false; reason: "stale" | "missing"; gap: CapabilityGap } {
+):
+  | { ok: true }
+  | { ok: false; reason: "stale" | "missing" | "handheld-destructive"; gap: CapabilityGap } {
   if (!isDeviceAvailable(device, now))
     return {
       ok: false,
       reason: "stale",
+      gap: { missing: [], alternatives: viableAlternatives(required, now, allDevices, device.id) },
+    };
+  // Checked before the capability gap for the same reason as in the claim
+  // path: a handheld missing nothing is still refused, and reporting an empty
+  // `missing` list with reason "missing" would be a confusing lie.
+  if (!formFactorAllows(device, required))
+    return {
+      ok: false,
+      reason: "handheld-destructive",
       gap: { missing: [], alternatives: viableAlternatives(required, now, allDevices, device.id) },
     };
 
@@ -130,7 +202,10 @@ export function selectDeviceForTask(
   preferredDeviceId?: string | undefined,
 ): DeviceProfile | null {
   const viable = devices.filter(
-    (d) => isDeviceAvailable(d, now) && required.every((c) => d.capabilities.includes(c)),
+    (d) =>
+      isDeviceAvailable(d, now) &&
+      formFactorAllows(d, required) &&
+      required.every((c) => d.capabilities.includes(c)),
   );
   if (viable.length === 0) return null;
   return viable.find((d) => d.id === preferredDeviceId) ?? viable[0] ?? null;

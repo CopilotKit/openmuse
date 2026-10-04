@@ -181,6 +181,86 @@ describe("lapsedLeaseRecovery", () => {
   });
 });
 
+describe("a handheld never takes destructive work", () => {
+  const phone = { ...shellPhone, formFactor: "handheld" as const };
+  const desktop = { ...shellDesktop, formFactor: "desktop" as const };
+
+  it("refuses destructive work even when the phone DECLARES the capability", () => {
+    // Declaring it must not help. A client that can claim a capability can also
+    // claim a form factor, and only one of those claims is worth believing.
+    const greedy: DeviceProfile = {
+      ...phone,
+      capabilities: ["browser", "destructive", "shell"],
+    };
+    const decision = claimEligibility(
+      task({ requiredCapabilities: ["destructive"] }),
+      greedy,
+      true,
+      NOW,
+    );
+    assert.equal(decision.eligible, false);
+    assert.equal(decision.reason, "handheld-destructive");
+    assert.equal(decision.missing, undefined, "the capability was offered; this is not a gap");
+  });
+
+  it("refuses a phone that never declared a form factor", () => {
+    // Rows written before the column existed must fail closed.
+    const undeclared: DeviceProfile = {
+      id: "old",
+      name: "Old",
+      capabilities: ["destructive"],
+      lastSeenAt: new Date(NOW).toISOString(),
+    };
+    const decision = claimEligibility(
+      task({ requiredCapabilities: ["destructive"] }),
+      undeclared,
+      true,
+      NOW,
+    );
+    assert.equal(decision.eligible, false);
+    assert.equal(decision.reason, "handheld-destructive");
+  });
+
+  it("lets a desktop take the same destructive work", () => {
+    // The desktop must OFFER `destructive`: the form-factor rule only removes a
+    // restriction, it never grants a capability the device does not have.
+    const powerful: DeviceProfile = { ...desktop, capabilities: ["destructive", "shell"] };
+    assert.deepEqual(
+      claimEligibility(task({ requiredCapabilities: ["destructive"] }), powerful, true, NOW),
+      { eligible: true },
+    );
+    // Offering nothing relevant is still a capability gap, form factor aside.
+    const desk = claimEligibility(
+      task({ requiredCapabilities: ["destructive"] }),
+      desktop,
+      true,
+      NOW,
+    );
+    assert.equal(desk.eligible, false);
+    assert.equal(desk.reason, "capability-gap");
+  });
+
+  it("still allows a phone non-destructive work", () => {
+    assert.deepEqual(
+      claimEligibility(task({ requiredCapabilities: ["browser"] }), phone, true, NOW),
+      { eligible: true },
+    );
+  });
+
+  it("reports the form-factor refusal, not a capability gap", () => {
+    // Ordering: a phone that lacks nothing must not be told it is missing a
+    // capability. The message would send the operator to a different machine.
+    const decision = claimEligibility(
+      task({ requiredCapabilities: ["destructive", "shell"] }),
+      phone,
+      true,
+      NOW,
+    );
+    assert.equal(decision.reason, "handheld-destructive");
+    assert.equal(decision.missing, undefined);
+  });
+});
+
 describe("selectClaimableTask", () => {
   it("returns null for an unpaired device even when work is available", () => {
     const work = [task({ id: "task-1" })];
@@ -215,6 +295,16 @@ describe("selectClaimableTask", () => {
     // not sit idle waiting for a machine that will never come back.
     const work = [task({ id: "task-a", deviceId: "dead-laptop", requiredCapabilities: ["shell"] })];
     assert.equal(selectClaimableTask(work, shellDesktop, true, NOW)?.id, "task-a");
+  });
+
+  it("never hands destructive work to a handheld", () => {
+    const phone = { ...shellPhone, formFactor: "handheld" as const };
+    const work = [
+      task({ id: "task-a", requiredCapabilities: ["destructive"] }),
+      task({ id: "task-b", requiredCapabilities: ["browser"] }),
+    ];
+    // Prefers work it may actually run rather than refusing to run anything.
+    assert.equal(selectClaimableTask(work, phone, true, NOW)?.id, "task-b");
   });
 
   it("skips a leased task and takes the next one", () => {

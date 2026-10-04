@@ -71,9 +71,18 @@ async function pairedDevice(
   server: Awaited<ReturnType<typeof createApp>>,
   deviceId: string,
   capabilities: string[],
+  // Defaults to desktop: most tests in this file are about the claim protocol,
+  // and a silent `handheld` default would make them fail for a reason that has
+  // nothing to do with what they assert. Tests about the form-factor rule pass
+  // it explicitly.
+  formFactor: "handheld" | "desktop" = "desktop",
 ) {
   const token = await sessionFor(server, deviceId);
-  const registered = await post(server, token, "/devices", { name: deviceId, capabilities });
+  const registered = await post(server, token, "/devices", {
+    name: deviceId,
+    capabilities,
+    formFactor,
+  });
   assert.equal(registered.status, 201, await registered.clone().text());
   const paired = await post(server, token, "/pairing/bootstrap", { accessKey: "test-key" });
   assert.equal(paired.status, 200, await paired.clone().text());
@@ -86,9 +95,14 @@ async function satelliteDevice(
   bootstrapToken: string,
   deviceId: string,
   capabilities: string[],
+  formFactor?: "handheld" | "desktop",
 ) {
   const token = await sessionFor(server, deviceId);
-  const registered = await post(server, token, "/devices", { name: deviceId, capabilities });
+  const registered = await post(server, token, "/devices", {
+    name: deviceId,
+    capabilities,
+    formFactor,
+  });
   assert.equal(registered.status, 201, await registered.clone().text());
   const minted = await post(server, bootstrapToken, "/pairing/request", { deviceId });
   assert.equal(minted.status, 200, await minted.clone().text());
@@ -375,4 +389,130 @@ test("a device with no eligible work is told so plainly", async (t) => {
   const claim = (await response.json()) as ClaimResponse;
   assert.equal(claim.task, null);
   assert.equal(claim.reason, "no-eligible-work");
+});
+
+test("a phone is refused destructive work end to end, even when it declares it", async (t) => {
+  // The whole point of the rule, over real HTTP with a real registration:
+  // a handheld that advertises `destructive` still never receives the task.
+  const { server } = await fixture(t);
+  const phone = await pairedDevice(
+    server,
+    "phone-greedy",
+    ["browser", "shell", "destructive"],
+    "handheld",
+  );
+  const desk = await satelliteDevice(server, phone, "desk", ["destructive", "shell"], "desktop");
+
+  const created = await post(server, phone, "/tasks", {
+    prompt: "send the invoice",
+    kind: "plan",
+    requiredCapabilities: ["destructive"],
+  });
+  assert.equal(created.status, 201, await created.clone().text());
+  const taskId = ((await created.json()) as { id: string }).id;
+
+  // The phone asks: nothing for you.
+  const phoneClaim = (await (await post(server, phone, "/device/claim")).json()) as ClaimResponse;
+  assert.equal(phoneClaim.task, null, "a handheld must never be handed destructive work");
+
+  // The desktop, which may, is handed it instead.
+  const deskClaim = (await (await post(server, desk, "/device/claim")).json()) as ClaimResponse;
+  assert.equal(deskClaim.task?.id, taskId);
+
+  // And runnable-on says why, in terms the operator can act on.
+  const report = (await (
+    await server.app.request(`/api/agent/tasks/${taskId}/runnable-on`, {
+      headers: { Authorization: `Bearer ${phone}` },
+    })
+  ).json()) as {
+    selected: { id: string } | null;
+    devices: { id: string; ok: boolean; reason?: string }[];
+  };
+  assert.equal(report.selected?.id, "desk");
+  const phoneRow = report.devices.find((d) => d.id === "phone-greedy");
+  assert.equal(phoneRow?.ok, false);
+  assert.equal(phoneRow?.reason, "handheld-destructive");
+});
+
+test("a device that omits its form factor is treated as a handheld", async (t) => {
+  // Registration without `formFactor` — what every pre-existing client does —
+  // must fail closed rather than defaulting to the permissive class.
+  const { server } = await fixture(t);
+  // Registered by hand, with NO formFactor key -- exactly what every client
+  // written before the column existed sends.
+  const token = await sessionFor(server, "no-factor");
+  const registered = await post(server, token, "/devices", {
+    name: "no-factor",
+    capabilities: ["shell", "destructive"],
+  });
+  assert.equal(registered.status, 201, await registered.clone().text());
+  const bootstrap = await post(server, token, "/pairing/bootstrap", { accessKey: "test-key" });
+  assert.equal(bootstrap.status, 200, await bootstrap.clone().text());
+  const pairingResponse = await server.app.request("/api/agent/pairing", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const pairing = (await pairingResponse.json()) as { paired: boolean };
+  assert.equal(pairing.paired, true);
+
+  const created = await post(server, token, "/tasks", {
+    prompt: "delete everything",
+    kind: "plan",
+    requiredCapabilities: ["destructive"],
+  });
+  assert.equal(created.status, 201, await created.clone().text());
+  const taskId = ((await created.json()) as { id: string }).id;
+
+  const claim = (await (await post(server, token, "/device/claim")).json()) as ClaimResponse;
+  assert.equal(claim.task, null, "an undeclared form factor must not grant destructive work");
+  void taskId;
+});
+
+test("a bogus form factor degrades to handheld rather than escaping the rule", async (t) => {
+  // The server's contract is fail-CLOSED, not fail-fast: an unrecognised form
+  // factor must land on the restrictive default. A 422 would be friendlier, but
+  // it would leave the normalisation in `Store.registerDevice` unreachable --
+  // the route would be the only caller and the only thing ever validating.
+  const { server } = await fixture(t);
+  const token = await sessionFor(server, "bogus-factor");
+  const response = await post(server, token, "/devices", {
+    name: "Sneaky",
+    capabilities: ["destructive", "shell"],
+    formFactor: "server-rack",
+  });
+  assert.equal(response.status, 201, await response.clone().text());
+  const device = (await response.json()) as { formFactor?: string };
+  assert.equal(
+    device.formFactor,
+    "handheld",
+    "an unrecognised form factor must degrade to handheld, never to something permissive",
+  );
+
+  // And the consequence is real: the device is refused destructive work.
+  const bootstrap = await post(server, token, "/pairing/bootstrap", { accessKey: "test-key" });
+  assert.equal(bootstrap.status, 200, await bootstrap.clone().text());
+  const created = await post(server, token, "/tasks", {
+    prompt: "wire it up",
+    kind: "plan",
+    requiredCapabilities: ["destructive"],
+  });
+  assert.equal(created.status, 201, await created.clone().text());
+  const claim = (await (await post(server, token, "/device/claim")).json()) as ClaimResponse;
+  assert.equal(claim.task, null);
+});
+
+test("registerDevice normalises a bogus form factor at the store layer", async (t) => {
+  // The defence belongs in the store, not only at the route, so it is asserted
+  // directly: a future caller that skips route validation still cannot grant a
+  // device a permissive form factor.
+  const { db } = await fixture(t);
+  const device = await db.registerDevice(
+    "local-user",
+    "direct-bogus",
+    "Direct",
+    ["destructive"],
+    "cloud-vm",
+  );
+  assert.equal(device.formFactor, "handheld");
+  const listed = await db.listDevices("local-user");
+  assert.equal(listed.find((d) => d.id === "direct-bogus")?.formFactor, "handheld");
 });

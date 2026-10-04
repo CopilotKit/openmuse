@@ -4,8 +4,11 @@ import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
 import type { TaskStatus } from "../../../packages/domain/src/agent.ts";
 import {
+  DEFAULT_FORM_FACTOR,
   type DeviceProfile,
+  formFactorOf,
   normalizeCapabilities,
+  normalizeFormFactor,
 } from "../../../packages/domain/src/capabilities.ts";
 import {
   type PairingState,
@@ -266,20 +269,30 @@ export class Store {
     id: string,
     name: string,
     capabilities: readonly string[],
+    formFactor?: string | undefined,
   ): Promise<DeviceProfile> {
     const normalized = normalizeCapabilities(capabilities);
+    // Unrecognised form factors are DROPPED, not stored verbatim, so a client
+    // cannot invent a third class and escape the destructive-work restriction.
+    // A device that sends nonsense here reads as `handheld` downstream.
+    const factor = normalizeFormFactor(formFactor);
     const result = await this.db.query<DeviceProfile>(
-      `INSERT INTO devices(owner,id,name,capabilities,last_seen_at)
-       VALUES($1,$2,$3,$4::jsonb,now())
+      `INSERT INTO devices(owner,id,name,capabilities,form_factor,last_seen_at)
+       VALUES($1,$2,$3,$4::jsonb,$5,now())
        ON CONFLICT(owner,id) DO UPDATE
-         SET name=EXCLUDED.name, capabilities=EXCLUDED.capabilities, last_seen_at=now()
-       RETURNING id, name, capabilities,
+         SET name=EXCLUDED.name, capabilities=EXCLUDED.capabilities,
+             form_factor=EXCLUDED.form_factor, last_seen_at=now()
+       RETURNING id, name, capabilities, form_factor AS "formFactor",
          to_char(last_seen_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastSeenAt"`,
-      [owner, id, name, JSON.stringify(normalized)],
+      [owner, id, name, JSON.stringify(normalized), factor ?? DEFAULT_FORM_FACTOR],
     );
     const row = result.rows[0];
     if (!row) throw new Error("device registration returned no row");
-    return { ...row, capabilities: normalizeCapabilities(row.capabilities ?? []) };
+    return {
+      ...row,
+      capabilities: normalizeCapabilities(row.capabilities ?? []),
+      formFactor: formFactorOf(row),
+    };
   }
 
   /** Heartbeat only. Does not change declared capabilities. */
@@ -293,7 +306,7 @@ export class Store {
   /** Most-recently-seen first, so callers can stop once they have enough. */
   async listDevices(owner: string): Promise<DeviceProfile[]> {
     const result = await this.db.query<DeviceProfile>(
-      `SELECT id, name, capabilities,
+      `SELECT id, name, capabilities, form_factor AS "formFactor",
          to_char(last_seen_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "lastSeenAt"
        FROM devices WHERE owner=$1 ORDER BY last_seen_at DESC`,
       [owner],
@@ -301,6 +314,10 @@ export class Store {
     return result.rows.map((row) => ({
       ...row,
       capabilities: normalizeCapabilities(row.capabilities ?? []),
+      // Normalised on read as well as on write: a row written before the
+      // column existed has no form factor, and must read as the fail-closed
+      // default rather than as an untyped hole in the contract.
+      formFactor: formFactorOf(row),
     }));
   }
 
@@ -505,6 +522,16 @@ async function migrateSchema(database: Database): Promise<void> {
        capabilities jsonb NOT NULL DEFAULT '[]'::jsonb,
        last_seen_at timestamptz NOT NULL DEFAULT now(),
        PRIMARY KEY(owner,id))`,
+  );
+  // Form factor, added forward-only. A phone and a desktop differ on more than
+  // capabilities: only a handheld is excluded from destructive work, and that
+  // exclusion must not be inferred from the capability list (a phone that
+  // declares `screen` would otherwise slip through). Defaults to 'handheld',
+  // the FAIL-CLOSED choice -- a device that never declared a form factor is
+  // treated as the more restricted kind, so rows written before this column
+  // existed cannot claim destructive work by omission.
+  await database.query(
+    "ALTER TABLE devices ADD COLUMN IF NOT EXISTS form_factor text NOT NULL DEFAULT 'handheld'",
   );
   await database.query(
     "CREATE INDEX IF NOT EXISTS devices_recent ON devices(owner,last_seen_at DESC)",

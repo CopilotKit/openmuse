@@ -251,9 +251,15 @@ export class AgentService {
   async registerDevice(
     owner: string,
     deviceId: string,
-    body: { name: string; capabilities: string[] },
+    body: { name: string; capabilities: string[]; formFactor?: string | undefined },
   ) {
-    const device = await this.db.registerDevice(owner, deviceId, body.name, body.capabilities);
+    const device = await this.db.registerDevice(
+      owner,
+      deviceId,
+      body.name,
+      body.capabilities,
+      body.formFactor,
+    );
     const unsupported = body.capabilities.filter((c) => !device.capabilities.includes(c as never));
     return { ...device, unsupported };
   }

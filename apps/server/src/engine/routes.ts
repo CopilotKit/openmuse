@@ -72,6 +72,15 @@ export function agentRoutes(
       .object({
         name: z.string().min(1).max(120),
         capabilities: z.array(z.string().min(1)).max(32),
+        // Optional so existing clients keep working; when absent the server
+        // treats the device as a handheld, which is the restrictive default.
+        // Deliberately NOT z.enum here: the server's contract is that an
+        // unrecognised form factor degrades to the restrictive default, and
+        // that behaviour has to be exercised. A 422 would be friendlier but
+        // would leave the normalisation in `Store.registerDevice` dead code,
+        // because this is the only caller. `Store` is validated directly in
+        // `tests/device-work-api.test.ts` instead.
+        formFactor: z.string().max(32).optional(),
       })
       .parse(await c.req.json());
     return c.json(await service.registerDevice(c.get("owner"), device.deviceId, body), 201);
