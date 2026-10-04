@@ -16,6 +16,7 @@ The native and web agent core runs locally. This inventory describes the current
 | Generated results | Plans/reports/comparisons, finance CSV metrics, and scripts in the private Linux workspace | Managed tool installation/versioning and image/audio generation |
 | Notifications | Durable in-app inbox, source-linked change alerts, restart reconciliation | APNs/FCM/device push delivery |
 | Connectors | Searchable capability/status catalogue, Google connection, browser worker | Plaid, health, Instagram, WhatsApp and partner APIs |
+| Device plane | Device registration with capability and form-factor contracts, pairing gate (OTP + access-key bootstrap), `claim`/`heartbeat`/`report` with compare-and-swap leases and lapsed-lease recovery, a phone-side agent loop (off by default, Apps → This device), and pairing from the app on both sides | Push delivery, background continuation when the app is killed, step placement, on-device model execution |
 | OpenBot | Disabled adapter with pinned protocol/identity tests | Live session bridge, routines and computer backend wiring |
 
 The Linux computer is disabled until configured on the server and has no network access. It is a single-owner container with a persistent `/workspace`, separate from the browser worker; see [computer setup and limits](COMPUTER.md). It is not a graphical desktop or a full OS VM.

@@ -42,8 +42,10 @@ re-widens the keys.
 
 ## Biome
 
-89 rules are pinned to `error` across `correctness`, `suspicious`, `style` and
-`complexity`, well past the `recommended` preset. Notably:
+80 rules are pinned to `error` across `correctness`, `suspicious`, `style` and
+`complexity`, well past the `recommended` preset (9 more are explicitly `off`).
+Count them from `biome.json` rather than trusting this line — it has drifted before.
+Notably:
 `noExplicitAny`, `noShadow`, `noUnnecessaryConditions`, `noEvolvingTypes`,
 noDoubleEquals, `noUnusedTemplateLiteral`, `noUnusedFunctionParameters`,
 `noImplicitAnyLet`, `noUnassignedVariables`, `useFlatMap`,

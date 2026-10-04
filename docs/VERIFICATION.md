@@ -39,6 +39,7 @@ September 16, 2026 · Capybara and distinct mobile/web demos, following the agen
 | Identity / memory | Edit, persist, and forget paths are tested through the authenticated API. | Single owner per deployment. |
 | Rich Threads | Tests through the real CopilotKit runtime cover authenticated owner scoping, main-thread provisioning/recovery, pagination, rename, archive, rich tool history, provider failures, and server-only key handling. A real CopilotKit Core failure verifies that queued messages pause when the SDK emits an error but resolves its promise. | Intelligence boundary is mocked in tests. Live WebSocket persistence/replay and cross-device acceptance need a project key. |
 | OpenBot | Disabled adapter has protocol and identity contract tests against a pinned public revision, including computer gateway, takeover, refusal, and uncertain outcomes. | No live identity, routine, or computer backend bridge yet. |
+| Device plane | Automated: pairing gate (a device cannot pair itself; first-device bootstrap is once only), compare-and-swap claim races with exactly one winner, lapsed-lease recovery, every write behind the gate, handheld refusal of destructive work, and the phone-side loop driven against a real server for a full claim → run → report round trip, a lost lease reporting nothing, and pairing end to end. Each guard is mutation-verified (`scripts/mutation-device-loop.sh`). The web bundle exports. | **No Android device or emulator run.** Backgrounding is handled; the app being *killed* is not, so a task in flight is recovered by lease expiry rather than continued. |
 | Native / web UI | iPhone simulator and web preview have been exercised. Native acceptance covers actual task/results navigation, PDF pages, browser navigation, Linux Terminal and Files, finance, and goals. | Android is bundle-validated, not installed on a device/emulator. |
 
 ## Release fixes and interface polish
@@ -79,4 +80,6 @@ The [demo guide](DEMO.md) describes the native walkthrough. The CI workflow defi
 
 ## Still outside this release
 
-Health, bank, social, and WhatsApp connectors; a managed generated-tool registry; voice/media generation; automatic purchases/reservations; mobile push; multi-tenant identity; and full desktop VM isolation. See the [roadmap](../ROADMAP.md).
+Health, bank, social, and WhatsApp connectors; a managed generated-tool registry; voice/media generation; automatic purchases/reservations; mobile push; multi-tenant identity; and full desktop VM isolation.
+
+For the device plane specifically: **push delivery, background continuation when the app is killed, step placement, and on-device model execution** are also outside. Devices pull work today. See the [roadmap](../ROADMAP.md) and [docs/SYNC.md](SYNC.md).
