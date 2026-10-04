@@ -12,15 +12,30 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, AppState, Text, View } from "react-native";
 import type { AgentTask } from "../../../packages/domain/src/agent";
 import { runConversationTurn } from "./conversation-run";
+import { deviceId } from "./device";
 import { isForeground, useDeviceLoop } from "./device-loop";
+import {
+  CODE_MAX_LENGTH,
+  canSubmitCode,
+  type DeviceSummary,
+  deviceToApprove,
+  normalizeCode,
+  pairingView,
+} from "./device-pairing";
 import { deviceStatusLine, visibleError } from "./device-work-copy";
-import { Button, Card, Chip, colors, ErrorNotice, SectionHeading, s } from "./ui";
+import { Button, Card, Chip, colors, ErrorNotice, Field, SectionHeading, s } from "./ui";
 import { useWorkspace } from "./workspace";
 
 export function DeviceWorkCard() {
   const { api } = useWorkspace();
   const [paired, setPaired] = useState<boolean>();
+  const [attemptsRemaining, setAttemptsRemaining] = useState(0);
   const [pairingError, setPairingError] = useState("");
+  const [devices, setDevices] = useState<DeviceSummary[]>([]);
+  const [selfId, setSelfId] = useState("");
+  const [code, setCode] = useState("");
+  const [minted, setMinted] = useState("");
+  const [pairingBusy, setPairingBusy] = useState(false);
 
   // Execute the task on the same agent the chat screen uses, in its own thread.
   //
@@ -69,13 +84,60 @@ export function DeviceWorkCard() {
 
   const refreshPairing = useCallback(async () => {
     try {
-      const status = await api.request<{ paired: boolean }>("/api/agent/pairing");
+      const status = await api.request<{
+        paired: boolean;
+        attemptsRemaining: number;
+      }>("/api/agent/pairing");
       setPaired(status.paired);
+      setAttemptsRemaining(status.attemptsRemaining);
       setPairingError("");
+      const list = await api.request<DeviceSummary[]>("/api/agent/devices");
+      setDevices(list);
+      setSelfId(await deviceId());
     } catch (e) {
       setPairingError(e instanceof Error ? e.message : String(e));
     }
   }, [api]);
+
+  /** Redeem a code typed from another device. */
+  const redeem = useCallback(async () => {
+    if (!canSubmitCode(code)) return;
+    setPairingBusy(true);
+    setPairingError("");
+    try {
+      await api.request("/api/agent/pairing/verify", { code: normalizeCode(code) });
+      // The code is single-use, so clearing it stops a second submit from
+      // spending another attempt on a challenge that has already been consumed.
+      setCode("");
+      await refreshPairing();
+    } catch (e) {
+      setPairingError(e instanceof Error ? e.message : String(e));
+      await refreshPairing().catch(() => {});
+    } finally {
+      setPairingBusy(false);
+    }
+  }, [api, code, refreshPairing]);
+
+  /** Mint a code for a device waiting to be approved. */
+  const approve = useCallback(
+    async (target: DeviceSummary) => {
+      setPairingBusy(true);
+      setPairingError("");
+      try {
+        const mintedFor = await api.request<{ code: string }>("/api/agent/pairing/request", {
+          deviceId: target.id,
+        });
+        // Shown once, and deliberately not persisted: the server stores only a
+        // hash, so this response is the sole chance to read it aloud.
+        setMinted(`${target.name}: ${mintedFor.code}`);
+      } catch (e) {
+        setPairingError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setPairingBusy(false);
+      }
+    },
+    [api],
+  );
 
   useEffect(() => {
     void refreshPairing();
@@ -97,6 +159,9 @@ export function DeviceWorkCard() {
   }, [loop, snapshot.enabled]);
 
   const notice = visibleError(snapshot.error);
+  const view = paired === undefined ? null : pairingView({ paired, attemptsRemaining }, devices);
+  const approval = deviceToApprove(selfId, devices);
+
   return (
     <Card style={{ gap: 12 }}>
       <SectionHeading title="This device" />
@@ -104,6 +169,43 @@ export function DeviceWorkCard() {
         When on, this device claims work it can run and keeps holding it while it works. Work
         needing send, delete or pay is never claimed here.
       </Text>
+      {view?.kind === "redeem" && (
+        <>
+          <Text style={s.small}>{view.detail}</Text>
+          <Field
+            label="Pairing code"
+            value={code}
+            onChangeText={setCode}
+            keyboardType="number-pad"
+            maxLength={CODE_MAX_LENGTH}
+            placeholder="123456"
+          />
+          <Button
+            small
+            primary
+            busy={pairingBusy}
+            disabled={!canSubmitCode(code)}
+            onPress={() => void redeem()}
+          >
+            Pair this device
+          </Button>
+        </>
+      )}
+      {view?.kind === "approve" && (
+        <>
+          <Text style={s.small}>{view.detail}</Text>
+          {minted ? (
+            <Text style={[s.text, { fontVariant: ["tabular-nums"] }]}>{minted}</Text>
+          ) : (
+            approval && (
+              <Button small busy={pairingBusy} onPress={() => void approve(approval)}>
+                {`Create a code for ${approval.name}`}
+              </Button>
+            )
+          )}
+        </>
+      )}
+      {view?.kind === "paired" && <Text style={s.small}>{view.detail}</Text>}
       <View style={[s.row, { gap: 8, flexWrap: "wrap" }]}>
         <Chip>{paired === undefined ? "Checking…" : paired ? "Paired" : "Not paired"}</Chip>
         {snapshot.task && <Chip>Working</Chip>}
@@ -114,12 +216,16 @@ export function DeviceWorkCard() {
       {snapshot.phase === "claiming" && <ActivityIndicator color={colors.blueDark} />}
       {notice && <ErrorNotice error={notice} />}
       <ErrorNotice error={pairingError} />
-      <View style={[s.row, { gap: 8 }]}>
-        <Button primary={!snapshot.enabled} onPress={loop.start} disabled={snapshot.enabled}>
-          {snapshot.enabled ? "On" : "Use this device for work"}
-        </Button>
-        {snapshot.enabled && <Button onPress={loop.stop}>Pause</Button>}
-      </View>
+      {/* Not offered while unpaired: claiming is behind the pairing gate, so the
+          button's only possible outcome is an error on every press. */}
+      {paired === true && (
+        <View style={[s.row, { gap: 8 }]}>
+          <Button primary={!snapshot.enabled} onPress={loop.start} disabled={snapshot.enabled}>
+            {snapshot.enabled ? "On" : "Use this device for work"}
+          </Button>
+          {snapshot.enabled && <Button onPress={loop.stop}>Pause</Button>}
+        </View>
+      )}
     </Card>
   );
 }

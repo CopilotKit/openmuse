@@ -20,9 +20,11 @@ export interface StatusSnapshot {
 /** One line describing what the loop is doing, and what to do about it. */
 export function deviceStatusLine(snapshot: StatusSnapshot): string {
   // Pairing outranks every other state, including a task in hand: it is the one
-  // thing that unblocks the card, so it is the line the user needs to see first.
-  if (snapshot.unpaired)
-    return "Pair this device from a machine you already trust, then it can pick up work.";
+  // thing that unblocks the card. The wording points at the code field rather than
+  // restating the instruction, because the card now renders that field directly
+  // above this line — saying "pair this device" here read as an instruction the
+  // user could not act on, which is exactly the dead end this UI replaced.
+  if (snapshot.unpaired) return "Enter the code from a device you already trust.";
   if (snapshot.task) return `Working on ${snapshot.task.title}`;
   if (!snapshot.enabled) return "Off. This device is not picking up work.";
   if (snapshot.phase === "running") return "Finishing up…";

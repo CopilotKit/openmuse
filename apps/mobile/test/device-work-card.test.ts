@@ -19,13 +19,19 @@ const idle = {
   error: "",
 };
 
-test("an unpaired device is told to pair, not to wait", () => {
+test("an unpaired device is pointed at the code field, not told to wait", () => {
   // Pairing outranks every other state: it is the one thing that unblocks the
   // card, so it must be the line shown even while the loop is otherwise idle.
-  assert.match(deviceStatusLine({ ...idle, unpaired: true }), /pair this device/i);
+  assert.match(deviceStatusLine({ ...idle, unpaired: true }), /enter the code/i);
   assert.match(
     deviceStatusLine({ ...idle, unpaired: true, enabled: true, phase: "waiting" }),
-    /pair this device/i,
+    /enter the code/i,
+  );
+  // It must NOT also claim to be working: an unpaired device cannot claim, so
+  // showing a task title here would be a lie about what this device is doing.
+  assert.doesNotMatch(
+    deviceStatusLine({ ...idle, unpaired: true, task: { id: "t1", title: "Anything" } }),
+    /working on/i,
   );
 });
 
