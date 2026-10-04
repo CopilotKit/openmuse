@@ -338,6 +338,29 @@ Four decisions, each avoiding work the user did not ask for:
 never offers a promotion the API would refuse — and the client does not keep a
 second copy of the rule to drift.
 
+**From chat too (2026-10-04).** Requirement 1 says *from any device*, and the
+phone was the only place a note could be captured. `capture_note` is now a chat
+tool, so a thought can be spoken in conversation and promoted on the device
+later.
+
+The tool's shape is the enforcement. It **captures and cannot promote**:
+`promoteNote` is reachable only from the HTTP route, never from a tool, so the
+agent can suggest and the user can confirm — the rule above, enforced by what
+the model is offered rather than by asking it well. `delegate_task` remains the
+tool that starts work; the distinction is which one the model picks, not that
+one is hidden.
+
+Captures are idempotent, because tool calls get replayed when a provider stream
+drops: the tool passes a request-scoped key and `createNote` uses
+`insertIfAbsent`. That is not only about duplicate rows — `put` appends a change
+unconditionally, so a replay would announce a note that did not change and send
+every device re-fetching it. A note-count assertion cannot catch that; only the
+change log can, which is why `tests/conversation-notes.test.ts` counts changes.
+
+Note `capture_note` had to be added to the default `CHAT_TOOL_ALLOWLIST` in
+`docker-compose.yml` and `.env.example` — an allowlist that omits it means chat
+can never capture anything on a default deployment, and nothing errors.
+
 ## Security lift order
 
 SSRF guard and host-exec gate first: they protect execution paths that already

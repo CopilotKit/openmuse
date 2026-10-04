@@ -17,13 +17,16 @@ The release is a personal-agent alpha: delegate a job, inspect its plan, supply 
 
 ## Notes: capture and promotion
 
-- [x] **Notes, with deliberate promotion into tasks** (shipped 2026-10-04). Vision
+- [x] **Notes, with deliberate promotion into tasks, capturable from chat** (shipped
+  2026-10-04). Vision
   requirement 1 asks for notes and tasks in one store, not two systems, so a note
   is a row in the same `records` table as a task and syncs through the existing
   change log. Saving a note starts no work; promotion is an explicit request, the
   task id is derived from the note id so a repeated or concurrent promotion yields
   one task, and a promoted note cannot be deleted while its task is live. Mobile
-  screen in `apps/mobile/src/notes.tsx`, rules in `notes-model.ts`. See
+  screen in `apps/mobile/src/notes.tsx`, rules in `notes-model.ts`. Chat can
+  capture with `capture_note` but cannot promote — promotion stays the user's
+  explicit act, enforced by the tool the model is offered. See
   [docs/SYNC.md](docs/SYNC.md).
 
 ## Device plane: the remaining half

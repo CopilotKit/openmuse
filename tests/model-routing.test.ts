@@ -202,12 +202,12 @@ const allToolNames = [
 
 test("filterTools: undefined allowlist returns all tools", () => {
   const tools = allToolNames.map(makeTool);
-  assert.equal(filterTools(tools, undefined).length, 18);
+  assert.equal(filterTools(tools, undefined).length, allToolNames.length);
 });
 
 test("filterTools: empty allowlist returns all tools", () => {
   const tools = allToolNames.map(makeTool);
-  assert.equal(filterTools(tools, []).length, 18);
+  assert.equal(filterTools(tools, []).length, allToolNames.length);
 });
 
 test("filterTools: exact names keep only matched tools", () => {
@@ -235,7 +235,9 @@ test("filterTools: prefix glob keeps all matching tools", () => {
 test("filterTools: wildcard keeps everything", () => {
   const tools = allToolNames.map(makeTool);
   const filtered = filterTools(tools, ["*"]);
-  assert.equal(filtered.length, 17);
+  // Every tool in the list, so this tracks `allToolNames` rather than a count
+  // that has to be bumped by hand each time a tool is added.
+  assert.equal(filtered.length, allToolNames.length);
 });
 
 test("filterTools: mixed exact and glob patterns", () => {
