@@ -13,13 +13,7 @@
  * what actually shipped stays intact.
  */
 
-export type BoardState =
-  | "Backlog"
-  | "InProgress"
-  | "Review"
-  | "Blocked"
-  | "Done"
-  | "Cancelled";
+export type BoardState = "Backlog" | "InProgress" | "Review" | "Blocked" | "Done" | "Cancelled";
 
 export const BOARD_STATES: readonly BoardState[] = [
   "Backlog",
@@ -71,7 +65,10 @@ export type TransitionAcceptance = { ok: true; from: BoardState; to: BoardState 
  * Structured transition check. Rejections carry the legal alternatives so the
  * API can answer "what could I have done instead?" in one round-trip.
  */
-export function checkTransition(from: BoardState, to: BoardState): TransitionAcceptance | TransitionRejection {
+export function checkTransition(
+  from: BoardState,
+  to: BoardState,
+): TransitionAcceptance | TransitionRejection {
   if (canTransition(from, to)) return { ok: true, from, to };
   return {
     ok: false,

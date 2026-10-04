@@ -194,7 +194,7 @@ export async function createStore(
   if (options.databaseUrl) {
     const pool = createPool(options.databaseUrl);
     database = {
-      query: async <T,>(sql: string, params?: unknown[]) =>
+      query: async <T>(sql: string, params?: unknown[]) =>
         (await pool.query(sql, params)) as unknown as { rows: T[] },
       close: () => pool.end(),
     };
@@ -203,7 +203,7 @@ export async function createStore(
     const embedded = new PGlite(options.dataDir);
     await embedded.waitReady;
     database = {
-      query: async <T,>(sql: string, params?: unknown[]) =>
+      query: async <T>(sql: string, params?: unknown[]) =>
         (await embedded.query(sql, params)) as { rows: T[] },
       close: () => embedded.close(),
     };
