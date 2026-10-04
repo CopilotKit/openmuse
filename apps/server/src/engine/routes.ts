@@ -81,6 +81,73 @@ export function agentRoutes(
     return c.json({ ok: true });
   });
   /**
+   * Claim work for the calling device.
+   *
+   * A device PULLS work rather than being pushed it, because the phone may be
+   * asleep when the task is created. The response is the task plus the lease
+   * that now belongs to this device; `null` means "nothing for you right now",
+   * which is a normal answer and not an error.
+   *
+   * The claim is a compare-and-swap on the task's prior status, so two devices
+   * racing for the same task produce exactly one winner: the loser sees a task
+   * that is no longer `queued` and is told so rather than both running it.
+   */
+  app.post("/device/claim", async (c) => {
+    const deviceId = c.get("device").deviceId;
+    if (!deviceId) throw new AppError("Sign in with a device ID to claim work", 400);
+    // A claim IS execution, so it is behind the pairing gate. Reading is not.
+    await service.requirePaired(c.get("owner"), deviceId);
+    const profile = await service.deviceProfile(c.get("owner"), deviceId);
+    if (!profile) throw new AppError("Register this device before claiming work", 404);
+
+    // Recover first: a task whose previous device died must be requeued before it
+    // can be claimed again, or it is invisible to every device forever.
+    await service.recoverLapsedLeases(c.get("owner"));
+
+    const claimed = await service.claimNextTask(c.get("owner"), profile);
+    if (!claimed) return c.json({ task: null, reason: "no-eligible-work" });
+    return c.json({
+      task: claimed,
+      lease: { id: claimed.leaseId, until: claimed.leaseUntil },
+    });
+  });
+  /**
+   * Extend a lease this device holds.
+   *
+   * A device heartbeats while it works so the server knows it is alive. The CAS
+   * is on the exact lease id: if the lease lapsed and another device took the
+   * task, the swap fails and this device is told to stop rather than continuing
+   * to work on a task it no longer owns.
+   */
+  app.post("/device/heartbeat", async (c) => {
+    const deviceId = c.get("device").deviceId;
+    if (!deviceId) throw new AppError("Sign in with a device ID to heartbeat", 400);
+    await service.requirePaired(c.get("owner"), deviceId);
+    const body = z
+      .object({ taskId: z.string().min(1), leaseId: z.string().min(1) })
+      .parse(await c.req.json());
+    return c.json(await service.heartbeat(c.get("owner"), body.taskId, body.leaseId));
+  });
+  /**
+   * Report a task's outcome back to the server.
+   *
+   * `succeeded` with a `result` is what publishes work into the activity feed.
+   */
+  app.post("/device/report", async (c) => {
+    const deviceId = c.get("device").deviceId;
+    if (!deviceId) throw new AppError("Sign in with a device ID to report work", 400);
+    await service.requirePaired(c.get("owner"), deviceId);
+    const body = z
+      .object({
+        taskId: z.string().min(1),
+        leaseId: z.string().min(1),
+        outcome: z.enum(["succeeded", "failed"]),
+        result: z.string().max(20_000).default(""),
+      })
+      .parse(await c.req.json());
+    return c.json(await service.reportDeviceWork(c.get("owner"), body, deviceId));
+  });
+  /**
    * Pairing. A session may READ without pairing; claiming device work may not.
    * `deviceId` is always taken from the session, never the body, so a device
    * cannot assert someone else's identity.

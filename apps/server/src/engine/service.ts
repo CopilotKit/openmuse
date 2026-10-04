@@ -29,10 +29,17 @@ import {
 import {
   type Capability,
   checkMigration,
+  type DeviceProfile,
   isDeviceAvailable,
   normalizeCapabilities,
   selectDeviceForTask,
 } from "../../../../packages/domain/src/capabilities.ts";
+import {
+  CLAIM_LEASE_MS,
+  type ClaimableTask,
+  lapsedLeaseRecovery,
+  selectClaimableTask,
+} from "../../../../packages/domain/src/device-work.ts";
 import type {
   ActionProposal,
   Artifact,
@@ -251,6 +258,160 @@ export class AgentService {
     return { ...device, unsupported };
   }
 
+  /** The device's profile as the capability logic sees it, or null if unregistered. */
+  async deviceProfile(owner: string, deviceId: string): Promise<DeviceProfile | null> {
+    const all = await this.db.listDevices(owner);
+    return all.find((d) => d.id === deviceId) ?? null;
+  }
+  /**
+   * Requeue tasks whose device stopped heartbeating.
+   *
+   * This is the recovery half of the claim protocol and the reason leases
+   * expire at all. Without it, a phone that loses network mid-task leaves work
+   * `running` forever: every other device sees a live-or-expired lease and
+   * declines to touch it, so the task is stranded rather than merely delayed.
+   *
+   * The CAS matches on the lapsed lease id, so a task that moved on in the
+   * meantime — a human cancelled it, another sweep already requeued it — is
+   * left untouched instead of being rolled back to `queued`.
+   */
+  async recoverLapsedLeases(owner: string): Promise<number> {
+    const now = Date.now();
+    const queued = await this.db.list<AgentTask>(owner, "tasks");
+    let recovered = 0;
+    for (const task of queued) {
+      if (!lapsedLeaseRecovery(toClaimable(task), now)) continue;
+      const moved = await this.db.compareAndSwap<AgentTask>(
+        owner,
+        "tasks",
+        task.id,
+        { status: "running", leaseId: task.leaseId ?? null },
+        {
+          status: "queued",
+          leaseId: null,
+          leaseUntil: null,
+          updatedAt: date(),
+          error: "The device running this stopped responding; returned to the queue.",
+        },
+      );
+      if (!moved) continue;
+      recovered += 1;
+      await this.db.put(owner, "run-events", {
+        id: randomUUID(),
+        taskId: task.id,
+        kind: "status",
+        date: date(),
+        title: "Task requeued",
+        detail: "The device running it stopped responding",
+      });
+    }
+    return recovered;
+  }
+  /**
+   * Claim the next eligible task for a device, or null.
+   *
+   * Selection is pure (see `selectClaimableTask`); the claim itself is the CAS
+   * that decides the winner. Two devices can select the SAME task — the pool is
+   * identical for both — and the compare-and-swap resolves it: whoever swaps
+   * first gets the lease, the other gets null and tries again next tick. This
+   * is why the selection does not need to be lock-free-perfect; it only needs
+   * to be deterministic.
+   */
+  async claimNextTask(
+    owner: string,
+    device: DeviceProfile,
+  ): Promise<(AgentTask & { leaseId: string; leaseUntil: string }) | null> {
+    const paired = (await this.db.pairingState(owner, device.id)).pairedAt !== null;
+    if (!paired) return null;
+    await this.db.touchDevice(owner, device.id);
+    const candidates = await this.db.list<AgentTask>(owner, "tasks");
+    const now = Date.now();
+    const pick = selectClaimableTask(candidates.map(toClaimable), device, paired, now);
+    if (!pick) return null;
+    const leaseId = randomUUID();
+    const leaseUntil = new Date(now + CLAIM_LEASE_MS).toISOString();
+    const claimed = await this.db.compareAndSwap<AgentTask>(
+      owner,
+      "tasks",
+      pick.id,
+      { status: pick.status, leaseId: pick.leaseId ?? null },
+      {
+        status: "running",
+        leaseId,
+        leaseUntil,
+        updatedAt: date(),
+        attempts: (candidates.find((t) => t.id === pick.id)?.attempts ?? 0) + 1,
+      },
+    );
+    // Lost the race. Not an error: the other device has it, and this one will
+    // find different work (or the same work, once it lapses) on the next pull.
+    if (!claimed) return null;
+    return claimed as AgentTask & { leaseId: string; leaseUntil: string };
+  }
+  /**
+   * Extend a lease this device holds.
+   *
+   * Returns whether the lease was extended. A device that gets `false` must stop
+   * working: the lease it was holding has lapsed and the task may already have
+   * been claimed elsewhere, so continuing would have two devices writing results
+   * for one task.
+   */
+  async heartbeat(
+    owner: string,
+    taskId: string,
+    leaseId: string,
+  ): Promise<{ ok: boolean; leaseUntil: string | null }> {
+    const task = await this.db.get<AgentTask>(owner, "tasks", taskId);
+    if (!task) return { ok: false, leaseUntil: null };
+    // The lease id is the authority on who holds the task, not `deviceId`: a
+    // lease is unguessable and already device-bound, so matching it is what
+    // stops one device from keeping another device's task alive.
+    const held = await this.db.compareAndSwap<AgentTask>(
+      owner,
+      "tasks",
+      taskId,
+      { status: "running", leaseId },
+      { leaseUntil: new Date(Date.now() + CLAIM_LEASE_MS).toISOString(), updatedAt: date() },
+    );
+    return { ok: held !== null, leaseUntil: held?.leaseUntil ?? null };
+  }
+  /**
+   * Record a device's outcome for a task it holds.
+   *
+   * The CAS on `leaseId` is what makes this safe: only the device holding the
+   * lease can close the task, so a device that lost its lease cannot overwrite
+   * the result of whoever took over.
+   */
+  async reportDeviceWork(
+    owner: string,
+    body: { taskId: string; leaseId: string; outcome: "succeeded" | "failed"; result: string },
+    deviceId: string,
+  ): Promise<AgentTask> {
+    const updated = await this.db.compareAndSwap<AgentTask>(
+      owner,
+      "tasks",
+      body.taskId,
+      { status: "running", leaseId: body.leaseId },
+      {
+        status: body.outcome === "succeeded" ? "succeeded" : "failed",
+        leaseId: null,
+        leaseUntil: null,
+        result: body.result,
+        error: body.outcome === "failed" ? body.result || "The device reported a failure." : null,
+        updatedAt: date(),
+      },
+    );
+    if (!updated) throw new AppError("Lost the lease on this task; stop working on it", 409);
+    await this.db.put(owner, "run-events", {
+      id: randomUUID(),
+      taskId: body.taskId,
+      kind: "status",
+      date: date(),
+      title: `Task ${body.outcome} on ${deviceId}`,
+      detail: "Reported by the device",
+    });
+    return updated;
+  }
   /**
    * Which devices can run this task, and why not the others.
    *
@@ -1492,6 +1653,25 @@ export class AgentService {
  * older build, or hand-edited. Unknown entries are dropped rather than honoured,
  * so a task can never claim a capability this build cannot actually satisfy.
  */
-export function requiredCapabilitiesOf(task: AgentTask): Capability[] {
+export /**
+ * Project a stored task onto the fields the claim logic reads.
+ *
+ * A function rather than a cast so the two shapes cannot drift: if `AgentTask`
+ * gains a field the claim protocol cares about, this is the one place that has
+ * to learn about it, and adding it there is a type error rather than a silent
+ * no-op at runtime.
+ */
+function toClaimable(task: AgentTask): ClaimableTask {
+  return {
+    id: task.id,
+    status: task.status,
+    requiredCapabilities: task.requiredCapabilities,
+    deviceId: task.deviceId,
+    leaseId: task.leaseId ?? null,
+    leaseUntil: task.leaseUntil ?? null,
+  };
+}
+
+function requiredCapabilitiesOf(task: AgentTask): Capability[] {
   return normalizeCapabilities(task.requiredCapabilities ?? []);
 }
