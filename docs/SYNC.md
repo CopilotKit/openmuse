@@ -100,9 +100,41 @@ the paths, payload shapes, pairing gate, lease CAS and the `409` are all proven 
 agree). `scripts/mutation-device-loop.sh` removes each control in turn and requires
 the suite to fail.
 
+### Pairing, from the user's side (shipped 2026-10-04)
+
+The protocol was asymmetric and unusable: a device may not pair itself, so a code is
+minted on a machine already in the operator's hands and typed into the new one — but
+only the server half existed, so an unpaired phone was told to pair and then given
+nothing to do about it.
+
+Two things made it work:
+
+- **`GET /api/agent/devices` now reports `paired` per device.** Without it the
+  approving device has no way to know *which* device is waiting, and
+  `POST /pairing/request` needs a `deviceId` — so it would have to know a UUID the
+  phone never displays. This is the change that makes approval possible at all, and
+  it is a read, not a gate: an unpaired device may still list them.
+- **The Apps card renders both halves.** An unpaired device gets a code field; a
+  paired one is told what is waiting and can mint a code for it. The minted code is
+  shown once and not persisted, because the server stores only a hash — that response
+  is the sole chance to read it aloud.
+
+Three decisions in that flow, each avoiding an action whose only outcome is an error:
+
+- The work-loop toggle is **not offered while unpaired**. Claiming is behind the
+  pairing gate, so every press would fail.
+- An unpaired device is never offered approval, and a paired device is never offered
+  itself as a target (`/pairing/request` answers 409 for that).
+- A **stale** unpaired device is not offered either: it is most likely a switched-off
+  phone, and telling the operator to approve something that will not respond wastes a
+  five-minute OTP.
+
+The code field submits only at the OTP length. The attempt budget is five, so sending
+a half-typed code to learn it was too short would spend a real attempt on a typo.
+Spaces and dashes are stripped, because a code read aloud is often typed with one.
+
 Still not built: background continuation when the app is **killed** (only backgrounding
-is handled), on-device model execution, and the pairing UX for entering a code on a
-second phone.
+is handled), and on-device model execution.
 
 ## Placement: a running task stays put
 

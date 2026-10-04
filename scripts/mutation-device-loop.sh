@@ -143,6 +143,53 @@ mutate "let a short lease produce a tiny heartbeat" \
   '  return Math.max(Math.floor(window * timing.heartbeatFraction), timing.minHeartbeatMs);' \
   '  return Math.floor(window * timing.heartbeatFraction);'
 
+# The pairing list. Kept separate because it guards a DIFFERENT file: without
+# `paired` on `/devices`, the approval UI has no target and a second phone can
+# never be paired at all.
+PAIRS="apps/server/src/engine/service.ts"
+PAIRS_BAK="/tmp/openmuse-device-pairs.bak.ts"
+cp "$PAIRS" "$PAIRS_BAK" || exit 1
+restore_pairs() { cp "$PAIRS_BAK" "$PAIRS"; }
+trap 'restore; restore_pairs' EXIT
+
+mutate_pairs() {
+  local label="$1" old="$2" new="$3"
+  restore_pairs
+  python3 - "$PAIRS" "$old" "$new" <<'PY2'
+import sys, pathlib
+path, old, new = sys.argv[1], sys.argv[2], sys.argv[3]
+s = pathlib.Path(path).read_text()
+if s.count(old) != 1:
+    print(f"ANCHOR_AMBIGUOUS ({s.count(old)} matches)", file=sys.stderr)
+    sys.exit(3)
+pathlib.Path(path).write_text(s.replace(old, new))
+PY2
+  if [ $? -ne 0 ]; then
+    echo "STALE_ANCHOR $label -- UNPROVEN (mutation not applied)"
+    return 3
+  fi
+  local result
+  result=$(npx tsx --test tests/device-loop-e2e.test.ts 2>&1 | awk '/^# pass [0-9]/ {p+=$3} /^# fail [0-9]/ {f+=$3} END {print "pass=" p+0 " fail=" f+0}')
+  case "$result" in
+    *"fail=0"*) echo "MUTATION_SURVIVED $label  ($result)" ;;
+    *)          echo "MUTATION_KILLED   $label  ($result)" ;;
+  esac
+}
+
+# Anchored on the whole `devices()` body, NOT the `paired:` line alone: an
+# identical expression appears in `runnableOn`, and a single-line anchor would
+# mutate whichever came first — reporting a gap that is really a bad anchor.
+mutate_pairs "hide pairing from the device list" \
+  '        paired: (await this.db.pairingState(owner, device.id)).pairedAt !== null,
+      })),
+    );
+  }' \
+  '        paired: true,
+      })),
+    );
+  }'
+
 restore
+restore_pairs
 echo "restored"
 git diff --stat "$LOOP"

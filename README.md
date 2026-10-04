@@ -193,6 +193,8 @@ contract (`packages/domain/src/capabilities.ts`) rather than in individual route
 - **Pairing.** A paired device may claim and execute; an unpaired device may only
   read. A device cannot pair itself — minting a code requires an already-paired
   caller — and the first device bootstraps with the account access key, once only.
+  The flow is usable from the app: a paired device lists what is waiting and mints
+  a code, and an unpaired one redeems it.
 - **Form factor.** A handheld never takes `destructive` work (send, delete, pay),
   *even if it declares the capability*. The approval gate is the only thing between an
   irreversible action and the world, and a phone left face up on a desk makes that
