@@ -65,6 +65,21 @@ rather than inline.
 - **`noBitwiseOperators`, `noForEach`.** Style preferences this codebase does
   not follow. Not correctness signals, and turning them on would be churn.
 
+### `noUnnecessaryConditions` and mutable instance flags
+
+This rule narrows a private boolean field to its initialiser and then reports
+every guard on it as dead code — it cannot see that `start()` flips it. The
+workaround used in `apps/mobile/src/device-agent-loop.ts` is to read the flag
+through a private accessor (`isEnabled()`, `isClaiming()`) rather than off the
+field, which the rule cannot constant-fold.
+
+The alternative — adding a `biome-ignore` — was rejected for the reason already
+recorded elsewhere in this repo: a suppression comment is a claim about a rule
+rather than a change to the code, and this one is provably wrong. Deleting the
+guards instead would have been worse still, since they are exactly what stops a
+stopped loop from claiming work. The same pattern appears as an explicit
+`biome-ignore` with a stated reason in `apps/server/src/engine/worker.ts`.
+
 ## Tests
 
 `pnpm test` needs a reachable Postgres:
