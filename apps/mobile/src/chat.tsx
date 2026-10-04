@@ -10,6 +10,7 @@ import {
 import { ArrowDown, ArrowUp, FileText, RotateCcw, Square, X } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -235,6 +236,22 @@ export function ChatScreen({
   const [saveError, setSaveError] = useState("");
   const [historyError, setHistoryError] = useState("");
   const [historyAttempt, setHistoryAttempt] = useState(0);
+  const [keyboardPadding, setKeyboardPadding] = useState(0);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const onShow = (e: { endCoordinates: { height: number } }) => {
+      const bottomNavHeight = 74;
+      setKeyboardPadding(Math.max(0, e.endCoordinates.height - bottomNavHeight));
+    };
+    const onHide = () => setKeyboardPadding(0);
+    const showSub = Keyboard.addListener("keyboardDidShow", onShow);
+    const hideSub = Keyboard.addListener("keyboardDidHide", onHide);
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
   useEffect(() => {
     if (!isReady) return;
     let active = true;
@@ -698,7 +715,10 @@ export function ChatScreen({
           Latest messages
         </Button>
       )}
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={keyboardPadding > 0 ? { paddingBottom: keyboardPadding } : undefined}
+      >
         <ErrorNotice error={saveError} />
         {!!saveError && (
           <Button
