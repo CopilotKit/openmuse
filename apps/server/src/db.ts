@@ -7,6 +7,11 @@ import {
   type DeviceProfile,
   normalizeCapabilities,
 } from "../../../packages/domain/src/capabilities.ts";
+import {
+  type PairingState,
+  pairingStateSchema,
+  unpaired,
+} from "../../../packages/domain/src/pairing.ts";
 import type { Prerequisite } from "../../../packages/domain/src/scheduler.ts";
 import type { SyncChange } from "../../../packages/domain/src/sync.ts";
 import { backgroundFailure } from "./log.ts";
@@ -304,6 +309,46 @@ export class Store {
   }
 
   /**
+   * Pairing state for one device, or `unpaired` when the device is unknown.
+   *
+   * An unknown device reads as unpaired rather than throwing: pairing is a
+   * gate, and a gate must fail CLOSED for a caller it has never heard of. The
+   * caller's session is already authenticated by this point, so an unknown id
+   * here means "this session's device was removed", not "this is an attacker" —
+   * but either way it must not be executable.
+   */
+  async pairingState(owner: string, id: string): Promise<PairingState> {
+    const result = await this.db.query<{ pairing: PairingState | null }>(
+      "SELECT pairing FROM devices WHERE owner=$1 AND id=$2",
+      [owner, id],
+    );
+    const row = result.rows[0];
+    if (!row?.pairing) return unpaired;
+    // Validate what came back: the column is jsonb and a hand-edited or
+    // future-shaped row must not be trusted into the state machine.
+    const parsed = pairingStateSchema.safeParse(row.pairing);
+    return parsed.success ? parsed.data : unpaired;
+  }
+
+  /**
+   * Persist pairing state.
+   *
+   * The row is updated unconditionally rather than compare-and-swapped on the
+   * prior value: pairing is a single-device state machine whose transitions are
+   * already guarded by the challenge being consumed on use, so a lost update
+   * here can only ever move a device further from paired, never into a forged
+   * pairing. `mintChallenge` is the transition that must not race, and it is
+   * reached from an already-trusted surface.
+   */
+  async savePairingState(owner: string, id: string, state: PairingState): Promise<void> {
+    await this.db.query("UPDATE devices SET pairing=$3::jsonb WHERE owner=$1 AND id=$2", [
+      owner,
+      id,
+      JSON.stringify(state),
+    ]);
+  }
+
+  /**
    * Append to the sync log and return the assigned sequence number.
    *
    * The counter is bumped with `RETURNING` inside a single statement rather than
@@ -464,6 +509,16 @@ async function migrateSchema(database: Database): Promise<void> {
   await database.query(
     "CREATE INDEX IF NOT EXISTS devices_recent ON devices(owner,last_seen_at DESC)",
   );
+  // Pairing state, added after `devices` shipped. Forward-only, `IF NOT EXISTS`,
+  // per this repo's schema policy — there are still no migration files.
+  //
+  // `pairing` holds the whole serializable state as jsonb (pairedAt + the
+  // outstanding challenge) rather than nullable columns, because the state
+  // machine in packages/domain/src/pairing.ts produces and consumes it as one
+  // value and splitting it across columns would put a second, divergent
+  // representation on the table. `NULL` means "never paired", which is the
+  // fail-closed default: a row predating this migration cannot execute.
+  await database.query("ALTER TABLE devices ADD COLUMN IF NOT EXISTS pairing jsonb");
   // The sync log. Append-only, ordered by a monotonic per-owner seq; a device
   // stores the highest seq it has seen and pulls everything after it. This is
   // Telegram's model: the server owns an ordered log, device state is a

@@ -167,7 +167,7 @@ export async function createApp(
     );
     return c.json(snapshot);
   });
-  app.route("/api/agent", agentRoutes(agent));
+  app.route("/api/agent", agentRoutes(agent, auth));
   app.route("/api/computer", computerRoutes(computer, files));
   app.get("/api/calendars", async (c) => c.json(await workspace.calendars(c.get("owner"))));
   app.get("/api/calendar/events", async (c) => {

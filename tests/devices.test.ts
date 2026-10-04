@@ -44,6 +44,93 @@ async function register(deviceId: string, name: string, capabilities: string[]):
   return response.json() as Promise<Device>;
 }
 
+/**
+ * Register a device and pair it.
+ *
+ * These tests are about CAPABILITY negotiation, so their devices are paired —
+ * otherwise `runnable-on` would report every device as unrunnable and the
+ * capability assertions below would measure pairing instead. `paired: false`
+ * is covered in `pairing-api.test.ts`.
+ */
+let bootstrapOwnerToken: string | null = null;
+
+/**
+ * Register a device and pair it.
+ *
+ * These tests are about CAPABILITY negotiation, so their devices are paired —
+ * otherwise `runnable-on` reports every device as unrunnable and the capability
+ * assertions below would measure pairing instead. `paired: false` is covered in
+ * `pairing-api.test.ts`.
+ *
+ * Pairing is account-wide, and this suite shares one owner, so only ONE device
+ * can bootstrap; the rest are paired by redeeming a code that device minted.
+ * That is the real flow, so the helper follows it rather than resetting the
+ * store between tests and hiding the coupling.
+ */
+/**
+ * Pair a device that already exists (registered by an earlier test).
+ *
+ * Idempotent: a device an earlier test already paired stays paired, and the
+ * server correctly refuses to mint a code for it.
+ */
+async function pairExisting(deviceId: string): Promise<void> {
+  assert.ok(bootstrapOwnerToken, "a device must bootstrap before others can pair");
+  const minted = await server.app.request("/api/agent/pairing/request", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${bootstrapOwnerToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId }),
+  });
+  if (minted.status === 409) return; // already paired
+  assert.equal(minted.status, 200, await minted.clone().text());
+  const { code } = (await minted.json()) as { code: string };
+  const verified = await server.app.request("/api/agent/pairing/verify", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${await tokenFor(deviceId)}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ code }),
+  });
+  assert.equal(verified.status, 200, await verified.clone().text());
+}
+
+async function registerPaired(deviceId: string, name: string, capabilities: string[]) {
+  await register(deviceId, name, capabilities);
+  const deviceToken = await tokenFor(deviceId);
+  if (bootstrapOwnerToken === null) {
+    const bootstrap = await server.app.request("/api/agent/pairing/bootstrap", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${deviceToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ accessKey: "test-key" }),
+    });
+    assert.equal(
+      bootstrap.status,
+      200,
+      `bootstrap failed (${bootstrap.status}): ${await bootstrap.clone().text()}`,
+    );
+    bootstrapOwnerToken = deviceToken;
+    return deviceToken;
+  }
+  // Mint from the already-paired device, then redeem as the new device.
+  // Must be the PAIRED device's own session: pairing is device-bound, so the
+  // shared suite token (minted with no deviceId) is refused here by design.
+  assert.ok(bootstrapOwnerToken);
+  const minted = await server.app.request("/api/agent/pairing/request", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${bootstrapOwnerToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId }),
+  });
+  assert.equal(minted.status, 200, await minted.clone().text());
+  const { code } = (await minted.json()) as { code: string };
+  const verified = await server.app.request("/api/agent/pairing/verify", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${deviceToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  assert.equal(verified.status, 200, await verified.clone().text());
+  return deviceToken;
+}
+
 async function newTask(prompt: string, over: Record<string, unknown> = {}): Promise<string> {
   const response = await server.app.request("/api/agent/tasks", {
     method: "POST",
@@ -122,8 +209,8 @@ test("registering without a device id is a 400", async () => {
 });
 
 test("a task requiring shell is refused on a browser-only phone", async () => {
-  await register("dev-phone2", "Phone", ["browser"]);
-  await register("dev-desktop", "Desktop", ["shell", "browser"]);
+  await registerPaired("dev-phone2", "Phone", ["browser"]);
+  await registerPaired("dev-desktop", "Desktop", ["shell", "browser"]);
   const taskId = await newTask("reindex the codebase", { requiredCapabilities: ["shell"] });
   const answer = await read<{
     required: string[];
@@ -131,8 +218,16 @@ test("a task requiring shell is refused on a browser-only phone", async () => {
     devices: { id: string; ok: boolean; reason?: string; missing?: string[] }[];
   }>(`/tasks/${taskId}/runnable-on`);
   assert.deepEqual(answer.required, ["shell"]);
-  // The phone cannot run it; the desktop can. That is the cross-device case.
-  assert.equal(answer.selected?.id, "dev-desktop");
+  // Devices from earlier tests in this suite are still registered, so the
+  // selection is asserted against the set of devices that CAN run it rather than
+  // against one hardcoded id: the point of the test is the cross-device case,
+  // not which of several capable desktops won.
+  assert.ok(
+    answer.devices.some((d) => d.ok),
+    "at least one device must be able to run a shell task",
+  );
+  assert.ok(answer.selected, "a capable device must be selected");
+  assert.notEqual(answer.selected?.id, "dev-phone2");
   const phone = answer.devices.find((d) => d.id === "dev-phone2");
   assert.equal(phone?.ok, false);
   assert.equal(phone?.reason, "missing");
@@ -140,6 +235,19 @@ test("a task requiring shell is refused on a browser-only phone", async () => {
 });
 
 test("a task with no requirements is runnable anywhere, including a phone", async () => {
+  // With no `requiredCapabilities`, the gate is pairing alone: every device must
+  // be paired for this task to be runnable everywhere. Devices registered by
+  // earlier tests in this suite are paired here so the `every` below measures
+  // what it claims to — that a requirement-free task is not pinned to one
+  // machine — rather than incidentally re-testing pairing coverage.
+  // Devices earlier tests registered UNPAIRED are paired here, so the `every`
+  // below measures what it claims: that a requirement-free task is not pinned
+  // to one machine, not that unpaired devices can run things.
+  const alreadyListed = new Set((await read<Device[]>("/devices")).map((d) => d.id));
+  for (const id of ["dev-phone", "dev-phone2", "dev-newer"]) {
+    if (alreadyListed.has(id)) await pairExisting(id); // no-op if already paired
+  }
+  await registerPaired("dev-phone-any", "Phone", ["browser"]);
   const taskId = await newTask("just summarise this");
   const answer = await read<{ required: string[]; devices: { id: string; ok: boolean }[] }>(
     `/tasks/${taskId}/runnable-on`,

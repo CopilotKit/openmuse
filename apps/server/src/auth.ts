@@ -58,6 +58,24 @@ export class Auth {
       deviceName: session.deviceName ?? null,
     };
   }
+  /**
+   * Does this access key authenticate? Constant-time, like `session`.
+   *
+   * Separate from `session` because the pairing bootstrap needs to CHECK a key
+   * without minting another session for the device that presents it. Calling
+   * `session` for the check would leave a second live token behind on every
+   * bootstrap — a credential the caller did not ask for, which then has to be
+   * cleaned up, and which is a real token if the cleanup is ever skipped.
+   *
+   * Always true in sample mode: there the access key is not a credential, and
+   * refusing pairing because no key was configured would make the sample
+   * workspace unusable.
+   */
+  verifyAccessKey(accessKey?: string): boolean {
+    if (this.config.mode !== "live") return true;
+    if (!accessKey || !this.config.accessKey) return false;
+    return timingSafeEqual(digest(accessKey), digest(this.config.accessKey));
+  }
   sign(owner: string, path: string) {
     const expires = String(Date.now() + 15 * 60 * 1000);
     const signature = createHmac("sha256", this.signingKey)

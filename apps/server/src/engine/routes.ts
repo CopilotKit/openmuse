@@ -10,7 +10,7 @@ import type {
   DeviceModelRouting,
   RunEvent,
 } from "../../../../packages/domain/src/agent.ts";
-import type { DeviceInfo } from "../auth.ts";
+import type { Auth, DeviceInfo } from "../auth.ts";
 import { AppError } from "../errors.ts";
 import type { AgentService } from "./service.ts";
 
@@ -32,6 +32,7 @@ const goalPatchSchema = z.object({
 
 export function agentRoutes(
   service: AgentService,
+  auth: Auth,
 ): Hono<{ Variables: { owner: string; device: DeviceInfo } }> {
   const app = new Hono<{ Variables: { owner: string; device: DeviceInfo } }>();
   app.get("/", async (c) => c.json(await service.snapshot(c.get("owner"))));
@@ -79,6 +80,76 @@ export function agentRoutes(
     await service.db.removeDevice(c.get("owner"), c.req.param("id"));
     return c.json({ ok: true });
   });
+  /**
+   * Pairing. A session may READ without pairing; claiming device work may not.
+   * `deviceId` is always taken from the session, never the body, so a device
+   * cannot assert someone else's identity.
+   */
+  app.get("/pairing", async (c) =>
+    c.json(await service.pairingStatus(c.get("owner"), c.get("device").deviceId)),
+  );
+  /**
+   * Mint a pairing code for ANOTHER device.
+   *
+   * Refused unless the CALLER's own device is already paired. That is the whole
+   * security property: the operator approves a new phone from a machine already
+   * in their hands. Without it this route is theatre — a phone would request a
+   * code, get it in the response, and pair itself, and the gate would gate
+   * nothing. So a first device must be paired from the desktop, and that
+   * asymmetry is deliberate.
+   */
+  app.post("/pairing/request", async (c) => {
+    const caller = c.get("device").deviceId;
+    if (!caller) throw new AppError("Sign in with a device ID to pair another device", 400);
+    await service.requirePaired(c.get("owner"), caller);
+    const body = z
+      .object({ deviceId: z.string().trim().min(1).max(120) })
+      .parse(await c.req.json());
+    if (body.deviceId === caller) throw new AppError("This device is already paired", 409);
+    return c.json(await service.requestPairingCode(c.get("owner"), body.deviceId));
+  });
+  /**
+   * Pair the FIRST device.
+   *
+   * `/pairing/request` deliberately requires an already-paired caller, which
+   * leaves the first device with no way in — that is the intended asymmetry, but
+   * it needs a way out or the product can never be used at all. The bootstrap is
+   * the account access key: proving you hold the operator's credential is a
+   * stronger statement than "some paired device said so", and it is available
+   * exactly once, before any device exists.
+   *
+   * The key is compared through `Auth`, which already does it in constant time.
+   * It is accepted ONLY when no device is paired yet, so this cannot be used to
+   * silently re-pair a device that was deliberately revoked — revoking is
+   * supposed to mean it, and re-pairing should take the normal path.
+   */
+  app.post("/pairing/bootstrap", async (c) => {
+    const device = c.get("device").deviceId;
+    if (!device) throw new AppError("Sign in with a device ID to pair this device", 400);
+    const all = await service.db.listDevices(c.get("owner"));
+    const paired = (
+      await Promise.all(all.map((d) => service.db.pairingState(c.get("owner"), d.id)))
+    ).some((state) => state.pairedAt !== null);
+    if (paired) throw new AppError("A device is already paired. Pair from it instead.", 409);
+    const body = z.object({ accessKey: z.string().min(1).max(200) }).parse(await c.req.json());
+    // `verifyAccessKey` is the SAME comparison sign-in uses, so there is no
+    // second place that decides whether a key is correct, and no extra session
+    // is minted by the check.
+    if (!auth.verifyAccessKey(body.accessKey)) throw new AppError("Access key is incorrect", 401);
+    await service.pairDevice(c.get("owner"), device);
+    return c.json(await service.pairingStatus(c.get("owner"), device));
+  });
+  /** Redeem a code. Reachable by an unpaired device — that is the point. */
+  app.post("/pairing/verify", async (c) => {
+    const device = c.get("device").deviceId;
+    if (!device) throw new AppError("Sign in with a device ID to pair this device", 400);
+    const body = z.object({ code: z.string().trim().min(1).max(16) }).parse(await c.req.json());
+    return c.json(await service.verifyPairingCode(c.get("owner"), device, body.code));
+  });
+  /** Drop this device's own pairing. Scoped to the session's device. */
+  app.post("/pairing/revoke", async (c) =>
+    c.json(await service.unpairDevice(c.get("owner"), c.get("device").deviceId)),
+  );
   /**
    * Where can this task run? The answer drives cross-device resumption, so it
    * names the missing capabilities and the viable alternatives rather than

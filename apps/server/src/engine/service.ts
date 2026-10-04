@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   type AgentArtifact,
@@ -40,6 +40,16 @@ import type {
   Mail,
   ProposalInput,
 } from "../../../../packages/domain/src/index.ts";
+import {
+  mintChallenge,
+  PAIRING_OTP_LENGTH,
+  type PairingState,
+  type PairingStatus,
+  pairingDecision,
+  pairingStatus,
+  revokePairing,
+  verifyPairing,
+} from "../../../../packages/domain/src/pairing.ts";
 import { unmetDependencies } from "../../../../packages/domain/src/scheduler.ts";
 import type { ActionService } from "../actions.ts";
 import type { DeviceInfo } from "../auth.ts";
@@ -248,6 +258,18 @@ export class AgentService {
    * the identity requirement implied by the device that created it: work started
    * on a desktop and handed to a phone should be refused unless it genuinely
    * needs nothing device-local.
+   *
+   * `paired` is reported alongside the capability verdict because the two
+   * failures are different problems with different fixes: a device that cannot
+   * shell needs a different machine, while an unpaired device needs a code
+   * typed in. Merging them into one boolean would send the operator to the
+   * wrong place.
+   *
+   * `reason` and `missing` stay CAPABILITY-ONLY. Pairing is reported in its own
+   * `paired` field rather than overwriting `reason`, because a phone can fail
+   * both at once and the client needs both facts: reporting only "not-paired"
+   * would hide the shell shortfall, and reporting only "missing" would hide
+   * that pairing it still would not help.
    */
   async runnableOn(owner: string, taskId: string) {
     const task = await this.db.get<AgentTask>(owner, "tasks", taskId);
@@ -256,20 +278,144 @@ export class AgentService {
     const now = Date.now();
     const all = await this.db.listDevices(owner);
     const selected = selectDeviceForTask(required, all, now, task.deviceId);
+    const pairedIds = new Set(
+      (
+        await Promise.all(
+          all.map(async (device) => ({
+            id: device.id,
+            paired: (await this.db.pairingState(owner, device.id)).pairedAt !== null,
+          })),
+        )
+      )
+        .filter((entry) => entry.paired)
+        .map((entry) => entry.id),
+    );
     return {
       taskId,
       required,
-      selected: selected ? { id: selected.id, name: selected.name } : null,
+      // A device is only `selected` if it can actually run the task, which now
+      // includes being paired — selecting an unpaired device would place work
+      // somewhere it is not allowed to execute.
+      selected:
+        selected && pairedIds.has(selected.id) ? { id: selected.id, name: selected.name } : null,
       devices: all.map((device) => {
         const check = checkMigration(device, required, now, all);
+        const paired = pairedIds.has(device.id);
         return {
           id: device.id,
           name: device.name,
-          ok: check.ok,
+          paired,
+          ok: check.ok && paired,
           ...(check.ok ? {} : { reason: check.reason, missing: check.gap.missing }),
         };
       }),
     };
+  }
+
+  /**
+   * Pairing status of the calling device.
+   *
+   * `deviceId` comes from the SESSION, never the request body: a device asking
+   * about a different device's pairing would be a cross-device information leak,
+   * and it is also the only way to stop a device asserting someone else's id.
+   */
+  async pairingStatus(owner: string, deviceId: string | null | undefined): Promise<PairingStatus> {
+    if (!deviceId) throw new AppError("Sign in with a device ID to use device pairing", 400);
+    return pairingStatus(await this.db.pairingState(owner, deviceId), Date.now());
+  }
+
+  /**
+   * Mint a pairing code for a device and return it ONCE.
+   *
+   * WHO MAY CALL THIS is the security property, and the route enforces it: a
+   * device may not pair itself. Minting requires a session presented from an
+   * already-paired device, so the operator approves a new phone from the desktop
+   * they already trust. Without that rule this endpoint is theatre — a device
+   * would request a code, receive it in the response, and verify itself.
+   *
+   * The code is returned in the response body rather than logged, because the
+   * requester is by definition a trusted surface; the operator reads it there
+   * and types it into the phone. Only the hash is persisted.
+   */
+  async requestPairingCode(
+    owner: string,
+    forDeviceId: string,
+  ): Promise<{ code: string; status: PairingStatus }> {
+    const salt = randomBytes(16).toString("base64url");
+    // `randomInt` rather than a Math.random draw: an OTP guarding an execution
+    // grant must not come from a non-cryptographic generator.
+    const code = String(randomInt(0, 10 ** PAIRING_OTP_LENGTH)).padStart(PAIRING_OTP_LENGTH, "0");
+    const minted = mintChallenge(
+      await this.db.pairingState(owner, forDeviceId),
+      salt,
+      code,
+      Date.now(),
+    );
+    await this.db.savePairingState(owner, forDeviceId, minted.state);
+    return { code, status: pairingStatus(minted.state, Date.now()) };
+  }
+
+  /**
+   * Redeem a pairing code. The device presents it; success flips the DEVICE to
+   * paired. Failure reasons are distinguished because the operator's next action
+   * differs: `expired` and `attempts-exhausted` both mean "ask for a new code",
+   * while `mismatch` means "try again with the one you have".
+   */
+  async verifyPairingCode(owner: string, deviceId: string, code: string) {
+    const before = await this.db.pairingState(owner, deviceId);
+    const result = verifyPairing(before, code, Date.now());
+    await this.db.savePairingState(owner, deviceId, result.state);
+    if (result.ok) return pairingStatus(result.state, Date.now());
+    const messages: Record<typeof result.reason, string> = {
+      "no-challenge": "Ask the desktop for a pairing code first",
+      expired: "That pairing code expired. Ask for a new one.",
+      mismatch: "That code is not right",
+      "attempts-exhausted": "Too many attempts. Ask for a new code.",
+    };
+    // 429 once the attempt budget is gone: it is a rate-limit fact the client
+    // can act on, and 403 would read as "this device may never pair".
+    throw new AppError(messages[result.reason], result.reason === "attempts-exhausted" ? 429 : 422);
+  }
+
+  /** Drop this device's pairing. Scoped to the session's own device. */
+  async unpairDevice(owner: string, deviceId: string | null | undefined): Promise<PairingStatus> {
+    if (!deviceId) throw new AppError("Sign in with a device ID to change pairing", 400);
+    const revoked = revokePairing(await this.db.pairingState(owner, deviceId));
+    await this.db.savePairingState(owner, deviceId, revoked);
+    return pairingStatus(revoked, Date.now());
+  }
+
+  /**
+   * Pair a device directly, with no OTP.
+   *
+   * For the first-device bootstrap only, where the caller has already proved
+   * possession of the account access key — a stronger statement than an OTP
+   * typed by an operator, and available before any device exists. The route
+   * refuses to call this once any device is paired, so it cannot be used to
+   * resurrect a revoked pairing; re-pairing goes through the OTP path.
+   */
+  async pairDevice(owner: string, deviceId: string): Promise<PairingStatus> {
+    const paired: PairingState = { pairedAt: Date.now(), challenge: null };
+    await this.db.savePairingState(owner, deviceId, paired);
+    return pairingStatus(paired, Date.now());
+  }
+
+  /**
+   * The single place the read-vs-execute rule is enforced.
+   *
+   * Called by every route that acts on a device's behalf. Throws rather than
+   * returning a verdict, because a caller that forgets to check the return value
+   * would otherwise proceed unpaired — the failure mode this whole module
+   * exists to prevent.
+   */
+  async requirePaired(owner: string, deviceId: string | null | undefined): Promise<void> {
+    if (!deviceId) throw new AppError("Sign in with a device ID to run device work", 400);
+    const decision = pairingDecision(await this.db.pairingState(owner, deviceId), "execute");
+    if (!decision.allowed)
+      throw new AppError(
+        "Pair this device before it runs work. Ask your desktop for a pairing code.",
+        403,
+      );
   }
 
   /**
