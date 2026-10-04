@@ -7,6 +7,11 @@ import type { Config } from "./config.ts";
 import type { Store } from "./db.ts";
 import { AppError } from "./errors.ts";
 import type { Files } from "./files.ts";
+import {
+  applyUrlGuardWithDns,
+  OutboundUrlGuardError,
+  outboundGuardMode,
+} from "./security/outbound-url-guard.ts";
 
 const sessionSchema = z.object({
   id: z.string(),
@@ -45,7 +50,7 @@ export class BrowserService {
     if (!this.config.workerUrl || !this.config.workerToken) return Promise.resolve(false);
     const now = this.now();
     if (this.health && now - this.health.checkedAt < 15_000) return this.health.reachable;
-    const reachable = fetch(`${this.config.workerUrl}/health`, {
+    const reachable = this.outbound(`${this.config.workerUrl}/health`, {
       signal: AbortSignal.timeout(2000),
     }).then(
       (response) => response.ok,
@@ -63,13 +68,42 @@ export class BrowserService {
       if (this.queues.get(id) === next) this.queues.delete(id);
     }
   }
+  /**
+   * Fetch the worker with the SSRF guard applied per request.
+   *
+   * The config-time check in `readConfig` is lexical: it inspects the hostname
+   * STRING once at boot. This re-resolves immediately before the socket opens,
+   * so a name that resolved benignly at startup and privately now is refused.
+   * That NARROWS the rebinding window; it does not eliminate it, because nothing
+   * pins the connection onto the address validated here. See the "WHAT IS NOT
+   * BUILT" note in the guard for the full limit.
+   *
+   * `init` is forwarded verbatim — the guard governs the destination, never the
+   * request shape. Guard errors become a 503 with an actionable message; every
+   * other failure is left to the caller's own handling, so this cannot swallow
+   * a genuine transport error and report it as a policy decision.
+   */
+  private async outbound(url: string, init: RequestInit): Promise<Response> {
+    let guarded: URL;
+    try {
+      ({ url: guarded } = await applyUrlGuardWithDns(url, outboundGuardMode()));
+    } catch (error) {
+      if (error instanceof OutboundUrlGuardError)
+        throw new AppError(
+          "The browser worker's address resolves to a blocked destination. Check BROWSER_WORKER_URL.",
+          503,
+        );
+      throw error;
+    }
+    return fetch(guarded, init);
+  }
   private async request(path: string, body?: unknown, signal?: AbortSignal) {
     signal?.throwIfAborted();
     if (!this.config.workerUrl || !this.config.workerToken)
       throw new AppError("Browser worker is not configured. Start it using the setup guide.", 503);
     let response: Response;
     try {
-      response = await fetch(`${this.config.workerUrl}${path}`, {
+      response = await this.outbound(`${this.config.workerUrl}${path}`, {
         method: body === undefined ? "GET" : "POST",
         headers: {
           Authorization: `Bearer ${this.config.workerToken}`,
@@ -82,8 +116,12 @@ export class BrowserService {
           ? AbortSignal.any([signal, AbortSignal.timeout(45000)])
           : AbortSignal.timeout(45000),
       });
-    } catch {
+    } catch (error) {
       signal?.throwIfAborted();
+      // A guard refusal is a configuration fault with its own message; do not
+      // relabel it as "worker unavailable", which sends the operator to the
+      // wrong container.
+      if (error instanceof AppError && error.status === 503) throw error;
       throw new AppError(
         "Browser worker is unavailable. Check that its container is running.",
         503,

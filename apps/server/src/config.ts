@@ -1,6 +1,26 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
+import { applyUrlGuard, outboundGuardMode } from "./security/outbound-url-guard.ts";
+
+/**
+ * Validate an operator-supplied outbound endpoint through the SSRF guard.
+ *
+ * Applied LEXICALLY here, at config read. The per-request resolve-then-validate
+ * pass lives with the code that actually opens the socket (`browser.ts`), because
+ * a DNS answer captured at boot says nothing about the one that matters later.
+ * A blocked URL fails startup loudly rather than at the first request, because a
+ * misconfigured `.env` is an operator error and should read as one.
+ */
+export function guardedEndpoint(name: string, value: string | undefined): string | undefined {
+  if (!value?.trim()) return undefined;
+  try {
+    return applyUrlGuard(value.trim(), outboundGuardMode()).toString();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "invalid URL";
+    throw new Error(`${name} is not an acceptable outbound destination: ${reason}`);
+  }
+}
 
 /** .env keys whose file value loses to a different value already set in the environment. */
 export function shadowedEnvKeys(
@@ -160,7 +180,7 @@ export function readConfig(): Config {
       ? Number(process.env.SIMPLE_TASK_MAX_STEPS)
       : undefined,
     agentBackend: backend,
-    agentUrl: process.env.AGENT_URL,
+    agentUrl: guardedEndpoint("AGENT_URL", process.env.AGENT_URL),
     agentToken: process.env.AGENT_TOKEN,
     openaiApiFormat:
       // biome-ignore lint/suspicious/noUnnecessaryConditions: type assertion makes left side non-nullish
@@ -169,7 +189,10 @@ export function readConfig(): Config {
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
     googleRedirectUri: `${publicUrl}/api/google/callback`,
-    workerUrl: browserWorkerUrl(process.env.BROWSER_WORKER_URL),
+    workerUrl: guardedEndpoint(
+      "BROWSER_WORKER_URL",
+      browserWorkerUrl(process.env.BROWSER_WORKER_URL),
+    ),
     workerToken: process.env.WORKER_TOKEN,
     taskWorkerEnabled: process.env.TASK_WORKER_ENABLED !== "false",
     computerEnabled: process.env.COMPUTER_ENABLED === "true",

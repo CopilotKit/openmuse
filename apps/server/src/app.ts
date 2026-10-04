@@ -21,6 +21,7 @@ import { AgentService } from "./engine/service.ts";
 import { AppError } from "./errors.ts";
 import { Files } from "./files.ts";
 import { GoogleAuth } from "./google-auth.ts";
+import { gated } from "./security/gated-middleware.ts";
 import { WorkspaceService } from "./workspace.ts";
 
 export async function createApp(
@@ -200,7 +201,7 @@ export async function createApp(
       for (const id of input.data.attachmentIds) await files.get(c.get("owner"), id);
     return c.json(await actions.propose(c.get("owner"), input), 201);
   });
-  app.post("/api/actions/:id/decide", async (c) => {
+  app.post("/api/actions/:id/decide", gated("action.decide"), async (c) => {
     const body = z
       .object({ hash: z.string(), decision: z.enum(["approve", "deny"]) })
       .parse(await c.req.json());
@@ -305,7 +306,7 @@ export async function createApp(
     else await google.disconnect(c.get("owner"));
     return c.json({ ok: true });
   });
-  app.post("/api/browsers", async (c) => {
+  app.post("/api/browsers", gated("browser.session"), async (c) => {
     const body = z.object({ url: z.url().max(4096) }).parse(await c.req.json());
     return c.json(await browser.create(c.get("owner"), body.url), 201);
   });
@@ -313,7 +314,7 @@ export async function createApp(
     const owner = c.get("owner");
     return c.json(browser.decorate(owner, await browser.get(owner, c.req.param("id"))));
   });
-  app.post("/api/browsers/:id/navigate", async (c) => {
+  app.post("/api/browsers/:id/navigate", gated("browser.session"), async (c) => {
     const body = z.object({ url: z.url().max(4096) }).parse(await c.req.json());
     return c.json(await browser.navigate(c.get("owner"), c.req.param("id"), body.url));
   });
@@ -344,11 +345,14 @@ export async function createApp(
     );
     return c.html(browser.console(c.get("owner"), c.req.param("id")));
   });
-  app.post("/api/browsers/:id/console", async (c) => {
+  app.post("/api/browsers/:id/console", gated("browser.input"), async (c) => {
     await browser.input(c.get("owner"), c.req.param("id"), await c.req.json());
     return c.json({ ok: true });
   });
-  app.all("/api/copilotkit/*", async (c) => {
+  // The agent turn itself. It can reach any tool CHAT_TOOL_ALLOWLIST permits,
+  // including the computer, so it is gated as a dispatch surface rather than
+  // left ungated as "just another route".
+  app.all("/api/copilotkit/*", gated("chat.dispatch"), async (c) => {
     if (!agentConfigured(config))
       throw new AppError(
         "Configure a model and provider API key, or a valid AG-UI endpoint, to start chat",
