@@ -7,6 +7,7 @@ import {
   computerOutput,
   computerOutputLimit,
   type DockerResult,
+  // biome-ignore lint/suspicious/noImportCycles: deliberate three-way type cycle from upstream #133
 } from "./computer.ts";
 import type { Config } from "./config.ts";
 import { AppError } from "./errors.ts";
@@ -141,8 +142,8 @@ export function e2bDesktopDriver(config: Config, load = sdk): DesktopDriver {
         async readFile(path) {
           return box.files.read(path, { format: "bytes", user });
         },
-        async keepAlive(timeoutMs) {
-          await box.setTimeout(timeoutMs);
+        async keepAlive(keepMs) {
+          await box.setTimeout(keepMs);
         },
         async stream(known) {
           // Exit bits: 1 = x11vnc runs, 2 = noVNC listens, 4 = `known` started it.
@@ -388,14 +389,14 @@ export class E2BDesktopComputer {
   // deployment did not create. Sandbox.list omits lifecycle, so getInfo checks it.
   async inspect(labels: Record<string, string>) {
     const ids = await this.control(() => this.driver.list(labels));
-    if (!ids.length) return undefined;
+    if (ids.length === 0) return undefined;
     const refuse = () =>
       new AppError(
         "Computer ownership or isolation does not match this deployment; refusing to attach",
         409,
       );
-    if (ids.length > 1) throw refuse();
-    const info = await this.control(() => this.driver.info(ids[0]));
+    if (ids.length > 1 || !ids[0]) throw refuse();
+    const info = await this.control(() => this.driver.info(ids[0]!));
     const template = this.template();
     const same = (a: Record<string, string>, b: Record<string, string>) =>
       Object.keys(a).length === Object.keys(b).length &&

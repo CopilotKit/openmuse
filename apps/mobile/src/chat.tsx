@@ -28,7 +28,7 @@ import { BrowserRunContext, BrowserToolCard } from "./browser-tool-card";
 import { BrowserThreadCard } from "./computer";
 import { ConversationQueue, type QueuedMessage } from "./conversation-queue";
 import { runConversationTurn } from "./conversation-run";
-import { DesktopToolCard } from "./desktop-tool-card"; (Run the agent computer on an E2B Desktop sandbox (#133))
+import { DesktopToolCard } from "./desktop-tool-card";
 import { MailToolCard } from "./mail-tool-card";
 import { FileThreadCard, TaskThreadCard } from "./thread-artifacts";
 import { type Selection, useMuseThread } from "./threads";
@@ -73,14 +73,14 @@ export function WorkspaceTools() {
     ),
   });
   useRenderTool({
-      name: "use_desktop",
-      description: "Show the agent working on the computer's desktop",
-      parameters: displayParameters,
-      render: ({ toolCallId, result, status }) => (
-        <DesktopToolCard toolCallId={toolCallId} result={result} loading={status !== "complete"} />
-      ),
-    });
-    useRenderTool({
+    name: "use_desktop",
+    description: "Show the agent working on the computer's desktop",
+    parameters: displayParameters,
+    render: ({ toolCallId, result, status }) => (
+      <DesktopToolCard toolCallId={toolCallId} result={result} loading={status !== "complete"} />
+    ),
+  });
+  useRenderTool({
     name: "delegate_task",
     description: "Display delegated work",
     parameters: displayParameters,

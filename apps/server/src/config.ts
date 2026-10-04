@@ -73,7 +73,7 @@ export interface Config {
   allowedOrigins: string[];
 }
 
-export type ComputerProvider = "docker" | "e2b-desktop"; (Run the agent computer on an E2B Desktop sandbox (#133))
+export type ComputerProvider = "docker" | "e2b-desktop";
 export const intelligenceKeyRequiredMessage =
   "OpenMuse requires CPK_INTELLIGENCE_API_KEY. " +
   "Run `npx copilotkit@latest login` and `npx copilotkit@latest project select`, " +

@@ -1,6 +1,7 @@
 import { ExternalLink } from "lucide-react-native";
 import { memo, useEffect, useState } from "react";
 import { ActivityIndicator, AppState, Linking, Platform, View } from "react-native";
+// biome-ignore lint/correctness/noUnresolvedImports: platform-suffixed module (details.tsx imports it identically)
 import BrowserConsole from "./BrowserConsole";
 import { Button, colors, ErrorNotice } from "./ui";
 import { useWorkspace } from "./workspace";

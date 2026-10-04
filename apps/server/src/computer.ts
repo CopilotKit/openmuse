@@ -12,11 +12,13 @@ import {
   type ComputerBackend,
   DesktopComputerBackend,
   DockerComputer,
+  // biome-ignore lint/suspicious/noImportCycles: deliberate three-way type cycle from upstream #133
 } from "./computer-backend.ts";
 import {
   describeDesktopAction,
   desktopActionSchema,
   E2BDesktopComputer,
+  // biome-ignore lint/suspicious/noImportCycles: deliberate three-way type cycle from upstream #133
 } from "./computer-e2b-desktop.ts";
 import type { Config } from "./config.ts";
 import type { Store } from "./db.ts";
@@ -220,7 +222,6 @@ export class ComputerService {
         503,
       );
   }
- (Run the agent computer on an E2B Desktop sandbox (#133))
   private async acquire(owner: string, operation: Lease["operation"] = "operation") {
     this.enabled();
     const previous = await this.db.get<Lease>(owner, "computer-state", "lease");

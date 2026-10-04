@@ -4,7 +4,9 @@ import {
   computerIdentity,
   type DockerResult,
   type DockerRunner,
+  // biome-ignore lint/suspicious/noImportCycles: deliberate three-way type cycle from upstream #133
 } from "./computer.ts";
+// biome-ignore lint/suspicious/noImportCycles: deliberate three-way type cycle from upstream #133
 import { desktopCommand, type E2BDesktopComputer } from "./computer-e2b-desktop.ts";
 import type { ComputerProvider, Config } from "./config.ts";
 import { AppError } from "./errors.ts";
@@ -112,7 +114,7 @@ export class DockerComputer implements ComputerBackend {
     const result = z.array(inspectionSchema).length(1).safeParse(raw);
     if (!result.success)
       throw new AppError("Computer isolation inspection failed; refusing to attach", 409);
-    const c = result.data[0],
+    const c = result.data[0]!,
       h = c.HostConfig;
     const empty = (list: unknown[] | null) => !list?.length;
     const safe =
@@ -122,7 +124,7 @@ export class DockerComputer implements ComputerBackend {
       c.Config.WorkingDir === "/workspace" &&
       Object.entries(identity.labels).every(([key, value]) => c.Config.Labels?.[key] === value) &&
       c.Config.Env.every((value) =>
-        ["PATH", "HOME", "LANG", "NODE_VERSION", "YARN_VERSION"].includes(value.split("=")[0]),
+        ["PATH", "HOME", "LANG", "NODE_VERSION", "YARN_VERSION"].includes(value.split("=")[0]!),
       ) &&
       JSON.stringify(c.Config.Entrypoint) === '["/usr/bin/sleep"]' &&
       JSON.stringify(c.Config.Cmd) === '["infinity"]' &&
@@ -144,17 +146,17 @@ export class DockerComputer implements ComputerBackend {
       empty(h.Binds) &&
       empty(h.Devices) &&
       empty(h.DeviceRequests) &&
-      !Object.keys(h.PortBindings ?? {}).length &&
+      Object.keys(h.PortBindings ?? {}).length === 0 &&
       h.PidMode === "" &&
       h.IpcMode === "private" &&
       h.RestartPolicy.Name === "no" &&
       Object.keys(h.Tmpfs ?? {}).length === 1 &&
       h.Tmpfs?.["/tmp"] === "rw,nosuid,nodev,noexec,size=67108864,mode=1777" &&
       c.Mounts.length === 1 &&
-      c.Mounts[0].Type === "volume" &&
-      c.Mounts[0].Name === identity.volume &&
-      c.Mounts[0].Destination === "/workspace" &&
-      c.Mounts[0].RW &&
+      c.Mounts[0]!.Type === "volume" &&
+      c.Mounts[0]!.Name === identity.volume &&
+      c.Mounts[0]!.Destination === "/workspace" &&
+      c.Mounts[0]!.RW &&
       Object.keys(c.NetworkSettings.Networks).every((network) => network === "none");
     if (!safe)
       throw new AppError(
@@ -179,12 +181,12 @@ export class DockerComputer implements ComputerBackend {
       .length(1)
       .safeParse(JSON.parse(await this.checked(["volume", "inspect", identity.volume])));
     if (!parsed.success) throw new AppError("Computer workspace ownership inspection failed", 409);
-    const v = parsed.data[0];
+    const v = parsed.data[0]!;
     if (
       v.Name !== identity.volume ||
       v.Driver !== "local" ||
       v.Scope !== "local" ||
-      Object.keys(v.Options ?? {}).length ||
+      Object.keys(v.Options ?? {}).length > 0 ||
       !Object.entries(identity.labels).every(([key, value]) => v.Labels?.[key] === value)
     )
       throw new AppError("Computer workspace ownership or isolation does not match", 409);

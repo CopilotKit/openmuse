@@ -238,8 +238,8 @@ test("start creates one desktop per owner with pause-on-idle and prepares /works
   const started = await computer.start(owner);
   assert.equal(started.status, "running");
   assert.equal(f.calls.create.length, 1);
-  assert.equal(f.calls.create[0].template, "desktop");
-  assert.deepEqual(f.calls.create[0].metadata, own);
+  assert.equal(f.calls.create[0]!.template, "desktop");
+  assert.deepEqual(f.calls.create[0]!.metadata, own);
   assert.ok(f.calls.setup.some((s) => s.user === "root" && s.command.includes("/workspace")));
   assert.deepEqual(f.calls.files, ["/opt/openmuse/files.py"]);
   assert.ok(f.calls.setup.some((s) => s.user === "user" && s.command.includes("startxfce4")));
@@ -307,11 +307,11 @@ test("commands run as the desktop user in /workspace with DISPLAY and the 30 sec
   assert.equal(result.stdout, "partial");
   assert.equal(result.stderr, "bad input");
   const call = f.calls.run[0];
-  assert.equal(call.command, desktopCommand(command));
-  assert.equal(call.options.user, "user");
-  assert.equal(call.options.cwd, "/workspace/notes");
-  assert.equal(call.options.envs.DISPLAY, ":0");
-  assert.equal(call.options.timeoutMs, 35000);
+  assert.equal(call!.command, desktopCommand(command));
+  assert.equal(call!.options.user, "user");
+  assert.equal(call!.options.cwd, "/workspace/notes");
+  assert.equal(call!.options.envs.DISPLAY, ":0");
+  assert.equal(call!.options.timeoutMs, 35000);
   assert.equal(f.calls.pause.length, 0);
 });
 
@@ -446,7 +446,7 @@ test("abort is honoured even when it fired before the listener was registered", 
     { signal: controller.signal },
   );
   assert.equal(receipt.status, "interrupted");
-  assert.equal(g.calls.run[0].options.signal, controller.signal);
+  assert.equal(g.calls.run[0]!.options.signal, controller.signal);
   assert.equal(g.calls.kills, 1);
   assert.deepEqual(g.calls.pause, ["sbx-1"]);
 });
@@ -467,11 +467,11 @@ test("file operations send their request on stdin in chunks, never in argv or /w
   const call = f.calls.run[0];
   // About 4 MB of JSON: the in-box limit grows by a second per MB sent over stdin.
   assert.equal(
-    call.command,
+    call!.command,
     "/usr/bin/timeout --kill-after=1s 13s /usr/bin/python3 -I /opt/openmuse/files.py",
   );
-  assert.equal(call.options.timeoutMs, 15000);
-  assert.equal(call.options.stdin, true);
+  assert.equal(call!.options.timeoutMs, 15000);
+  assert.equal(call!.options.stdin, true);
   assert.ok(f.calls.stdin.length > 1);
   assert.equal(JSON.parse(f.calls.stdin.join("")).path, "/workspace/doc.pdf");
   assert.equal(f.calls.closed, 1);
@@ -549,7 +549,7 @@ test("a fresh process connects once and never pauses a missing desktop session",
   await second.execute(owner, { command: "pwd" });
   await second.execute(owner, { command: "pwd" });
   assert.equal(f.calls.connect.length, 2, "the second process connected once, then reused it");
-  assert.equal(f.calls.connect[1].timeoutMs, 15 * 60_000);
+  assert.equal(f.calls.connect[1]!.timeoutMs, 15 * 60_000);
   // Paused right after getInfo: connect resumes it cold, without Xfce, so it is paused again.
   let once = true;
   const g = fake({
@@ -572,7 +572,7 @@ test("opening the desktop keeps the box awake longer and commands never shorten 
   await computer.start(owner);
   await computer.desktopUrl(owner);
   await computer.execute(owner, { command: "pwd" });
-  const [desktop, command] = f.calls.keepAlive;
+  const [desktop, command] = f.calls.keepAlive as [number, number];
   assert.ok(desktop > 29 * 60_000 && desktop <= 30 * 60_000, String(desktop));
   assert.ok(command > 29 * 60_000, "a command must not cut the desktop's timeout to 15 minutes");
 });
@@ -632,8 +632,8 @@ test("concurrent viewers share one stream start", async () => {
   });
   const f = fake({ boxes: [{}], streamGate: () => gate });
   const { computer, owner } = service(f);
-  const viewers = [computer.desktopUrl(owner), computer.desktopUrl(owner)];
-  while (!f.calls.streams.length) await new Promise((resolve) => setImmediate(resolve));
+  const viewers = [computer.desktopUrl(owner), computer.desktopUrl(owner)] as const;
+  while (f.calls.streams.length === 0) await new Promise((resolve) => setImmediate(resolve));
   release?.();
   const [first, second] = await Promise.all(viewers);
   assert.equal(second.url, first.url);
@@ -818,8 +818,8 @@ test("use_desktop exists only on the desktop provider and returns text plus the 
     content?: string;
     source?: { type: string; value: string; mimeType: string };
   }[];
-  assert.equal(result[0].type, "text");
-  assert.match(result[0].content ?? "", /"width":1280/);
+  assert.equal(result[0]!.type, "text");
+  assert.match(result[0]!.content ?? "", /"width":1280/);
   assert.deepEqual(result[1], {
     type: "image",
     source: { type: "data", value: Buffer.from(jpeg).toString("base64"), mimeType: "image/jpeg" },
@@ -875,7 +875,7 @@ test("a screenshot tool result reaches the model as an image but not the chat hi
         complete: resolve,
       }),
   );
-  const output = JSON.parse(requests[1].body).input.find(
+  const output = JSON.parse(requests[1]!.body).input.find(
     (item: { type: string }) => item.type === "function_call_output",
   );
   assert.deepEqual(output.output, [
@@ -893,7 +893,7 @@ test("a desktop action runs while a stream refresh is in flight", async () => {
   const f = fake({ boxes: [{}], streamGate: () => gate });
   const { computer, owner } = service(f);
   const url = computer.desktopUrl(owner);
-  while (!f.calls.streams.length) await new Promise((resolve) => setImmediate(resolve));
+  while (f.calls.streams.length === 0) await new Promise((resolve) => setImmediate(resolve));
   // The viewer's stream start is still pending; the agent's step does not wait for it.
   const action = await computer.desktopAction(owner, { action: "screenshot" });
   assert.equal(action.receipt.status, "succeeded");
@@ -937,8 +937,8 @@ test("PDF exports budget for the response size as well as the small request", as
   });
   const { computer, owner } = service(f);
   await computer.pdfBytes(owner, "/workspace/doc.pdf");
-  assert.match(f.calls.run[0].command, /23s/);
-  assert.equal(f.calls.run[0].options.timeoutMs, 25000);
+  assert.match(f.calls.run[0]!.command, /23s/);
+  assert.equal(f.calls.run[0]!.options.timeoutMs, 25000);
 });
 
 test("transient keepAlive errors remain provider failures on a running computer", async () => {
@@ -966,7 +966,7 @@ test("delivered input remains succeeded when the screenshot fails", async () => 
   assert.equal(shot.data, "");
   assert.match(shot.warning ?? "", /Action performed.*before retrying/);
   assert.equal(
-    (await db.list<ComputerCommand>(owner, "computer-desktop-actions"))[0].status,
+    (await db.list<ComputerCommand>(owner, "computer-desktop-actions"))[0]!.status,
     "succeeded",
   );
 });
@@ -983,7 +983,9 @@ test("a delivered input with a lost response returns a durable uncertain receipt
         boxes: [{}],
         setupEffect: async (command) => {
           if (!command.startsWith("xdotool ") || !command.includes("|| exit 3")) return;
-          const [intent] = await db.list<ComputerCommand>(owner, "computer-desktop-actions");
+          const [intent] = (await db.list<ComputerCommand>(owner, "computer-desktop-actions")) as [
+            ComputerCommand,
+          ];
           assert.equal(intent.status, "interrupted", "uncertain intent is durable before dispatch");
           applied++;
           throw error;
@@ -1001,7 +1003,7 @@ test("a delivered input with a lost response returns a durable uncertain receipt
         args: unknown,
       ) => Promise<{ type: string; content?: string }[]>;
       const result = await execute(action);
-      const text = JSON.parse(result[0].content ?? "{}");
+      const text = JSON.parse(result[0]!.content ?? "{}");
       assert.equal(applied, 1, "the provider must never replay uncertain input");
       assert.equal(text.status, "interrupted");
       assert.equal(text.error, undefined);
@@ -1033,7 +1035,9 @@ test("partially delivered input with a nonzero exit stays uncertain without repl
         boxes: [{}],
         setupEffect: async (command) => {
           if (!isInput(command)) return;
-          const [intent] = await db.list<ComputerCommand>(owner, "computer-desktop-actions");
+          const [intent] = (await db.list<ComputerCommand>(owner, "computer-desktop-actions")) as [
+            ComputerCommand,
+          ];
           assert.equal(intent.status, "interrupted", "intent is durable before any input");
           applied++; // Return submits, or the first click lands, before xdotool fails.
         },
@@ -1053,10 +1057,12 @@ test("partially delivered input with a nonzero exit stays uncertain without repl
       ) => Promise<{ type: string; content?: string }[]>;
       const result = await execute(action);
       assert.equal(applied, 1, "partially delivered input must not be replayed");
-      const [persisted] = await db.list<ComputerCommand>(owner, "computer-desktop-actions");
+      const [persisted] = (await db.list<ComputerCommand>(owner, "computer-desktop-actions")) as [
+        ComputerCommand,
+      ];
       assert.equal(persisted.status, "interrupted", "a nonzero exit cannot undo delivered input");
       assert.ok(Array.isArray(result), JSON.stringify(result));
-      const text = JSON.parse(result[0].content ?? "{}");
+      const text = JSON.parse(result[0]!.content ?? "{}");
       assert.equal(text.status, "interrupted");
       assert.equal(text.error, undefined);
       assert.match(
