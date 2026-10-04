@@ -73,6 +73,74 @@ This also keeps a **role** distinct from a **device**: a role says what work it 
 done, a device says what it can do here, and pairing says whether it is trusted to
 act at all.
 
+## Platform: Android primary, iOS deferred
+
+Decided 2026-10-04. **Android is the primary target; iOS is a deferred sprint.**
+
+This settles the background-execution question that motivated it. A phone agent
+loop cannot rely on a suspended iOS app, so "foreground-only" was the honest
+constraint — on Android the same constraint is much weaker (foreground services
+and a background service survive suspension), so execution can be continuous
+rather than only while the app is open.
+
+Deferred means deferred: do not add iOS-specific workarounds, and do not let an
+iOS constraint drive a design decision.
+
+## On-device AI: `meaty` is the reference, not yet a provider
+
+`Wiltermoodj/meaty` is the model for on-device AI and is in this ecosystem, so
+OpenMuse can eventually rely on it as its served LLM. **Verified current state: it
+does not host an inference endpoint.** It *consumes* OpenAI-compatible servers
+(Ollama, LM Studio, LocalAI) via `OpenAICompatibleProvider`, discovers them over
+the LAN, and runs on-device models in-process through `llama.rn`/LiteRT. There is
+no `.listen()` in its `src/`, so nothing outside the app can call its inference.
+
+So the served-LLM capability is a **thing to build**, not an integration to
+configure. OpenMuse needs an OpenAI-compatible endpoint on the device.
+
+**Where it lives: meaty hosts it, OpenMuse calls it.** Decided 2026-10-04. Meaty
+already owns on-device inference (`llama.rn`/LiteRT/ExecuTorch) and the
+OpenAI-compatible client plumbing, so hosting the endpoint there keeps the model
+lifecycle and the server in one place instead of splitting them across two apps.
+
+Consequence to be honest about: this creates a hard dependency on an external
+repository, and OpenMuse cannot serve on-device inference until that work lands
+there. OpenMuse should treat meaty as **optional** — when the endpoint is absent,
+fall back per the model policy (remote LAN server, then API). Do not gate core
+agent functionality on meaty being present or updated.
+
+Contract OpenMuse needs from meaty: an OpenAI-compatible endpoint
+(`/v1/chat/completions`, SSE) reachable over the LAN, advertised so a device can
+discover it, with tool-calling support. `react-native-zeroconf` discovery and
+`networkDiscovery.ts`'s gateway/Ollama probes are the existing patterns to follow.
+
+## Model policy
+
+Local when the device has a capable model, otherwise API, with a per-task
+override. Matches the existing per-device model routing in
+`agent-settings:device-models:{deviceId}`, which already establishes the pattern.
+
+## Promotion from notes to tasks
+
+The agent **suggests**; the user **confirms**. Not automatic. A note promoted
+without asking is work the user never asked for, and on a single-user agent that
+is the difference between a tool and a nuisance.
+
+## Security lift order
+
+SSRF guard and host-exec gate first: they protect execution paths that already
+exist. Pairing comes with the device work it gates.
+
+## Surface: chat-first, board stays a tab
+
+Decided 2026-10-04. **Chat is the home surface** — it opens first and holds the
+majority of the layout. The board remains a top-level tab rather than being
+demoted or removed, because goal #4 (multiple specialist roles doing concurrent
+work on a kanban) needs it visible.
+
+Reconciling the two goals: chat is how you *direct* the work, the board is how you
+*watch* it. Chat owns capture and conversation; the board owns state.
+
 ## What this does not solve
 
 Stated plainly so it is not mistaken for more than it is:
