@@ -1,5 +1,8 @@
 import "../config.ts";
 import { createHash, randomUUID } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { EventType, type RunAgentInput } from "@ag-ui/core";
 import { defineTool } from "@copilotkit/runtime/v2";
 import { z } from "zod";
@@ -7,6 +10,7 @@ import type { AgentTask, DeviceModelRouting } from "../../../../packages/domain/
 import { emailDraftSchema, eventDraftSchema } from "../../../../packages/domain/src/index.ts";
 import { computerInstructions, computerTools } from "../computer-tools.ts";
 import type { Config } from "../config.ts";
+import { layaComputerTools, tryCreateLayaClient } from "../laya-tools.ts";
 import type { AgentService } from "./service.ts";
 import { tanstackAgent } from "./tanstack-agent.ts";
 import type { TaskContext } from "./worker.ts";
@@ -136,6 +140,7 @@ export async function executeModelTask(
     await checkpoint();
     return result;
   };
+  const laya = tryCreateLayaClient(config, owner);
   const tools = [
     ...computerTools(service.computer, service.files, owner, `task:${task.id}`, {
       signal: ctx.signal,
@@ -144,6 +149,16 @@ export async function executeModelTask(
         await ctx.guard();
       },
     }),
+    ...(laya
+      ? layaComputerTools(laya, {
+          signal: ctx.signal,
+          before: async () => {
+            if (outcome)
+              throw new Error("Task is waiting or finished; do not perform more actions");
+            await ctx.guard();
+          },
+        })
+      : []),
     tool(
       "set_plan",
       "Make a concrete plan for the delegated outcome",
@@ -173,14 +188,65 @@ export async function executeModelTask(
     ),
     tool(
       "read_mail_thread",
-      "Read the complete selected email thread",
-      z.object({ threadId: z.string() }),
-      async ({ threadId }) => {
-        const mail = await service.workspace.thread(owner, threadId);
+      "Read the complete selected email thread. If a purpose is provided and Laya is available, only messages relevant to that purpose are returned — cutting context tokens by up to 90%.",
+      z.object({
+        threadId: z.string(),
+        purpose: z
+          .string()
+          .min(1)
+          .max(500)
+          .optional()
+          .describe(
+            "What you're looking for in this thread. When provided with Laya active, only relevant messages are returned.",
+          ),
+      }),
+      async ({ threadId, purpose }) => {
+        const allMail = await service.workspace.thread(owner, threadId);
+        const slice = allMail.slice(-20);
+
+        let filteredMail = slice;
+        if (laya && purpose && slice.length > 1) {
+          const tempDir = await mkdtemp(join(tmpdir(), "laya-mail-"));
+          try {
+            const tempFiles: string[] = [];
+            for (let i = 0; i < slice.length; i++) {
+              const msg = slice[i]!;
+              const tempFile = join(tempDir, `msg-${i}.txt`);
+              const content = `[${msg.date}] From: ${msg.sender}\nSubject: ${msg.subject}\n\n${msg.body.slice(0, 3000)}`;
+              await writeFile(tempFile, content);
+              tempFiles.push(tempFile);
+            }
+            const globPattern = join(tempDir, "**", "*.txt");
+            const results = await laya.classifyHostGlob(
+              globPattern,
+              `Is this email message relevant to: ${purpose}?`,
+              {
+                relevant: "Yes, this message is directly relevant to the inquiry",
+                not_relevant: "No, this message is not relevant to the inquiry",
+              },
+            );
+            const relevantIndices = new Set<number>();
+            for (const r of results) {
+              const fileName = r.path?.split("/").pop() ?? "";
+              const match = fileName.match(/msg-(\d+)\.txt/);
+              if (match && r.choice === "relevant" && r.confidence > 0.5) {
+                relevantIndices.add(parseInt(match[1]!, 10));
+              }
+            }
+            if (relevantIndices.size > 0 && relevantIndices.size < slice.length) {
+              filteredMail = Array.from(relevantIndices)
+                .sort((a, b) => a - b)
+                .map((i) => slice[i]!);
+            }
+          } finally {
+            await rm(tempDir, { recursive: true, force: true });
+          }
+        }
+
         task = await ctx.checkpoint({
-          evidence: [...task.evidence, ...mail.map((m) => service.mailEvidence(m))],
+          evidence: [...task.evidence, ...filteredMail.map((m) => service.mailEvidence(m))],
         });
-        return mail;
+        return filteredMail;
       },
     ),
     tool(

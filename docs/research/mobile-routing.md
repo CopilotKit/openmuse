@@ -34,6 +34,18 @@ New endpoint in apps/server/src/engine/routes.ts. Returns:
 Used by the mobile UI to show which providers are active and which model
 names the server defaults to.
 
+### GET /api/agent/available-models
+New endpoint in `apps/server/src/engine/routes.ts`. Returns:
+```json
+{
+  "providers": { "openai": true, "google": false },
+  "models": { "chat": "...", "task": "...", "simpleTask": "..." },
+  "chatToolAllowlist": ["delegate_task", "agent_status"]
+}
+```
+No device session required. Used by the mobile UI to validate that a
+user-selected model name matches a configured provider.
+
 ### GET/PATCH /api/agent/device-models
 Located in apps/server/src/engine/routes.ts. Requires deviceId session.
 - GET: reads agent-settings DB entry keyed device-models:${deviceId}, returns {}
@@ -206,9 +218,9 @@ tool allowlist — the task model is always given the full tool set.
 
 ## Tests
 
-Unit (tests/model-routing.test.ts): 10 tests
-- 4 selectTaskModel device override tests (priority, fallback, undefined, step override)
-- 6 filterTools tests (undefined, empty, exact, prefix glob, wildcard, mixed)
+Unit (tests/model-routing.test.ts): 11 tests
+- 6 selectTaskModel device override tests (priority, fallback, undefined, step override, custom env steps, model-only config)
+- 5 filterTools tests (undefined, empty, exact, prefix glob, wildcard, mixed, mobile-friendly)
 
 Integration (tests/agent-api.test.ts): 4 routing tests
 - device-models round-trip (chatModel, taskModel, chatMaxSteps: 3)
