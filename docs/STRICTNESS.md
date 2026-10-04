@@ -102,6 +102,13 @@ Postgres.
 concurrent behaviour, release it in a `finally`. An assertion failure before the
 release otherwise hangs the suite instead of failing it.
 
+**`pnpm test` must glob every directory that holds tests.** It read
+`tests/ apps/mobile/test/` and silently omitted `packages/domain/test/` — so 21
+tests of the pure core (capabilities, sync) had never once run in the full gate,
+and neither did the new note rules. Anything added under `packages/domain/test/`
+is dead weight until the glob includes it; verify a new file's tests actually
+appear by checking the suite count moves.
+
 **New behaviour needs a test that fails without it.** For the dependency gate we
 confirmed this by removing the gate and watching the new tests fail
 (`MUTATION_KILLED`), rather than trusting that a green suite means the code is
