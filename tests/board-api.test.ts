@@ -34,6 +34,12 @@ async function read<T>(path: string, init?: RequestInit, status = 200): Promise<
 
 const post = (body: unknown) => ({ method: "POST", body: JSON.stringify(body) });
 
+/** Assert a status only; used for 204s, which carry no body to parse. */
+async function expectStatus(path: string, init: RequestInit, status: number): Promise<void> {
+  const response = await server.app.request(`/api/agent${path}`, { headers: headers(), ...init });
+  assert.equal(response.status, status, await response.clone().text());
+}
+
 before(async () => {
   directory = await mkdtemp(join(tmpdir(), "openmuse-board-api-"));
   db = await createStore({ dataDir: join(directory, "db") });
@@ -196,4 +202,70 @@ test("a duplicate edge is refused rather than silently doubling up", async () =>
   await read(`/tasks/${b}/dependencies`, post({ dependsOnId: a }), 409);
   const graph = await read<{ dependsOn: string[] }>(`/tasks/${b}/dependencies`);
   assert.deepEqual(graph.dependsOn, [a]);
+});
+
+/** Settle a task so it becomes deletable, mirroring what a worker would write. */
+async function settle(id: string, status: "succeeded" | "failed" | "cancelled"): Promise<void> {
+  const stored = await db.get<AgentTask>(OWNER, "tasks", id);
+  assert.ok(stored);
+  await db.put(OWNER, "tasks", { ...stored, status });
+}
+
+test("a task that is still running cannot be deleted", async () => {
+  const id = await newTask("Still working");
+  const body = await read<{ error: string; status?: string }>(
+    `/tasks/${id}`,
+    { method: "DELETE" },
+    409,
+  );
+  assert.match(body.error, /Cancel the task before deleting/);
+  // details are spread flat into the body, matching the board-move convention.
+  assert.equal(body.status, "queued", "the conflict reports why it was refused");
+  assert.ok(await db.get<AgentTask>(OWNER, "tasks", id), "the task is still there");
+});
+
+test("deleting a task removes it and clears its dependency edges both ways", async () => {
+  const upstream = await newTask("Delete me upstream");
+  const downstream = await newTask("Depends on the deleted task");
+  await read(`/tasks/${downstream}/dependencies`, post({ dependsOnId: upstream }), 201);
+  await settle(upstream, "cancelled");
+
+  await expectStatus(`/tasks/${upstream}`, { method: "DELETE" }, 204);
+  assert.equal(await db.get<AgentTask>(OWNER, "tasks", upstream), null);
+  assert.deepEqual(
+    await db.dependencies(OWNER, downstream),
+    [],
+    "no dangling edge into a deleted task",
+  );
+  assert.deepEqual(await db.dependents(OWNER, upstream), [], "no dangling edge out of it");
+
+  // The dependent must be runnable again: a deleted prerequisite counts as
+  // unmet forever otherwise, so it would be blocked for good.
+  const graph = await read<{ dependsOn: string[]; unmet: string[] }>(
+    `/tasks/${downstream}/dependencies`,
+  );
+  assert.deepEqual(graph.dependsOn, []);
+  assert.deepEqual(graph.unmet, []);
+});
+
+test("deleting a task takes its run history with it", async () => {
+  const id = await newTask("Delete with history");
+  await db.put(OWNER, "run-events", {
+    id: "event-for-deleted-task",
+    taskId: id,
+    date: new Date().toISOString(),
+    kind: "status",
+    title: "Something happened",
+    detail: "",
+  });
+  await settle(id, "succeeded");
+  await expectStatus(`/tasks/${id}`, { method: "DELETE" }, 204);
+  const remaining = (await db.list<{ id: string; taskId?: string }>(OWNER, "run-events")).filter(
+    (event) => event.taskId === id,
+  );
+  assert.deepEqual(remaining, []);
+});
+
+test("deleting an unknown task is a 404", async () => {
+  await expectStatus("/tasks/does-not-exist", { method: "DELETE" }, 404);
 });

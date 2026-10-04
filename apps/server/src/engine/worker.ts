@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AgentTask, RunEvent } from "../../../../packages/domain/src/agent.ts";
+import { selectRunnable } from "../../../../packages/domain/src/scheduler.ts";
 import type { Store } from "../db.ts";
 import { backgroundFailure } from "../log.ts";
 
@@ -21,11 +22,12 @@ export type TaskHandler = (
   context: TaskContext,
 ) => Promise<Partial<AgentTask>>;
 export class TaskWorker {
-  private timer?: ReturnType<typeof setInterval>;
+  // `| undefined` because `stop()` clears it explicitly to release the handle.
+  private timer?: ReturnType<typeof setInterval> | undefined;
   private ticking = false;
   private stopping = false;
   private active = new Map<string, AbortController>();
-  lastTickAt?: string;
+  lastTickAt?: string | undefined;
   constructor(
     private readonly db: Store,
     private readonly execute: TaskHandler,
@@ -75,13 +77,26 @@ export class TaskWorker {
     this.lastTickAt = new Date(this.now()).toISOString();
     try {
       const records = await this.db.scan<AgentTask>("tasks");
+      const now = this.now();
+      // Resolve prerequisites once per owner, not once per task, then let the
+      // shared predicate decide what may run. Owners are independent here, so
+      // each is gated only by its own edges.
+      const runnableByOwner = new Map<string, Set<string>>();
+      for (const owner of new Set(records.map((record) => record.owner))) {
+        const candidates = records
+          .filter((record) => record.owner === owner && !this.active.has(record.value.id))
+          .map((record) => record.value);
+        runnableByOwner.set(
+          owner,
+          new Set(
+            selectRunnable(candidates, await this.db.prerequisiteStatuses(owner), now).map(
+              (task) => task.id,
+            ),
+          ),
+        );
+      }
       const due = records.filter(
-        ({ value: t }) =>
-          !this.active.has(t.id) &&
-          (t.status === "queued" ||
-            (t.status === "scheduled" && Date.parse(t.nextRunAt ?? "") <= this.now()) ||
-            (t.status === "running" && Date.parse(t.leaseUntil ?? "") <= this.now()) ||
-            t.status === "waiting_approval"),
+        ({ owner, value: t }) => runnableByOwner.get(owner)?.has(t.id) === true,
       );
       const eligible: typeof due = [];
       for (const record of due) {

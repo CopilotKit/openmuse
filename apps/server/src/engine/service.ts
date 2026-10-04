@@ -16,7 +16,6 @@ import {
   type Monitor,
   monitorInputSchema,
   type RunEvent,
-  type TaskStatus,
 } from "../../../../packages/domain/src/agent.ts";
 import {
   type BoardState,
@@ -33,6 +32,7 @@ import type {
   Mail,
   ProposalInput,
 } from "../../../../packages/domain/src/index.ts";
+import { unmetDependencies } from "../../../../packages/domain/src/scheduler.ts";
 import type { ActionService } from "../actions.ts";
 import type { DeviceInfo } from "../auth.ts";
 import type { BrowserService } from "../browser.ts";
@@ -50,11 +50,10 @@ import { LostLeaseError, type TaskContext, TaskWorker } from "./worker.ts";
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const date = () => new Date().toISOString();
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
-/** A dependency is satisfied once it can never run again, successfully or not. */
-const isClosedStatus = (status: TaskStatus) => terminal.has(status);
 export class AgentService {
   readonly worker: TaskWorker;
-  private maintenance?: ReturnType<typeof setInterval>;
+  // `| undefined` because it is cleared on shutdown to release the handle.
+  private maintenance?: ReturnType<typeof setInterval> | undefined;
   private refreshing = false;
   constructor(
     readonly db: Store,
@@ -209,15 +208,14 @@ export class AgentService {
   }
   /** A task's dependency edges, plus which of its prerequisites are unmet. */
   async taskGraph(owner: string, id: string) {
-    const [dependsOn, dependents] = await Promise.all([
+    const [dependsOn, dependents, statuses] = await Promise.all([
       this.db.dependencies(owner, id),
       this.db.dependents(owner, id),
+      this.db.prerequisiteStatuses(owner),
     ]);
-    const unmet: string[] = [];
-    for (const dependencyId of dependsOn) {
-      const dependency = await this.db.get<AgentTask>(owner, "tasks", dependencyId);
-      if (!dependency || !isClosedStatus(dependency.status)) unmet.push(dependencyId);
-    }
+    // Shared with the scheduler so the API and the worker cannot disagree about
+    // what counts as satisfied.
+    const unmet = unmetDependencies(statuses.get(id) ?? []);
     return { dependsOn, dependents, unmet };
   }
   /**
@@ -408,6 +406,33 @@ export class AgentService {
     });
     return updated;
   }
+  /**
+   * Delete a task and everything scoped to it.
+   *
+   * Only terminal tasks can be deleted: removing a task that a worker still
+   * holds a lease on would let that worker keep writing rows for something the
+   * user can no longer see. Cancelling first is the intended path — cancelling
+   * keeps the audit trail, deleting discards it.
+   *
+   * Dependency edges must go in both directions. A dangling edge into a deleted
+   * task counts as unmet and would block its dependents forever; a dangling edge
+   * out of one leaves the scheduler following edges to nothing.
+   */
+  async deleteTask(owner: string, id: string): Promise<{ id: string }> {
+    const task = await this.getTask(owner, id);
+    if (!terminal.has(task.status))
+      throw new AppError("Cancel the task before deleting it", 409, { status: task.status });
+    if (task.kind === "monitor" && task.input.monitorId)
+      await this.db.remove(owner, "monitors", String(task.input.monitorId));
+    await this.db.removeDependenciesFor(owner, id);
+    // Events and runs are keyed by their own id, so they are removed by scan.
+    for (const kind of ["run-events", "runs"]) {
+      for (const record of await this.db.list<{ id: string; taskId?: string }>(owner, kind))
+        if (record.taskId === id) await this.db.remove(owner, kind, record.id);
+    }
+    await this.db.remove(owner, "tasks", id);
+    return { id };
+  }
   async answer(
     owner: string,
     id: string,
@@ -450,7 +475,9 @@ export class AgentService {
   async updateGoal(
     owner: string,
     id: string,
-    patch: { status?: Goal["status"]; milestones?: Goal["milestones"] },
+    // `| undefined` because `goalPatchSchema` produces explicit undefined for
+    // keys the client omitted; both mean "leave this field alone" below.
+    patch: { status?: Goal["status"] | undefined; milestones?: Goal["milestones"] | undefined },
   ) {
     const goal = await this.db.get<Goal>(owner, "goals", id);
     if (!goal) throw new AppError("Goal not found", 404);

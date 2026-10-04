@@ -19,13 +19,13 @@ export interface Evidence {
   kind: "mail" | "file" | "web" | "user";
   title: string;
   excerpt: string;
-  url?: string;
+  url?: string | undefined;
 }
 export interface TaskStep {
   id: string;
   title: string;
   status: "pending" | "running" | "succeeded" | "failed" | "waiting";
-  detail?: string;
+  detail?: string | undefined;
 }
 export interface AgentTask {
   id: string;
@@ -39,22 +39,22 @@ export interface AgentTask {
    * `DEFAULT_BOARD_STATE`. Never infer this from `status`: waiting for your
    * approval and blocked-on-a-dependency are different things.
    */
-  boardState?: BoardState;
-  goalId?: string;
+  boardState?: BoardState | undefined;
+  goalId?: string | undefined;
   plan: TaskStep[];
   evidence: Evidence[];
   input: Record<string, unknown>;
   state: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
-  nextRunAt?: string;
-  leaseId?: string | null;
-  leaseUntil?: string | null;
+  nextRunAt?: string | undefined;
+  leaseId?: string | null | undefined;
+  leaseUntil?: string | null | undefined;
   attempts: number;
-  actionId?: string | null;
-  result?: string;
-  error?: string | null;
-  question?: string;
+  actionId?: string | null | undefined;
+  result?: string | undefined;
+  error?: string | null | undefined;
+  question?: string | undefined;
   artifactIds: string[];
 }
 export interface RunEvent {
@@ -84,10 +84,10 @@ export interface Monitor {
   intervalMinutes: number;
   status: "active" | "paused" | "stopped";
   nextCheckAt: string;
-  lastCheckedAt?: string;
-  lastValue?: string;
-  lastHash?: string;
-  error?: string;
+  lastCheckedAt?: string | undefined;
+  lastValue?: string | undefined;
+  lastHash?: string | undefined;
+  error?: string | undefined;
   checks: number;
 }
 export interface Idea {
@@ -99,7 +99,7 @@ export interface Idea {
   kind: AgentTask["kind"];
   input: Record<string, unknown>;
   status: "new" | "dismissed" | "accepted";
-  taskId?: string;
+  taskId?: string | undefined;
   createdAt: string;
 }
 export interface AgentMemory {
@@ -119,7 +119,7 @@ export interface AgentArtifact {
 }
 export interface AgentNotification {
   id: string;
-  taskId?: string;
+  taskId?: string | undefined;
   title: string;
   body: string;
   createdAt: string;
@@ -128,8 +128,8 @@ export interface AgentNotification {
 export interface AgentIdentity {
   name: string;
   tone: "warm" | "concise" | "thoughtful";
-  avatar?: "sky" | "sand" | "lilac";
-  showChatUpdates?: boolean;
+  avatar?: "sky" | "sand" | "lilac" | undefined;
+  showChatUpdates?: boolean | undefined;
 }
 export interface AgentWorkspace {
   tasks: AgentTask[];
@@ -140,31 +140,31 @@ export interface AgentWorkspace {
   artifacts: AgentArtifact[];
   notifications: AgentNotification[];
   identity: AgentIdentity;
-  worker: { running: boolean; lastTickAt?: string };
+  worker: { running: boolean; lastTickAt?: string | undefined };
 }
 /** Server-side model routing configuration, returned by /api/agent/models. */
 export interface ModelRoutingInfo {
-  chatModel?: string;
-  taskModel?: string;
-  simpleTaskModel?: string;
+  chatModel?: string | undefined;
+  taskModel?: string | undefined;
+  simpleTaskModel?: string | undefined;
   maxSteps: {
     chat: number;
     task: number;
     simpleTask: number;
   };
   simpleTaskKinds: readonly ("monitor" | "finance")[];
-  chatToolAllowlist?: string[];
+  chatToolAllowlist?: string[] | undefined;
 }
 /** Per-device model routing overrides; stored server-side keyed by deviceId. */
 export interface DeviceModelRouting {
-  chatModel?: string;
-  taskModel?: string;
-  simpleTaskModel?: string;
-  chatMaxSteps?: number;
-  taskMaxSteps?: number;
-  simpleTaskMaxSteps?: number;
+  chatModel?: string | undefined;
+  taskModel?: string | undefined;
+  simpleTaskModel?: string | undefined;
+  chatMaxSteps?: number | undefined;
+  taskMaxSteps?: number | undefined;
+  simpleTaskMaxSteps?: number | undefined;
   /** Override for the server-wide CHAT_TOOL_ALLOWLIST (comma-separated). */
-  chatToolAllowlist?: string[];
+  chatToolAllowlist?: string[] | undefined;
 }
 export const createTaskSchema = z.object({
   title: z.string().trim().min(1).max(160).optional(),

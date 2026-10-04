@@ -32,44 +32,44 @@ export interface Config {
   host: string;
   publicUrl: string;
   dataDir: string;
-  databaseUrl?: string;
-  accessKey?: string;
-  encryptionKey?: string;
-  model?: string;
+  databaseUrl?: string | undefined;
+  accessKey?: string | undefined;
+  encryptionKey?: string | undefined;
+  model?: string | undefined;
   /** Model used for interactive chat (ConversationAgent). Falls back to `model`. */
-  chatModel?: string;
+  chatModel?: string | undefined;
   /** Model used for complex durable tasks (task worker). Falls back to `model`, then `chatModel`. */
-  taskModel?: string;
+  taskModel?: string | undefined;
   /** Model used for simple task kinds (monitor, finance). Falls back to `chatModel`, then `model`. */
-  simpleTaskModel?: string;
+  simpleTaskModel?: string | undefined;
   /** Comma-separated tool name allowlist for chat (e.g. "delegate_task,agent_status,computer_*"). */
-  chatToolAllowlist?: string[];
+  chatToolAllowlist?: string[] | undefined;
   /** Max tool-call iterations for interactive chat. Default: 6. */
-  chatMaxSteps?: number;
+  chatMaxSteps?: number | undefined;
   /** Max tool-call iterations for complex tasks. Default: 16. */
-  taskMaxSteps?: number;
+  taskMaxSteps?: number | undefined;
   /** Max tool-call iterations for simple tasks (monitor, finance). Default: 6. */
-  simpleTaskMaxSteps?: number;
+  simpleTaskMaxSteps?: number | undefined;
   /** SSE task-stream polling interval in milliseconds. Default: 2000. */
-  streamPollIntervalMs?: number;
+  streamPollIntervalMs?: number | undefined;
   agentBackend: "sample" | "model" | "agui";
-  agentUrl?: string;
-  agentToken?: string;
+  agentUrl?: string | undefined;
+  agentToken?: string | undefined;
   /** OpenAI API format: "responses" (Responses API, default) or "chat-completions" (for local backends like Ollama/llama.cpp). */
-  openaiApiFormat?: "responses" | "chat-completions";
-  intelligenceApiKey?: string;
-  googleClientId?: string;
-  googleClientSecret?: string;
+  openaiApiFormat?: "responses" | "chat-completions" | undefined;
+  intelligenceApiKey?: string | undefined;
+  googleClientId?: string | undefined;
+  googleClientSecret?: string | undefined;
   googleRedirectUri: string;
-  workerUrl?: string;
-  workerToken?: string;
-  taskWorkerEnabled?: boolean;
-  computerEnabled?: boolean;
-  computerImage?: string;
-  computerDeploymentId?: string;
+  workerUrl?: string | undefined;
+  workerToken?: string | undefined;
+  taskWorkerEnabled?: boolean | undefined;
+  computerEnabled?: boolean | undefined;
+  computerImage?: string | undefined;
+  computerDeploymentId?: string | undefined;
   computerProvider?: ComputerProvider;
   computerE2bTemplate?: string;
-  e2bApiKey?: string;
+  e2bApiKey?: string | undefined;
   allowedOrigins: string[];
 }
 

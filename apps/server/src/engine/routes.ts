@@ -93,6 +93,11 @@ export function agentRoutes(
       ),
     ),
   );
+  app.delete("/tasks/:id", async (c) => {
+    const owner = c.get("owner");
+    await service.deleteTask(owner, c.req.param("id"));
+    return c.body(null, 204);
+  });
   app.post("/tasks/:id/input", async (c) => {
     const body = z
       .object({

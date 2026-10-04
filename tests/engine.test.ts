@@ -135,6 +135,86 @@ test("scheduled tasks wait for due time and approvals wait for a recorded outcom
     await db.close();
   }
 });
+test("the worker withholds a task whose prerequisite has not finished", async () => {
+  const db = await createStore();
+  try {
+    await db.put("owner", "tasks", task("first"));
+    await db.put("owner", "tasks", task("second"));
+    assert.equal(await db.addDependency("owner", "second", "first"), true);
+
+    const started: string[] = [];
+    const worker = new TaskWorker(db, async (_owner, value) => {
+      started.push(value.id);
+      // Hold "first" open so the gate is observed while it is genuinely running.
+      if (value.id === "first") {
+        await db.compareAndSwap(
+          "owner",
+          "tasks",
+          value.id,
+          { status: "running" },
+          { status: "succeeded" },
+        );
+      }
+      return { status: "succeeded" };
+    });
+    await worker.tick();
+    // "first" may run; "second" must not have started alongside it.
+    assert.ok(started.includes("first"));
+    assert.equal(started.includes("second"), false, "dependent ran before its prerequisite");
+    assert.equal((await db.get<AgentTask>("owner", "tasks", "second"))?.status, "queued");
+
+    // A later tick, with the prerequisite closed, releases exactly the dependent.
+    await worker.tick();
+    assert.equal(started.includes("second"), true);
+    assert.equal((await db.get<AgentTask>("owner", "tasks", "second"))?.status, "succeeded");
+  } finally {
+    await db.close();
+  }
+});
+
+test("a dependent is not run while its prerequisite is still running in another batch", async () => {
+  const db = await createStore();
+  try {
+    await db.put("owner", "tasks", task("long"));
+    await db.put("owner", "tasks", task("short"));
+    await db.put("owner", "tasks", task("after"));
+    await db.addDependency("owner", "after", "long");
+
+    let releaseLong = () => {};
+    const held = new Promise<void>((resolve) => {
+      releaseLong = resolve;
+    });
+    const started: string[] = [];
+    const worker = new TaskWorker(
+      db,
+      async (_owner, value) => {
+        started.push(value.id);
+        if (value.id === "long") await held;
+        return { status: "succeeded" };
+      },
+      { now: () => Date.now(), leaseMs: 60_000 },
+    );
+    const running = worker.tick();
+    // Let the batch start, then check that only the two unblocked tasks ran.
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.deepEqual([...started].sort(), ["long", "short"]);
+      assert.equal((await db.get<AgentTask>("owner", "tasks", "after"))?.status, "queued");
+    } finally {
+      // Always release, or a failed assertion hangs the suite on this promise.
+      releaseLong();
+    }
+    await running;
+    assert.equal(
+      started.includes("after"),
+      false,
+      "dependent ran in the same batch as its prerequisite",
+    );
+  } finally {
+    await db.close();
+  }
+});
+
 test("finance artifacts compute cents exactly and reject ambiguous CSV", () => {
   const report = analyzeSpending(
     'date,description,amount,category\n2026-09-01,Salary,-1000,Income\n2026-09-02,"Coffee, local",10.10,Food\n2026-09-03,Lunch,20.20,Food',
