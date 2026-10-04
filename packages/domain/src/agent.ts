@@ -1,4 +1,8 @@
 import { z } from "zod";
+import type { BoardState } from "./board.ts";
+
+/** Board state for a task that has never been moved on the board. */
+export const DEFAULT_BOARD_STATE: BoardState = "Backlog";
 
 export type TaskStatus =
   | "queued"
@@ -29,6 +33,13 @@ export interface AgentTask {
   prompt: string;
   kind: "agent" | "document" | "monitor" | "finance" | "plan";
   status: TaskStatus;
+  /**
+   * Where the task sits on the user's board. Optional so rows written before
+   * the board layer existed still load; treat a missing value as
+   * `DEFAULT_BOARD_STATE`. Never infer this from `status`: waiting for your
+   * approval and blocked-on-a-dependency are different things.
+   */
+  boardState?: BoardState;
   goalId?: string;
   plan: TaskStep[];
   evidence: Evidence[];

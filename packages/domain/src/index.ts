@@ -199,4 +199,20 @@ export type {
   DeviceModelRouting,
   ModelRoutingInfo,
 } from "./agent.ts";
+export {
+  ALLOWED_TRANSITIONS as BOARD_ALLOWED_TRANSITIONS,
+  BOARD_STATES,
+  canTransition as canBoardTransition,
+  checkTransition as checkBoardTransition,
+  computeEffectiveState as computeEffectiveBoardState,
+  isBoardClosed,
+  isBoardState,
+  isTerminal as isBoardTerminal,
+  validTransitionsFor as validBoardTransitionsFor,
+} from "./board.ts";
+export type {
+  BoardState,
+  TransitionAcceptance as BoardTransitionAcceptance,
+  TransitionRejection as BoardTransitionRejection,
+} from "./board.ts";
 export type { ComputerCommand, ComputerDirectory, ComputerSnapshot } from "./computer.ts";
