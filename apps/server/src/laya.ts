@@ -18,38 +18,38 @@ import type { Config } from "./config.ts";
 export interface LayaBoolResult {
   answer: "yes" | "no";
   question: string;
-  noul?: number;
+  noul?: number | undefined;
   confidence: number;
-  cached?: boolean;
-  truncated?: boolean;
-  fallback?: boolean;
-  model?: string;
-  latency_ms?: number;
-  error?: string;
+  cached?: boolean | undefined;
+  truncated?: boolean | undefined;
+  fallback?: boolean | undefined;
+  model?: string | undefined;
+  latency_ms?: number | undefined;
+  error?: string | undefined;
 }
 
 export interface LayaChoiceResult {
   choice: string;
   question: string;
-  probabilities?: Record<string, number>;
+  probabilities?: Record<string, number> | undefined;
   confidence: number;
-  cached?: boolean;
-  truncated?: boolean;
-  fallback?: boolean;
-  model?: string;
-  latency_ms?: number;
-  path?: string;
-  error?: string;
+  cached?: boolean | undefined;
+  truncated?: boolean | undefined;
+  fallback?: boolean | undefined;
+  model?: string | undefined;
+  latency_ms?: number | undefined;
+  path?: string | undefined;
+  error?: string | undefined;
 }
 
 export interface LayaPickResult {
   path: string;
   purpose: string;
   probability: number;
-  model?: string;
-  latency_ms?: number;
-  cached?: boolean;
-  error?: string;
+  model?: string | undefined;
+  latency_ms?: number | undefined;
+  cached?: boolean | undefined;
+  error?: string | undefined;
 }
 
 export interface LayaStatus {

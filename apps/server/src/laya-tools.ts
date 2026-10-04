@@ -123,7 +123,7 @@ export function layaComputerTools(
     ),
     tool(
       "laya_status",
-      `Check the Laya classification service health and cache stats. Shows tunnel status, model info, and cache hit/miss counts.`,
+      "Check the Laya classification service health and cache stats. Shows tunnel status, model info, and cache hit/miss counts.",
       z.object({}),
       async () => {
         return laya.status();
@@ -131,7 +131,7 @@ export function layaComputerTools(
     ),
     tool(
       "laya_clear_cache",
-      `Clear all cached Laya classification results. Use after modifying workspace files to force re-classification on the next call.`,
+      "Clear all cached Laya classification results. Use after modifying workspace files to force re-classification on the next call.",
       z.object({}),
       async () => {
         return laya.clearCache();

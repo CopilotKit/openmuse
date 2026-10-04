@@ -5,6 +5,7 @@ import { type BuiltInAgent, defineTool } from "@copilotkit/runtime/v2";
 import { z } from "zod";
 import { MODEL_MAX_RETRIES } from "../apps/server/src/config.ts";
 import { tanstackAgent } from "../apps/server/src/engine/tanstack-agent.ts";
+import { defined } from "../packages/backends/src/strict-optional.ts";
 import { modelFixture } from "./helpers/model.ts";
 
 const run = (agent: BuiltInAgent) => {
@@ -36,9 +37,9 @@ const run = (agent: BuiltInAgent) => {
       error: (cause) => {
         // An erroring observable never completes, so resolve here.
         if (error === undefined) error = String(cause);
-        resolve({ error, finished: false, text });
+        resolve(defined({ error, finished: false, text }));
       },
-      complete: () => resolve({ error, finished, text }),
+      complete: () => resolve(defined({ error, finished, text })),
     });
   });
 };

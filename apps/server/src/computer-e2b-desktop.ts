@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { z } from "zod";
+import { defined } from "../../../packages/backends/src/strict-optional.ts";
 import {
   type ComputerState,
   computerOutput,
@@ -82,7 +83,9 @@ export interface DesktopDriver {
 
 // `load` is the SDK module; tests pass a fake one.
 export function e2bDesktopDriver(config: Config, load = sdk): DesktopDriver {
-  const opts = () => ({ apiKey: config.e2bApiKey, requestTimeoutMs: controlMs });
+  // The E2B SDK option bags predate `exactOptionalPropertyTypes`, so they reject an
+  // explicit `apiKey: undefined`. Omit it here rather than at all five call sites.
+  const opts = () => defined({ apiKey: config.e2bApiKey, requestTimeoutMs: controlMs });
   return {
     async list(metadata) {
       const { Sandbox } = await load();
@@ -359,7 +362,8 @@ const loadFilesScript = () =>
 interface Handle {
   box: DesktopBox;
   url?: string;
-  streaming?: Promise<string>;
+  // `| undefined`: cleared in a `finally` to release the in-flight promise.
+  streaming?: Promise<string> | undefined;
 }
 export class E2BDesktopComputer {
   private readonly handles = new Map<string, Handle>();
@@ -623,16 +627,19 @@ export class E2BDesktopComputer {
       if (options.signal?.aborted) abort();
       if (result.interrupted) return finish();
       try {
-        handle = await box.run(command, {
-          user,
-          cwd: options.cwd ?? "/workspace",
-          envs: { DISPLAY: display },
-          stdin: options.input !== undefined,
-          timeoutMs: options.timeoutMs,
-          signal: options.signal,
-          onStdout: capture(output.stdout),
-          onStderr: capture(output.stderr),
-        });
+        handle = await box.run(
+          command,
+          defined({
+            user,
+            cwd: options.cwd ?? "/workspace",
+            envs: { DISPLAY: display },
+            stdin: options.input !== undefined,
+            timeoutMs: options.timeoutMs,
+            signal: options.signal,
+            onStdout: capture(output.stdout),
+            onStderr: capture(output.stderr),
+          }),
+        );
       } catch (error) {
         if (error instanceof InvalidArgumentError) {
           // A missing working directory is rejected before the command starts.

@@ -24,6 +24,7 @@ import { computerInstructions, computerTools } from "../apps/server/src/computer
 import type { Config } from "../apps/server/src/config.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
 import { tanstackAgent } from "../apps/server/src/engine/tanstack-agent.ts";
+import { defined } from "../packages/backends/src/strict-optional.ts";
 import type { ComputerCommand } from "../packages/domain/src/computer.ts";
 import { config as base } from "./helpers/computer.ts";
 import { modelFixture } from "./helpers/model.ts";
@@ -771,7 +772,7 @@ test("X11 calls set DISPLAY themselves, so actions work on a resumed box", async
   class Sandbox {
     commands = {
       run: async (command: string, opts: { envs?: Record<string, string> }) => {
-        sdkCalls.push({ command, envs: opts.envs });
+        sdkCalls.push(defined({ command, envs: opts.envs }));
         if (opts.envs?.DISPLAY !== ":0")
           throw new CommandExitError({
             exitCode: 1,

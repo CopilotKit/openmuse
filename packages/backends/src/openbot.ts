@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { defined } from "./strict-optional.ts";
 
 /** Verified against OpenBot a96d88c6 and its public CopilotKit runtime 1.70.1. */
 export const OPENBOT_CONTRACT_REF = "a96d88c6fb75385842529d7db7d463f4a8c4a86e";
@@ -256,24 +257,37 @@ export class OpenBotAdapter {
   private async json<T>(
     path: string,
     schema: z.ZodType<T>,
-    init: RequestInit = {},
+    // Deliberately not `RequestInit`: under `exactOptionalPropertyTypes` that
+    // type rejects a caller passing `{ signal: maybeUndefined }`, and every call
+    // site here has an optional signal. This admits `undefined` and `defined()`
+    // below drops the absent keys before the object reaches the transport.
+    init: {
+      method?: string | undefined;
+      body?: string | undefined;
+      headers?: Record<string, string> | undefined;
+      signal?: AbortSignal | undefined;
+    } = {},
     mutates = false,
   ): Promise<T> {
+    init = defined(init);
     const transport = this.requireTransport();
     if (init.signal?.aborted)
       throw new OpenBotError("cancelled", "OpenBot request cancelled before dispatch.");
     let response: Response;
     try {
-      response = await transport.request(path, {
-        ...init,
-        method: init.method ?? "GET",
-        credentials: "include",
-        redirect: "error",
-        headers: {
-          Accept: "application/json",
-          ...(init.body ? { "Content-Type": "application/json" } : {}),
-        },
-      });
+      response = await transport.request(
+        path,
+        defined({
+          ...init,
+          method: init.method ?? "GET",
+          credentials: "include",
+          redirect: "error",
+          headers: {
+            Accept: "application/json",
+            ...(init.body ? { "Content-Type": "application/json" } : {}),
+          },
+        }),
+      );
     } catch {
       throw new OpenBotError(
         init.signal?.aborted ? "cancelled" : "unavailable",

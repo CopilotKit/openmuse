@@ -18,6 +18,7 @@ import { type GeminiTextModel, geminiText } from "@tanstack/ai-gemini";
 import { type OpenAIChatModel, openaiChatCompletions, openaiText } from "@tanstack/ai-openai";
 import { map, mergeMap, type Observable } from "rxjs";
 import { z } from "zod";
+import { defined } from "../../../../packages/backends/src/strict-optional.ts";
 import { MODEL_MAX_RETRIES } from "../config.ts";
 
 // Same "provider/model" strings, env vars and base URL formats as the AI SDK resolver in
@@ -51,11 +52,11 @@ function adapter(spec: string) {
     case "google-gemini":
       // The AI SDK base URL ends in /v1beta; @google/genai adds the API version itself.
       return geminiText(id as GeminiTextModel, {
-        httpOptions: {
+        httpOptions: defined({
           baseUrl: process.env.GOOGLE_GENERATIVE_AI_BASE_URL?.replace(/\/v1beta\/?$/, ""),
           // @google/genai counts the first call in `attempts`.
           retryOptions: { attempts: MODEL_MAX_RETRIES + 1 },
-        },
+        }),
       });
     default:
       throw unknownProvider(provider, spec);

@@ -13,7 +13,11 @@
       "!**/artifacts"
     ]
   },
-  "formatter": { "enabled": true, "indentStyle": "space", "lineWidth": 100 },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "lineWidth": 100
+  },
   "linter": {
     "enabled": true,
     "rules": {
@@ -29,7 +33,10 @@
         "noUnusedLabels": "error",
         "noUnusedPrivateClassMembers": "error",
         "useYield": "error",
-        "noUnresolvedImports": "error"
+        "noUnresolvedImports": "error",
+        "noConstantCondition": "error",
+        "noUnusedFunctionParameters": "error",
+        "useJsxKeyInIterable": "error"
       },
       "suspicious": {
         "noExplicitAny": "error",
@@ -56,7 +63,29 @@
         "useErrorMessage": "error",
         "useGuardForIn": "error",
         "useIsArray": "error",
-        "useIterableCallbackReturn": "error"
+        "useIterableCallbackReturn": "error",
+        "noImplicitAnyLet": "error",
+        "noUnassignedVariables": "error",
+        "noOctalEscape": "error",
+        "noAsyncPromiseExecutor": "error",
+        "noTsIgnore": "error",
+        "noCommentText": "error",
+        "noGlobalIsNan": "error",
+        "noFunctionAssign": "error",
+        "noArrayIndexKey": "error",
+        "noAssignInExpressions": "error",
+        "noDuplicateClassMembers": "error",
+        "noDuplicateDependencies": "error",
+        "noDuplicateParameters": "error",
+        "noExtraNonNullAssertion": "error",
+        "noHeadImportInDocument": "error",
+        "noShadowRestrictedNames": "error",
+        "useDefaultSwitchClauseLast": "error",
+        "noDocumentCookie": "error",
+        "noDuplicateFields": "error",
+        "noDuplicateObjectKeys": "error",
+        "noConfusingVoidType": "error",
+        "noUselessEscapeInString": "error"
       },
       "style": {
         "useImportType": "error",
@@ -69,7 +98,10 @@
         "useConst": "error",
         "useThrowOnlyError": "error",
         "useExplicitLengthCheck": "error",
-        "noUselessElse": "error"
+        "noUselessElse": "error",
+        "useConsistentArrayType": "error",
+        "noUnusedTemplateLiteral": "error",
+        "useDefaultParameterLast": "error"
       },
       "complexity": {
         "noUselessRename": "error",
@@ -78,7 +110,10 @@
         "noUselessFragments": "error",
         "noUselessReturn": "error",
         "noStaticOnlyClass": "error",
-        "noFlatMapIdentity": "error"
+        "noFlatMapIdentity": "error",
+        "useFlatMap": "error",
+        "noUselessSwitchCase": "error",
+        "noUselessThisAlias": "error"
       },
       "performance": {
         "noDelete": "error"
@@ -90,10 +125,23 @@
       }
     }
   },
-  "javascript": { "formatter": { "quoteStyle": "double" } },
-  "json": { "formatter": { "indentStyle": "space", "indentWidth": 2 } },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double"
+    }
+  },
+  "json": {
+    "formatter": {
+      "indentStyle": "space",
+      "indentWidth": 2
+    }
+  },
   "assist": {
-    "actions": { "source": { "organizeImports": "on" } }
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
   },
   "overrides": [
     {

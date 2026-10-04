@@ -1,13 +1,16 @@
 import { serve } from "@hono/node-server";
+import { defined } from "../../../packages/backends/src/strict-optional.ts";
 import { createApp } from "./app.ts";
 import { readConfig } from "./config.ts";
 import { createStore } from "./db.ts";
 
 const config = readConfig();
-const db = await createStore({
-  dataDir: `${config.dataDir}/postgres`,
-  databaseUrl: config.databaseUrl,
-});
+const db = await createStore(
+  defined({
+    dataDir: `${config.dataDir}/postgres`,
+    databaseUrl: config.databaseUrl,
+  }),
+);
 await db.recoverInterruptedActions();
 const { app, agent } = await createApp(db, config);
 if (config.taskWorkerEnabled) agent.start();

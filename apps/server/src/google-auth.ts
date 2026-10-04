@@ -14,7 +14,9 @@ const tokenSchema = z.object({
 interface Tokens {
   connectionId: string;
   accessToken: string;
-  refreshToken?: string;
+  // Google omits `refresh_token` when re-authorizing an already-connected
+  // account, so this is genuinely optional and callers fall back to the stored one.
+  refreshToken?: string | undefined;
   expiresAt: number;
   scopes: string[];
   account: string;

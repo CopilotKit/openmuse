@@ -6,8 +6,10 @@ import type { Store } from "./db.ts";
 import { AppError } from "./errors.ts";
 
 export interface DeviceInfo {
-  deviceId?: string | null;
-  deviceName?: string | null;
+  // `| undefined` because these come from a session row that may have been
+  // written before device identity existed.
+  deviceId?: string | null | undefined;
+  deviceName?: string | null | undefined;
 }
 
 const digest = (value: string) => createHash("sha256").update(value).digest();

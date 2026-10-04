@@ -4,6 +4,7 @@ import {
   type DockerRunner,
 } from "../../apps/server/src/computer.ts";
 import type { Config } from "../../apps/server/src/config.ts";
+import { defined } from "../../packages/backends/src/strict-optional.ts";
 export const config: Config = {
   mode: "sample",
   port: 8787,
@@ -74,7 +75,9 @@ export function fixture(
   const identity = computerIdentity(config, options.owner ?? "owner");
   const calls: { args: string[]; timeoutMs: number; input?: string }[] = [];
   const runner: DockerRunner = async (args, opts) => {
-    calls.push({ args, timeoutMs: opts.timeoutMs, input: opts.input });
+    // `input` is optional here; omitting it keeps the recorded call free of
+    // undefined-valued keys (tests read it as `call.input ?? ...`).
+    calls.push(defined({ args, timeoutMs: opts.timeoutMs, input: opts.input }));
     if (args[0] === "container" && args[1] === "ls")
       return ok(options.missing ? "" : "container-id\n");
     if (args[0] === "container" && args[1] === "inspect")

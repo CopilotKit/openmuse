@@ -57,9 +57,11 @@ test("the email demo reads the thread returned by search and quotes its actual d
   const search = demoResponse(mailRequest(messages));
   assert.ok("toolCalls" in search && search.toolCalls);
   assert.equal(search.toolCalls[0]!.name, "search_mail");
+  const searchCallId = search.toolCalls[0]!.id;
+  assert.ok(searchCallId, "the search tool call carries an id to reply with");
   messages.push({
     role: "tool",
-    tool_call_id: search.toolCalls[0]!.id,
+    tool_call_id: searchCallId,
     content: JSON.stringify({
       matches: [{ threadId: "dynamic-thread", subject: "New trip details" }],
     }),
@@ -68,9 +70,11 @@ test("the email demo reads the thread returned by search and quotes its actual d
   assert.ok("toolCalls" in read && read.toolCalls);
   assert.equal(read.toolCalls[0]!.name, "read_mail_thread");
   assert.deepEqual(JSON.parse(read.toolCalls[0]!.arguments), { threadId: "dynamic-thread" });
+  const readCallId = read.toolCalls[0]!.id;
+  assert.ok(readCallId, "the read tool call carries an id to reply with");
   messages.push({
     role: "tool",
-    tool_call_id: read.toolCalls[0]!.id,
+    tool_call_id: readCallId,
     content: JSON.stringify({
       messages: [
         {

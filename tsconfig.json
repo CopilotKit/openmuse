@@ -11,6 +11,7 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "noErrorTruncation": true,
+    "exactOptionalPropertyTypes": true,
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,
     "skipLibCheck": true,

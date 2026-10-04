@@ -47,8 +47,8 @@ export interface Artifact {
   url: string;
   createdAt: string;
   source: string;
-  parentId?: string;
-  fields?: { name: string; value: string; type: "text" | "checkbox" | "unsupported" }[];
+  parentId?: string | undefined;
+  fields?: { name: string; value: string; type: "text" | "checkbox" | "unsupported" }[] | undefined;
 }
 export interface BrowserSession {
   id: string;
@@ -56,8 +56,8 @@ export interface BrowserSession {
   url: string;
   status: "idle" | "active" | "closed" | "error";
   updatedAt: string;
-  previewUrl?: string;
-  consoleUrl?: string;
+  previewUrl?: string | undefined;
+  consoleUrl?: string | undefined;
 }
 export const emailDraftSchema = z.object({
   to: z.array(z.email()).min(1).max(50),
@@ -131,11 +131,11 @@ export type EmailDraft = z.infer<typeof emailDraftSchema>;
 export type EventDraft = z.infer<typeof eventDraftSchema>;
 export type ProposalInput = z.infer<typeof proposalSchema>;
 export interface ActionProposal {
-  target?: CalendarEvent;
-  targetVersion?: string;
-  taskId?: string;
-  account?: string;
-  connectionId?: string;
+  target?: CalendarEvent | undefined;
+  targetVersion?: string | undefined;
+  taskId?: string | undefined;
+  account?: string | undefined;
+  connectionId?: string | undefined;
   id: string;
   title: string;
   kind: ProposalInput["kind"];
@@ -152,8 +152,8 @@ export interface ActionProposal {
   hash: string;
   createdAt: string;
   expiresAt: string;
-  result?: string;
-  error?: string;
+  result?: string | undefined;
+  error?: string | undefined;
 }
 export interface ActivityEntry {
   id: string;
@@ -161,13 +161,13 @@ export interface ActivityEntry {
   detail: string;
   date: string;
   status: string;
-  actionId?: string;
+  actionId?: string | undefined;
 }
 export interface Connection {
   id: string;
   name: string;
   status: "connected" | "disconnected" | "sample" | "unconfigured" | "unavailable";
-  account?: string;
+  account?: string | undefined;
   capabilities: string[];
 }
 export interface Workspace {
@@ -184,7 +184,7 @@ export interface Workspace {
     provider: "sample" | "model" | "openbot";
     configured: boolean;
     openbotConfigured: boolean;
-    richThreads?: boolean;
+    richThreads?: boolean | undefined;
   };
 }
 

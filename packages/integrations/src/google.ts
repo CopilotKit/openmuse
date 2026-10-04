@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { type DefaultTreeAdapterMap, parseFragment } from "parse5";
 import { z } from "zod";
+import { defined } from "../../backends/src/strict-optional.ts";
 import {
   type CalendarEvent,
   type EmailDraft,
@@ -58,12 +59,16 @@ export interface ListEventsOptions {
   timeMax?: string;
 }
 
+// Zod's inferred output types carry `?: T | undefined`, so this local mirror of
+// the Gmail payload declares the same shape under `exactOptionalPropertyTypes`.
 interface GmailPart {
-  mimeType?: string;
-  filename?: string;
-  headers?: { name: string; value: string }[];
-  body?: { data?: string; size?: number; attachmentId?: string };
-  parts?: GmailPart[];
+  mimeType?: string | undefined;
+  filename?: string | undefined;
+  headers?: { name: string; value: string }[] | undefined;
+  body?:
+    | { data?: string | undefined; size?: number | undefined; attachmentId?: string | undefined }
+    | undefined;
+  parts?: GmailPart[] | undefined;
 }
 const partSchema: z.ZodType<GmailPart> = z.lazy(() =>
   z.object({
@@ -571,7 +576,9 @@ export class GoogleClient {
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
           ...conditionalHeaders,
         },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        // `RequestInit` is compiled without `exactOptionalPropertyTypes`, so the
+        // key must be absent rather than explicitly undefined.
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: AbortSignal.timeout(30000),
         redirect: "error",
       });
@@ -769,7 +776,9 @@ export class GoogleClient {
       .object({ id: z.string().min(1), threadId: z.string().optional() })
       .safeParse(result);
     if (!parsed.success) throw new OutcomeUnknownError();
-    return parsed.data;
+    // Zod may carry `threadId: undefined` explicitly; the return type promises
+    // absent-or-present, so drop undefined-valued keys before returning.
+    return defined(parsed.data);
   }
 
   async createEvent(input: EventDraft): Promise<CalendarEvent> {

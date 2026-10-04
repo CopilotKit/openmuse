@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { z } from "zod";
+import { defined } from "../../../packages/backends/src/strict-optional.ts";
 import { emailDraftSchema, proposalSchema } from "../../../packages/domain/src/index.ts";
 import { ActionService } from "./actions.ts";
 import { agentConfigured, makeRuntime, modelInfo } from "./agent.ts";
@@ -183,7 +184,12 @@ export async function createApp(
         Date.parse(query.timeMax) - Date.parse(query.timeMin) > 366 * 86400000)
     )
       throw new AppError("Choose a calendar range between one moment and 366 days", 422);
-    return c.json(await workspace.events(c.get("owner"), query));
+    return c.json(
+      await workspace.events(
+        c.get("owner"),
+        defined(query) as { calendarId?: string; timeMin?: string; timeMax?: string },
+      ),
+    );
   });
   app.get("/api/mail/threads/:id", async (c) =>
     c.json(await workspace.thread(c.get("owner"), c.req.param("id"))),

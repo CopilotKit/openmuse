@@ -168,9 +168,9 @@ interface Screen {
   id: "latest";
   receiptId: string;
   mimeType: string;
-  blob?: string;
-  data?: string; // Older deployments stored base64; accepted until the next screenshot.
-  takenAt?: string;
+  blob?: string | undefined;
+  data?: string | undefined; // Older deployments stored base64; accepted until the next screenshot.
+  takenAt?: string | undefined;
 }
 type Lease = {
   id: string;

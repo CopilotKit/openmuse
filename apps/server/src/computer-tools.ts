@@ -75,7 +75,7 @@ export function computerTools(
       async ({ operationId, ...args }) =>
         computer.execute(owner, args, {
           idempotencyKey: `${scope}:${operationId}`,
-          signal: options.signal,
+          ...(options.signal ? { signal: options.signal } : {}),
         }),
     ),
     tool(

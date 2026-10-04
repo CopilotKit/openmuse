@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { defined } from "../../../packages/backends/src/strict-optional.ts";
 import {
   type ComputerState,
   computerIdentity,
@@ -299,7 +300,7 @@ export class DockerComputer implements ComputerBackend {
             "-c",
             command,
           ],
-          { timeoutMs: 35000, signal },
+          defined({ timeoutMs: 35000, signal }),
         ),
       file: (input, _seconds, maxOutputBytes) =>
         this.docker(
@@ -354,7 +355,7 @@ export class DesktopComputerBackend implements ComputerBackend {
         this.desktop.run(labels, desktopCommand(command), {
           cwd,
           timeoutMs: 35000,
-          signal,
+          ...(signal ? { signal } : {}),
           verified,
         }),
       file: (input, seconds, maxOutputBytes) =>
@@ -364,7 +365,7 @@ export class DesktopComputerBackend implements ComputerBackend {
           {
             timeoutMs: (seconds + 2) * 1000,
             input,
-            maxOutputBytes,
+            ...(maxOutputBytes === undefined ? {} : { maxOutputBytes }),
             propagateAttachError: true,
             verified,
           },

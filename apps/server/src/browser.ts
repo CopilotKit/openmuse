@@ -73,9 +73,11 @@ export class BrowserService {
         method: body === undefined ? "GET" : "POST",
         headers: {
           Authorization: `Bearer ${this.config.workerToken}`,
-          "Content-Type": "application/json",
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        // `exactOptionalPropertyTypes`: a GET must omit `body` entirely rather
+        // than pass an explicit undefined.
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: signal
           ? AbortSignal.any([signal, AbortSignal.timeout(45000)])
           : AbortSignal.timeout(45000),
