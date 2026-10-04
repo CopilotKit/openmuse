@@ -2,6 +2,8 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
+import type { TaskStatus } from "../../../packages/domain/src/agent.ts";
+import type { Prerequisite } from "../../../packages/domain/src/scheduler.ts";
 import { backgroundFailure } from "./log.ts";
 
 /** `data` is the records table's payload; the index signature covers the real tables. */
@@ -44,6 +46,15 @@ export class Store {
       kind,
       id,
     ]);
+  }
+  /**
+   * Empty every table. Only for test fixtures and destructive maintenance —
+   * this is the only method here that discards other owners' data, so it must
+   * never sit on a request path.
+   */
+  async clearAll(): Promise<void> {
+    await this.db.query("DELETE FROM records");
+    await this.db.query("DELETE FROM task_dependencies");
   }
   async compareAndSwap<T>(
     owner: string,
@@ -177,6 +188,34 @@ export class Store {
       }
     }
     return false;
+  }
+  /**
+   * Every prerequisite edge for an owner, each paired with that prerequisite's
+   * current status, or `undefined` when the prerequisite task no longer exists.
+   *
+   * One query rather than one per task: the scheduler calls this on every tick
+   * and a per-task lookup would make dispatch scale with total task count.
+   */
+  async prerequisiteStatuses(owner: string): Promise<Map<string, Prerequisite[]>> {
+    const result = await this.db.query<{
+      task_id: string;
+      depends_on_id: string;
+      status?: TaskStatus;
+    }>(
+      `SELECT d.task_id, d.depends_on_id, t.data->>'status' AS status
+       FROM task_dependencies d
+       LEFT JOIN records t ON t.owner=d.owner AND t.kind='tasks' AND t.id=d.depends_on_id
+       WHERE d.owner=$1`,
+      [owner],
+    );
+    const edges = new Map<string, Prerequisite[]>();
+    for (const row of result.rows) {
+      const prerequisite: Prerequisite = { id: row.depends_on_id, status: row.status };
+      const existing = edges.get(row.task_id);
+      if (existing) existing.push(prerequisite);
+      else edges.set(row.task_id, [prerequisite]);
+    }
+    return edges;
   }
 }
 

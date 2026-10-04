@@ -13,6 +13,11 @@ Never commit `.env`, `.openmuse`, browser profiles, credentials, or personal doc
 
 ## Checks before a pull request
 
+All three gates are green on `main` and must stay green. Read
+[docs/STRICTNESS.md](docs/STRICTNESS.md) before adding code: it documents the
+compiler and lint settings, the two categories that satisfy
+`exactOptionalPropertyTypes`, and the rules we deliberately do not enforce.
+
 ```sh
 pnpm lint
 pnpm typecheck

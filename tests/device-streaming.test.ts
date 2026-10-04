@@ -44,6 +44,11 @@ before(async () => {
     googleRedirectUri: "http://localhost:8787/api/google/callback",
     allowedOrigins: ["http://localhost:8081"],
   };
+  // This suite shares one long-lived database with everything else that points
+  // at openmuse_test, so without this every run inherits the previous run's
+  // tasks and eventually trips the 100-non-terminal-task cap with a 409.
+  // Clear before the app starts so no worker tick can observe stale rows.
+  await db.clearAll();
   server = await createApp(db, config);
 });
 
@@ -192,7 +197,7 @@ test("task created without device info has no creatorDevice", async () => {
   assert.equal(session.status, 200);
   const { token: noDeviceToken } = (await session.json()) as { token: string };
 
-  const response = await server.app.request(`/api/agent/tasks`, {
+  const response = await server.app.request("/api/agent/tasks", {
     method: "POST",
     headers: { Authorization: `Bearer ${noDeviceToken}`, "Content-Type": "application/json" },
     body: JSON.stringify({ kind: "plan", prompt: "No device test" }),
