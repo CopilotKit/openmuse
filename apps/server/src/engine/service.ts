@@ -232,12 +232,27 @@ export class AgentService {
     return this.boardStateOf(moved);
   }
   /**
-   * Devices in the per-device execution plane, with liveness resolved.
+   * Devices in the per-device execution plane, with liveness AND pairing resolved.
+   *
+   * Pairing is included because the pairing flow is unusable without it: an
+   * already-paired device has to be able to see which other devices are waiting,
+   * and `POST /pairing/request` needs a `deviceId` to mint a code for. Without
+   * this field the operator would have to know a UUID the phone never displays,
+   * which makes approving a phone impossible from the UI.
+   *
+   * Reading is still allowed for an unpaired device, so this is not a gate — it
+   * is the list the approval UI renders.
    */
   async devices(owner: string) {
     const now = Date.now();
     const list = await this.db.listDevices(owner);
-    return list.map((device) => ({ ...device, available: isDeviceAvailable(device, now) }));
+    return Promise.all(
+      list.map(async (device) => ({
+        ...device,
+        available: isDeviceAvailable(device, now),
+        paired: (await this.db.pairingState(owner, device.id)).pairedAt !== null,
+      })),
+    );
   }
 
   /**

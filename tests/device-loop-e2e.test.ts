@@ -261,6 +261,88 @@ function deferred() {
   return { promise, resolve };
 }
 
+test("a phone pairs by redeeming a code minted on a paired device", async (t) => {
+  const { server, db } = await fixture(t);
+  const desktop = await pairedDevice(server, "desk-1", ["shell", "screen"]);
+  // The phone registers itself, as the app does on first launch.
+  const phone = await sessionFor(server, "phone-9");
+  const registered = await server.app.request("/api/agent/devices", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${phone}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "Pixel",
+      capabilities: ["screen"],
+      formFactor: "handheld",
+    }),
+  });
+  assert.equal(registered.status, 201, await registered.clone().text());
+
+  // The phone must be discoverable BEFORE it can be approved: the operator has to
+  // see a device waiting, and `/pairing/request` needs its id. This is why
+  // `/devices` reports `paired` at all.
+  const listResponse = await server.app.request("/api/agent/devices", {
+    headers: { Authorization: `Bearer ${desktop}` },
+  });
+  const list = (await listResponse.json()) as { id: string; paired: boolean }[];
+  const listed = list.find((d) => d.id === "phone-9");
+  assert.ok(listed, "an unpaired device must still appear in the device list");
+  assert.equal(listed.paired, false, "a device that has not redeemed a code is not paired");
+  assert.equal(list.find((d) => d.id === "desk-1")?.paired, true);
+
+  // Mint on the desktop, type into the phone.
+  const mintedResponse = await server.app.request("/api/agent/pairing/request", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${desktop}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: "phone-9" }),
+  });
+  assert.equal(mintedResponse.status, 200, await mintedResponse.clone().text());
+  const { code } = (await mintedResponse.json()) as { code: string };
+  assert.match(code, /^\d{6}$/);
+
+  const redeemed = await server.app.request("/api/agent/pairing/verify", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${phone}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  assert.equal(redeemed.status, 200, await redeemed.clone().text());
+  assert.equal(((await redeemed.json()) as { paired: boolean }).paired, true);
+
+  // And the paired phone can now claim, which is the entire point of pairing.
+  const claim = await server.app.request("/api/agent/device/claim", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${phone}`, "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  assert.equal(claim.status, 200, await claim.clone().text());
+  const claimed = (await claim.json()) as { task: { id: string } | null };
+  assert.equal(claimed.task, null, "there is no work queued, so a null claim is correct");
+  // A null claim rather than a 403 is the proof the GATE passed: unpaired, this
+  // same request would have been refused.
+  const state = await db.pairingState("local-user", "phone-9");
+  assert.notEqual(state.pairedAt, null);
+});
+
+test("an unpaired device cannot mint a code for itself", async (t) => {
+  const { server } = await fixture(t);
+  await pairedDevice(server, "desk-2", ["shell"]);
+  const phone = await sessionFor(server, "phone-10");
+  const registered = await server.app.request("/api/agent/devices", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${phone}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Phone", capabilities: ["screen"] }),
+  });
+  assert.equal(registered.status, 201, await registered.clone().text());
+
+  // The whole security property: approval authority never sits with the device
+  // asking to be approved.
+  const selfMint = await server.app.request("/api/agent/pairing/request", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${phone}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId: "phone-10" }),
+  });
+  assert.equal(selfMint.status, 403, await selfMint.clone().text());
+});
+
 test("the loop refuses a destructive task on a handheld, as the server does", async (t) => {
   const { server } = await fixture(t);
   const token = await sessionFor(server, "phone-4");
