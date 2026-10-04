@@ -13,13 +13,18 @@ import { Files } from "../../apps/server/src/files.ts";
 
 export async function browserFixture(
   t: TestContext,
-  handle: (path: string, body: Record<string, unknown>) => { status?: number; data: unknown },
+  handle: (
+    path: string,
+    body: Record<string, unknown>,
+  ) => { status?: number; data: unknown } | Promise<{ status?: number; data: unknown }>,
 ) {
   const server = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {};
-    const result = handle(request.url ?? "", body);
+    // Awaited so a handler can model a worker that has not answered yet, which is the state a
+    // Stop arrives into.
+    const result = await handle(request.url ?? "", body);
     response.writeHead(result.status ?? 200, { "content-type": "application/json" });
     response.end(JSON.stringify(result.data));
   });

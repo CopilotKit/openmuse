@@ -263,6 +263,52 @@ test("cancelled chat browser requests do not start navigation or a follow-up rea
   assert.equal((await db.list("owner", "browsers")).length, 1);
 });
 
+test("stopping a turn does not leave the browser marked as needing attention", async (t) => {
+  const controller = new AbortController();
+  let arrived = 0;
+  const { db, service } = await browserFixture(t, async () => {
+    arrived += 1;
+    // The worker has the request and has not answered, which is the state a Stop arrives into.
+    return new Promise(() => {});
+  });
+
+  const stopped = service.observeForThread(
+    "owner",
+    "chat-thread",
+    savedSession.url,
+    controller.signal,
+  );
+  // Abort only once the request is genuinely in flight, so this exercises the cancellation path
+  // rather than the pre-flight check at the top of observeForThread.
+  while (arrived === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+  controller.abort();
+
+  await assert.rejects(stopped, { name: "AbortError" });
+
+  const [stored] = await db.list<BrowserSession>("owner", "browsers");
+  // The turn was stopped, not broken. "error" is what the app reads as "Needs attention", hides the
+  // preview behind, and offers "Reconnect browser" for - none of which a person needs after asking
+  // for a turn to end, and none of which their profile stopped being true for.
+  assert.equal(stored?.status, "idle");
+});
+
+test("a worker that genuinely fails a turn still marks the browser as needing attention", async (t) => {
+  // The other half of the rule: only the caller's own Stop is silent. A failure the worker actually
+  // reported must keep recording, or this would hide a browser that really is broken.
+  const { db, service } = await browserFixture(t, () => ({
+    status: 500,
+    data: { error: { message: "The browser could not be launched." } },
+  }));
+
+  await assert.rejects(
+    service.observeForThread("owner", "chat-thread", savedSession.url),
+    /could not be launched/,
+  );
+
+  const [stored] = await db.list<BrowserSession>("owner", "browsers");
+  assert.equal(stored?.status, "error");
+});
+
 test("browser read fails on missing page text instead of inventing observation content", async (t) => {
   const { db, service } = await browserFixture(t, () => ({
     data: { url: savedSession.url, title: savedSession.title },

@@ -136,11 +136,19 @@ export class BrowserService {
       const response = await this.request("/sessions", { id, url: target }, signal);
       return await this.save(owner, await response.json(), id);
     } catch (error) {
-      await this.save(
-        owner,
-        { ...value, url: target, status: "error", updatedAt: new Date().toISOString() },
-        id,
-      );
+      // A Stop is not a broken session. The person asked for the turn to end, the profile and its
+      // cookies are intact, and `request` reports a cancelled request by throwing the signal's own
+      // abort - so writing "error" here is what puts "Needs attention" and "Reconnect browser" in
+      // front of somebody whose browser is working, and hides the preview behind a status they did
+      // not cause. Only the caller's own abort counts: the 45s request timeout is a real failure and
+      // leaves the signal untouched, so it still records.
+      if (!signal?.aborted) {
+        await this.save(
+          owner,
+          { ...value, url: target, status: "error", updatedAt: new Date().toISOString() },
+          id,
+        );
+      }
       throw error;
     }
   }
