@@ -11,6 +11,35 @@ document whose body was confidently wrong.
 Current source: `Wiltermoodj/meaty` @ `3e95e5ac` (`origin/main`), fetched this
 session with `GITHUB_TOKEN`. All claims below are against that commit.
 
+## What and where: Meaty
+
+**`Wiltermoodj/meaty`** — <https://github.com/Wiltermoodj/meaty> — a local-first,
+privacy-preserving meeting-transcription and AI assistant. React Native
+(Android primary, iOS secondary), running Whisper STT, speaker diarization and
+LLM inference (`llama.rn`, LiteRT, ExecuTorch) **on the device**.
+
+Its own docs, worth reading before touching this area:
+
+- `knowledge/planning/on-device-ai-command-center-plan.md` — the initiative that
+  built the localhost daemon this integration depends on. Status **complete**.
+- `knowledge/planning/agent-tool-calling-local-ai-plan.md` — **the plan for the
+  remaining gap**, authored 2026-10-04 in support of this integration.
+  <https://github.com/Wiltermoodj/meaty/pull/378> (branch
+  `feat/agent-tool-calling-local-ai`).
+- `knowledge/planning/README.md` — index; non-trivial plans must be registered
+  there.
+- `AGENTS.md` — the repo's mandatory agent workflow (stubs tooling, strictness).
+
+Other things to know before assessing it:
+
+- **A local checkout may be hundreds of commits stale.** Use `GITHUB_TOKEN` for
+  fetch/push; ambient git credentials return 401.
+- **Its HTTP listener is native code** (Kotlin `NanoHTTPD`, Swift `NWListener`)
+  bridged into JS, so grepping `src/` for `createServer` finds nothing even on a
+  current tree. Check `android/.../daemon/` and `ios/` too.
+- **It is not a library OpenMuse imports.** It is a separate app that serves an
+  HTTP contract. There is no code-level dependency in either direction.
+
 ## Summary
 
 **The endpoint exists and implements the contract.** Meaty ships
@@ -88,7 +117,13 @@ Four settled with the user. Superseding the open questions below.
    500 ms after false negatives.
 3. **Tool-calling: propose the change to the meaty repo** as part of this work.
    Not a reason to abandon on-device inference, and not something OpenMuse can fix
-   alone — it is another repository.
+   alone — it is another repository. **Done 2026-10-04:** the plan is written and
+   open as [PR #378](https://github.com/Wiltermoodj/meaty/pull/378), branch
+   `feat/agent-tool-calling-local-ai`, adding
+   `knowledge/planning/agent-tool-calling-local-ai-plan.md` plus its index entry.
+   It is written to apply to **any** consumer, so it carries no OpenMuse specifics
+   and doubles as the contract OpenMuse will build against. Nothing is implemented
+   yet — this is the gate everything else waits on.
 4. **Whose tools: standard OpenAI semantics.** The served endpoint accepts the
    *request's* tools and emits `tool_calls`; the caller executes them and sends
    results back. Meaty does **not** expose its internal registry to remote
@@ -153,7 +188,8 @@ assuming a PR is appropriate.
 
 1. **Tool-calling on the meaty side.** Blocks every path — an endpoint that
    cannot call tools cannot run an agent, however it is reached. Nothing in
-   OpenMuse is worth building until this lands.
+   OpenMuse is worth building until this lands. **Planned and proposed**
+   ([PR #378](https://github.com/Wiltermoodj/meaty/pull/378)); not implemented.
 2. **A streaming client on the phone.** `api.request()` buffers whole responses;
    relaying token-by-token needs `response.body` streaming, plus a long-lived
    connection the OS will not kill mid-run.

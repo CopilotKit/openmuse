@@ -301,8 +301,15 @@ unconditionally. And if meaty's endpoint gains tool-calling, it will use
 by the caller. Meaty will not expose its own device-touching registry to remote
 callers.
 
-This supersedes nothing above; it completes it. Sequencing, the consequences, and
-what the meaty-side proposal needs: [ON-DEVICE-INFERENCE.md](ON-DEVICE-INFERENCE.md).
+The meaty-side tool-calling plan is written and proposed as
+[PR #378](https://github.com/Wiltermoodj/meaty/pull/378) (`knowledge/planning/agent-tool-calling-local-ai-plan.md`,
+written to apply to any consumer rather than to OpenMuse specifically). Nothing
+is implemented yet, and nothing in OpenMuse should be built against it until it
+lands.
+
+This supersedes nothing above; it completes it. Sequencing, the consequences, what
+meaty is and where it lives, and what the proposal needs:
+[ON-DEVICE-INFERENCE.md](ON-DEVICE-INFERENCE.md).
 
 Note how this claim got wrong twice: first "meaty hosts no listener at all"
 (false — the sync subsystem binds a TCP port), then "meaty serves no inference
