@@ -14,6 +14,7 @@ The release is a personal-agent alpha: delegate a job, inspect its plan, supply 
 - Device pairing: a device may read without pairing, but claiming, heartbeating, or reporting work all require it. A device cannot pair itself; the first device bootstraps with the account access key, once only.
 - Device work loop (server side): `claim`/`heartbeat`/`report` with compare-and-swap leases, so a lost lease returns the task to the queue instead of stranding it. Two devices racing for one task produce exactly one winner.
 - Form factor as a capability-contract rule: a handheld never takes `destructive` work, even when it declares the capability, and an undeclared or unrecognised form factor is treated as a handheld.
+- Notes in the same store as tasks, promotable deliberately and exactly once, capturable from the phone or from chat. Saving a note starts no work.
 
 ## Notes: capture and promotion
 
