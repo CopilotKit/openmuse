@@ -1,128 +1,153 @@
 # On-device inference: assessment and open questions
 
-Written 2026-10-04 against `Wiltermoodj/meaty` @ `6999e641` (local checkout at
-`/home/ubuntu/meaty`, `main`). Verified by reading the source, not by taking
-earlier notes on trust — one earlier claim ("no `.listen()` anywhere") turned out
-to be **too strong** and is corrected below.
+**Rewritten 2026-10-04 after a version correction.** The first version of this
+document was written against a local `meaty` checkout **286 commits behind**
+GitHub and reached the wrong conclusion, because the feature it said did not exist
+had landed in the gap. Both the assessment and the freshness caveat are below; the
+caveat was not a sufficient defence — a stale read that is labelled stale is still
+a wrong answer, and the "re-verify before acting" note sat at the bottom of a
+document whose body was confidently wrong.
 
-## The question
+Current source: `Wiltermoodj/meaty` @ `3e95e5ac` (`origin/main`), fetched this
+session with `GITHUB_TOKEN`. All claims below are against that commit.
 
-OpenMuse's model policy is "local when the device has a capable model, otherwise
-API." `docs/SYNC.md` decided that **meaty hosts the endpoint and OpenMuse calls
-it**, on the reasoning that meaty already owns on-device inference
-(llama.rn / LiteRT / ExecuTorch) and the OpenAI-compatible client plumbing.
+## Summary
 
-## What meaty actually is
+**The endpoint exists and implements the contract.** Meaty ships
+`src/services/localAiServer.ts`: `GET /health`, `GET /v1/models`,
+`POST /v1/chat/completions` (SSE and non-streaming), plus audio transcription,
+vision and embeddings.
 
-A React Native app (iOS + Android) that runs models **in-process**:
+**Two blockers, and the second is the larger.** (1) OpenMuse runs all inference
+in `apps/server` and cannot reach a phone's loopback. (2) The served endpoint
+does not support tool-calling at all, and OpenMuse's agent *is* a tool loop. Both
+must be resolved; neither is a configuration change on our side.
 
-| Concern | Implementation |
+## What meaty provides
+
+| Requirement (from `docs/SYNC.md`) | Status |
 |---|---|
-| Local inference | `src/services/llm.ts` (llama.rn/GGUF), `src/services/litert.ts` |
-| Remote inference | `src/services/providers/openAICompatibleProvider.ts` — a **client** |
-| Discovery | `src/services/networkDiscovery.ts` — probes Ollama :11434, LM Studio :1234, "Meaty Gateway" :7878 |
-| Tool calling | `generationToolLoop.ts`, `llmToolGeneration.ts`, `openAIMessageBuilder.ts` |
-| P2P sync | `src/services/sync/` — `react-native-tcp-socket` + `react-native-zeroconf` |
+| `/v1/chat/completions`, SSE | ✅ implemented (`localAi/chatCompletionHandler.ts`) |
+| Reachable so another app can use it | ⚠️ **loopback only — see below** |
+| Tool-calling support | ❌ **not exposed on the endpoint** — see below |
+| OpenAI-compatible client plumbing | ✅ pre-existing |
+| Model lifecycle | ✅ GGUF + LiteRT, download and load managed in-app |
 
-So: meaty **consumes** OpenAI-compatible servers and runs local models itself. It
-is a capable *host* of inference and a capable *client* of an API.
+Authentication is `Authorization: Bearer` plus two headers: `X-Ecosystem-App`
+(validated against a canonical app registry in `@wiltermoodj/contracts`) and
+`X-Priority`. `/health` is unauthenticated; everything else is.
 
-## What it does not do
+## The blocker, precisely
 
-**It serves no inference endpoint.** Checked directly:
+The daemon binds **`127.0.0.1` only**, on both platforms:
 
-- No `http.createServer`, `net.createServer`, or `new Server(` anywhere in `src/`.
-- No route handling `/v1/chat/completions`; every occurrence is a `fetch` to a
-  *remote* base URL.
-- The "Meaty Gateway" is a **URL** the app probes, not a server the app runs.
-  `networkDiscovery.ts` comments it "runs on the user's laptop on the same LAN",
-  and it appears in this repo only inside tests as `http://mac:7878`.
+- Android: `class DaemonHttpServer(port: Int) : NanoHTTPD("127.0.0.1", port)`
+  (`android/app/src/main/java/ai/meaty/daemon/LocalAiDaemonService.kt:83`) — the
+  only `NanoHTTPD` instantiation in the repo.
+- iOS: `NWEndpoint.hostPort(host: "127.0.0.1", port: 11435)`
+  (`ios/LocalAiDaemonModule.swift:30`).
 
-**Correction to the earlier note.** `docs/SYNC.md` and the project skill both
-recorded "there is no `.listen()` in its `src/`, so nothing outside the app can
-call its inference." That is right about *HTTP inference* and wrong as stated:
-the sync subsystem does bind a TCP port (`transport.boundPort`, re-advertised
-over mDNS in `nativeSync.ts`). So meaty *is* reachable on the LAN — it just
-speaks its own sync protocol, not OpenAI. The conclusion for OpenMuse is
-unchanged; the reasoning was wrong and would not survive being repeated.
+Port `11435`.
 
-**The gateway lives elsewhere.** A desktop component is referenced but is not in
-this repository — there is no desktop package here. Whether it exists, is
-private, or is planned is unknown from this checkout.
+OpenMuse runs **all** model inference in `apps/server`, on a machine that is not
+the phone. `device-protocol.ts` shows device work is a client of the server API —
+claim, heartbeat, report — never a local model call. A loopback endpoint on the
+phone is therefore unreachable from the process that does the inferencing, by
+construction.
 
-## The blocker, stated precisely
+This is not a small gap. It is one of three architectures:
 
-OpenMuse needs an **OpenAI-compatible HTTP endpoint on the device**, reachable
-over the LAN, with SSE and tool-calling. Meaty has the inference and the
-tool-calling; it does not have the serving. That half is either unimplemented or
-in a repository we cannot see.
+- **(a) meaty binds `0.0.0.0`**, OpenMuse reaches it over the LAN. Requires a
+  change to meaty, plus real auth and TLS for an endpoint that runs tools on the
+  user's files and accounts. Loopback-only is likely deliberate.
+- **(b) OpenMuse gains an on-device inference client** in `apps/mobile` and runs
+  device-local work on-device. A new execution path, not a config knob, and it
+  collides with vision requirement 4 (concurrent specialist roles), which today
+  runs server-side.
+- **(c) the phone proxies** — relaying between the server and its own loopback
+  endpoint. Keeps orchestration server-side while the model runs on the phone.
 
-## Existing functionality relevant to this contract
-
-Already in meaty, reusable as-is:
-
-- GGUF and LiteRT inference, model download and lifecycle management.
-- A complete OpenAI-compatible **client**: request building, SSE streaming,
-  `tool_calls` assembly, a tool-execution loop.
-- LAN discovery of OpenAI-compatible servers, with capability probing
-  (`/v1/models`, llama.cpp `/props`).
-- Capability derivation (vision / tools / thinking) for both local and remote
-  models.
-
-Missing, and required:
-
-- Any listening HTTP server inside the app.
-- `GET /v1/models` and `POST /v1/chat/completions` (SSE) routes.
-- A service type to advertise via mDNS, plus the port.
-- Tool-calling exposed over that endpoint (the loop exists internally; it must be
-  reachable externally).
+(c) is the least invasive and the only one needing no change to meaty. All three
+are product decisions about where the agent runs, not implementation details.
 
 ## Open questions — these block the work
 
-Each needs an answer before implementation is meaningful.
+1. **(a), (b) or (c)?** Everything else depends on this.
+2. **Would meaty accept a `0.0.0.0` bind?** If (a), that is a change to another
+   repository and needs agreement there.
+3. **Where does the ecosystem token come from?** OpenMuse needs the same token
+   meaty validates against. The default is a dev constant
+   (`omnibutler-local-dev-token`), which is not a production secret; provisioning
+   is unsolved on both sides.
+4. **Is `X-Ecosystem-App` required, and under what name?** It is validated against
+   a canonical registry. Does OpenMuse have an entry, or does one need adding?
+5. **Is OpenMuse an intended consumer?** The daemon is described as serving
+   "sibling ecosystem applications." This repository does not settle it.
+6. **Model viability.** Meaty serves whatever the device has loaded. OpenMuse's
+   guidance is a 7B–9B floor for chat and more for task work. What can the target
+   phone hold, and what is the cold-start behaviour with nothing loaded?
+7. ~~Tool-calling fidelity.~~ **Answered 2026-10-04, and it is the second
+   blocker.** The served endpoint does not support tool-calling at all.
+   `localAi/chatCompletionHandler.ts` reads `body.stream` and nothing else —
+   no `tools`, no `tool_choice` — and `createSseStream` emits only
+   `delta: { content }`. There is no mention of tools anywhere under
+   `src/services/localAi/`. Meaty *has* a tool loop (`generationToolLoop.ts`,
+   `openAIMessageBuilder.ts`), but it runs inside the app for its own chat UI and
+   is not reachable over HTTP.
 
-1. **Where does the Meaty Gateway live?** Separate repository, private, or
-   planned? This determines whether we extend meaty, contribute to it, or run our
-   own endpoint.
-2. **Who implements the endpoint?** If it belongs in meaty, that is a separate
-   repo and a different authorization than "work on OpenMuse".
-3. **Is the endpoint per-device or per-lan?** A phone-local endpoint is useless
-   to a desktop client, and vice versa. Which is the requirement?
-4. **Transport.** Plain HTTP on the LAN (needs TLS decision), or reuse the
-   existing mDNS-discovered sync transport with a new message type?
-5. **Authentication.** The sync transport has some trust model; an inference
-   endpoint that runs tools on the user's machine needs a real one. What is
-   acceptable?
-6. **Model lifecycle.** Does meaty stream one already-loaded model, or must it
-   download/load on first request? OpenMuse needs a cold-start failure mode.
-7. **Minimum viable model.** Which model, and what context length? OpenMuse's own
-   guidance is a 7B–9B floor for the chat model and more for task work; a phone
-   may not sustain either.
-8. **Tool-calling fidelity.** Does the endpoint stream tool calls incrementally,
-   or emit them whole? OpenMuse's agent loop depends on the streaming shape.
-9. **Is a phone-hosted endpoint even the goal?** Requirement 3 says device
-   control is local, but the *model* need not be. If the phone is the client, a
-   desktop-hosted endpoint may satisfy the policy just as well.
-10. **Fallback contract.** `docs/SYNC.md` says fall back to remote, then API.
-    Confirm the probe/timeout budget, since `networkDiscovery` already needed
-    2000 ms after 500 ms produced false negatives.
+   OpenMuse's agent is a tool loop. A chat-completions endpoint that cannot call
+   tools is a completion endpoint, not an agent endpoint, so **(a), (b) and (c)
+   all fail without this** too. It is the larger of the two gaps.
+8. **Fallback budget.** `docs/SYNC.md` says fall back to remote, then API. Meaty's
+   own discovery needed 2000 ms after 500 ms produced false negatives, so do not
+   probe tighter than that.
+9. **Does the server hold the model lease?** Requirement 4 runs concurrent roles;
+   one phone serves one model, and the device work loop is deliberately
+   one-task-at-a-time. Worth deciding explicitly rather than discovering under
+   load.
 
-## Recommendation
+## Existing OpenMuse functionality this would build on
 
-**Build the OpenMuse side against the documented contract, as decided** — a
-provider that targets an OpenAI-compatible `/v1` endpoint, is configured per
-device, and degrades to the existing model policy when nothing answers. That work
-is useful regardless of the answers above: it is the same shape as the existing
-`OPENAI_BASE_URL` / `OPENAI_API_FORMAT` local-LLM support, and it is testable
-today against a fixture server.
+- `OPENAI_BASE_URL` + `OPENAI_API_FORMAT=chat-completions` already support any
+  OpenAI-compatible server, with `defined()` normalization for
+  `exactOptionalPropertyTypes` (`packages/backends/src/strict-optional.ts`).
+- Per-device model routing: `agent-settings:device-models:{deviceId}`, settable via
+  `PATCH /api/agent/device-models`.
+- `CHAT_TOOL_ALLOWLIST` and per-device overrides, for small-model tool surfaces.
+- Step budgets per device (`chatMaxSteps`, `taskMaxSteps`).
 
-Do not gate core agent functionality on the endpoint existing. When it does,
-nothing in OpenMuse needs to change beyond configuration.
+So the *provider* side is largely pointing `OPENAI_BASE_URL` at a reachable host.
+The hard part is reachability and the execution path.
+
+## Superseded: what the previous version claimed
+
+Kept because the error is instructive, not because any of it is true.
+
+It claimed meaty "does not serve an inference endpoint," on three checks that
+were all performed correctly against the wrong commit: no `http.createServer` in
+`src/`, every `/v1/chat/completions` a `fetch` to elsewhere, and the "Meaty
+Gateway" being a probed URL rather than a served one. All true at `6999e641`.
+`localAiServer.ts` did not exist yet — the listener is a **native** daemon
+(Kotlin `NanoHTTPD`, Swift `NWListener`) bridged into JS, so even a current tree
+would not have shown `createServer` in `src/`. Grepping the wrong directory for
+the wrong implementation is a way of getting a clean result that means nothing.
+
+It also carried a self-correction I was proud of: that an earlier "no listener at
+all" claim was too strong, because the sync subsystem does bind a TCP port. That
+correction was true, and was still consistent with a wrong conclusion, because it
+only checked the one thing that happened not to have changed.
 
 ## Verification notes
 
-- Claims above were checked against the working tree at `6999e641`. `git fetch`
-  failed (no valid token in this environment), so **this is the local `main`, not
-  necessarily the current remote** — re-verify before acting.
-- Two questions I could not answer from this checkout and did not guess: where the
-  gateway lives (1), and whether a mobile-hosted endpoint is the actual goal (9).
+- Verified against `meaty` `origin/main` @ `3e95e5ac`, fetched this session with
+  `GITHUB_TOKEN`. Ambient git credentials fail with 401 — use the token, as
+  OpenMuse already does for its own pushes.
+- The local checkout at `/home/ubuntu/meaty` is at `6999e641` (PR #240); current is
+  PR #377. It has **not** been fast-forwarded, so anything assessed from that
+  working tree needs re-checking.
+- Not determined from the source, and not guessed: whether OpenMuse is an intended
+  consumer of this daemon (question 5).
+- Question 7 (tool-calling) was open in the first draft and has since been
+  answered by reading the handler — see the struck-through entry above. The
+  lesson stands: two of the ten questions were answerable from the source, and
+  asking the user questions the code could answer is its own failure mode.
