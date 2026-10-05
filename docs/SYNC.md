@@ -290,9 +290,19 @@ independent of reachability.
 binds `127.0.0.1` only on both platforms, on port `11435`. OpenMuse runs every
 inference in `apps/server`, on a machine that is not the phone — device work is a
 client of the server API, never a local model call — so the phone's loopback
-endpoint is unreachable from the process that needs it. Reaching it means either
-meaty binding `0.0.0.0`, or OpenMuse gaining an on-device inference path, or the
-phone proxying. That is a product decision, not a config change.
+endpoint is unreachable from the process that needs it.
+
+**Decided 2026-10-04: the phone proxies.** The server keeps orchestrating; the
+phone relays to its own loopback endpoint, over a relay route rather than a
+changed bind. The server then decides **per request** whether to route through the
+phone, falling back to remote-then-API when the phone is asleep — never
+unconditionally. And if meaty's endpoint gains tool-calling, it will use
+**standard OpenAI semantics**: the caller's tools, `tool_calls` returned, executed
+by the caller. Meaty will not expose its own device-touching registry to remote
+callers.
+
+This supersedes nothing above; it completes it. Sequencing, the consequences, and
+what the meaty-side proposal needs: [ON-DEVICE-INFERENCE.md](ON-DEVICE-INFERENCE.md).
 
 Note how this claim got wrong twice: first "meaty hosts no listener at all"
 (false — the sync subsystem binds a TCP port), then "meaty serves no inference

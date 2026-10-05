@@ -70,11 +70,52 @@ This is not a small gap. It is one of three architectures:
 (c) is the least invasive and the only one needing no change to meaty. All three
 are product decisions about where the agent runs, not implementation details.
 
-## Open questions — these block the work
+## Decisions (2026-10-04)
 
-1. **(a), (b) or (c)?** Everything else depends on this.
-2. **Would meaty accept a `0.0.0.0` bind?** If (a), that is a change to another
-   repository and needs agreement there.
+Four settled with the user. Superseding the open questions below.
+
+1. **Reachability: (c), the phone proxies.** The server orchestrates; the phone
+   relays to its own `127.0.0.1:11435`. Chosen over a LAN bind (needs a change to
+   meaty and exposes an inference endpoint to the network) and over an on-device
+   inference client (a second agent execution path, colliding with vision
+   requirement 4). *Consequence:* OpenMuse must build a streaming client on the
+   phone — `api.request()` buffers whole responses today — and a relay path in the
+   server.
+2. **Routing: the server decides per request**, falling back to remote-then-API
+   when the phone is asleep or unreachable. Never unconditionally through the
+   phone. *Consequence:* a reachability probe and a fallback deadline. Do not
+   probe tighter than meaty's own 2000 ms discovery budget, which was raised from
+   500 ms after false negatives.
+3. **Tool-calling: propose the change to the meaty repo** as part of this work.
+   Not a reason to abandon on-device inference, and not something OpenMuse can fix
+   alone — it is another repository.
+4. **Whose tools: standard OpenAI semantics.** The served endpoint accepts the
+   *request's* tools and emits `tool_calls`; the caller executes them and sends
+   results back. Meaty does **not** expose its internal registry to remote
+   callers. This matters: `registry.ts` tools reach the device and UI stores
+   (`useChatStore`, `useAppStore`), and running those because a network client
+   asked would be a very different risk from echoing a tool call back.
+
+### What the meaty-side proposal needs
+
+`localAi/chatCompletionHandler.ts` currently reads `body.stream` and nothing
+else. The change is: parse `body.tools` / `body.tool_choice`, pass them to the
+model, and emit `delta.tool_calls` fragments in the SSE stream plus a non-streaming
+`tool_calls` array. The pieces largely exist — `openAIMessageBuilder.ts` builds
+tool schemas and `generationToolLoop.ts` assembles calls — but the loop is coupled
+to `useChatStore` / `useAppStore` / `useRemoteServerStore`, so it is not directly
+reusable from a request context and would need decoupling, or a server-side
+equivalent that reuses `src/services/tools/registry.ts` for schema only.
+
+*Not decided:* whether OpenMuse may propose this to `Wiltermoodj/meaty` as a
+contribution, and whether that repo accepts outside contributions. Check before
+assuming a PR is appropriate.
+
+## Open questions — still open
+
+1. ~~**(a), (b) or (c)?**~~ **Answered: (c)**, above.
+3. ~~**Would meaty accept a `0.0.0.0` bind?**~~ **Moot** under (c) — no bind
+   change is needed.
 3. **Where does the ecosystem token come from?** OpenMuse needs the same token
    meaty validates against. The default is a dev constant
    (`omnibutler-local-dev-token`), which is not a production secret; provisioning
@@ -105,6 +146,24 @@ are product decisions about where the agent runs, not implementation details.
    one phone serves one model, and the device work loop is deliberately
    one-task-at-a-time. Worth deciding explicitly rather than discovering under
    load.
+
+## Sequencing
+
+**(c) is settled, so the order follows from the blockers:**
+
+1. **Tool-calling on the meaty side.** Blocks every path — an endpoint that
+   cannot call tools cannot run an agent, however it is reached. Nothing in
+   OpenMuse is worth building until this lands.
+2. **A streaming client on the phone.** `api.request()` buffers whole responses;
+   relaying token-by-token needs `response.body` streaming, plus a long-lived
+   connection the OS will not kill mid-run.
+3. **The server's relay route and per-request routing decision**, with the
+   reachability probe and remote-then-API fallback.
+4. **Provider wiring** — `OPENAI_BASE_URL` pointed at the relay, per-device
+   configuration, and the fallback budget.
+
+Step 1 is in another repository. Do not begin step 2 until it has a target to aim
+at, or the client gets built twice.
 
 ## Existing OpenMuse functionality this would build on
 
