@@ -25,6 +25,10 @@ variables. An API key alone does not give runtime telemetry a resolvable identit
 If the CLI reports an identity provisioning failure, resolve that failure and
 run project selection again before claiming account attribution works.
 
+The Render Blueprint prompts for both values. For an existing Render service,
+add `CPK_TELEMETRY_ID` in the API service's Environment settings and redeploy the
+tracking commit; adding it to the Blueprint does not populate an existing service.
+
 The SDK sends existing runtime events to
 `https://telemetry.copilotkit.ai/ingest`. OpenMuse adds
 `accessibility_title: "OpenMuse"` and defaults
