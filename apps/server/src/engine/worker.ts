@@ -25,6 +25,8 @@ export class TaskWorker {
   private ticking = false;
   private stopping = false;
   private active = new Map<string, AbortController>();
+  // Tasks this worker has started and not yet settled, including ones still being claimed.
+  private inFlight = new Set<string>();
   lastTickAt?: string;
   constructor(
     private readonly db: Store,
@@ -56,7 +58,7 @@ export class TaskWorker {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     for (const controller of this.active.values()) controller.abort();
-    while (this.active.size || this.ticking) await new Promise((r) => setTimeout(r, 10));
+    while (this.inFlight.size || this.ticking) await new Promise((r) => setTimeout(r, 10));
   }
   abort(taskId: string) {
     this.active.get(taskId)?.abort();
@@ -71,11 +73,12 @@ export class TaskWorker {
     if (this.ticking) return;
     this.ticking = true;
     this.lastTickAt = new Date(this.now()).toISOString();
+    const started: Promise<void>[] = [];
     try {
       const records = await this.db.scan<AgentTask>("tasks");
       const due = records.filter(
         ({ value: t }) =>
-          !this.active.has(t.id) &&
+          !this.inFlight.has(t.id) &&
           (t.status === "queued" ||
             (t.status === "scheduled" && Date.parse(t.nextRunAt ?? "") <= this.now()) ||
             (t.status === "running" && Date.parse(t.leaseUntil ?? "") <= this.now()) ||
@@ -83,6 +86,7 @@ export class TaskWorker {
       );
       const eligible = [];
       for (const record of due) {
+        if (this.inFlight.size + eligible.length >= 3) break;
         if (record.value.status === "waiting_approval") {
           const action = record.value.actionId
             ? await this.db.get<{ status: string; expiresAt?: string }>(
@@ -106,12 +110,16 @@ export class TaskWorker {
           else if (action && ["awaiting_review", "executing"].includes(action.status)) continue;
         }
         eligible.push(record);
-        if (eligible.length === 3) break;
       }
-      await Promise.all(eligible.map(({ owner, value }) => this.run(owner, value)));
+      // Runs outlive the tick, so a long task does not stop later ticks from starting queued work.
+      for (const { owner, value } of eligible) {
+        this.inFlight.add(value.id);
+        started.push(this.run(owner, value).finally(() => this.inFlight.delete(value.id)));
+      }
     } finally {
       this.ticking = false;
     }
+    await Promise.all(started);
   }
   private async run(owner: string, previous: AgentTask) {
     if (this.stopping) return;

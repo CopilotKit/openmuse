@@ -26,14 +26,17 @@
     "dev:worker": "tsx apps/server/src/worker-entry.ts",
     "start:worker": "node dist/apps/server/src/worker-entry.js",
     "dev:browser": "node --env-file=.env --import tsx apps/worker/src/index.ts",
-    "test:computer": "tsx --test apps/computer/smoke.test.ts"
+    "test:computer": "tsx --test apps/computer/smoke.test.ts",
+    "test:computer:e2b-desktop": "tsx --test apps/computer/e2b-desktop-smoke.test.ts"
   },
   "dependencies": {
     "@ag-ui/client": "0.0.59",
     "@ag-ui/core": "0.0.59",
     "@copilotkit/runtime": "1.70.1",
+    "@e2b/desktop": "2.4.0",
     "@electric-sql/pglite": "^0.3.14",
     "@hono/node-server": "^1.19.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@tanstack/ai": "^0.59.0",
     "@tanstack/ai-anthropic": "^0.18.13",
     "@tanstack/ai-gemini": "^0.32.1",

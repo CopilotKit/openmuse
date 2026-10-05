@@ -217,3 +217,41 @@ test("dismissal racing acceptance never creates work for a dismissed idea", asyn
     else assert.ok(saved?.taskId && tasks.some((t) => t.id === saved.taskId));
   }
 });
+test("accepting an idea opens the task already handling its email instead of starting another", async () => {
+  const ideaOwner = "idea-in-progress";
+  await server.workspace.ensureSample(ideaOwner, server.actions);
+  const idea = (await server.agent.refreshIdeas(ideaOwner)).find(
+    (candidate) => candidate.kind === "document" && candidate.status === "new",
+  );
+  assert.ok(idea);
+  const existing = await server.agent.createTask(
+    ideaOwner,
+    { kind: "document", prompt: "Complete the permission slip", input: idea.input },
+    "chat-request",
+  );
+  const accepted = await server.agent.decideIdea(ideaOwner, idea.id, "accept");
+  assert.equal(accepted?.taskId, existing.id);
+  const again = await server.agent.decideIdea(ideaOwner, idea.id, "accept");
+  assert.equal(again?.taskId, existing.id);
+  const tasks = (await db.list<AgentTask>(ideaOwner, "tasks")).filter(
+    (task) => task.kind === "document" && task.input.messageId === idea.input.messageId,
+  );
+  assert.equal(tasks.length, 1);
+});
+test("a cancelled task does not stop its idea from starting fresh work", async () => {
+  const ideaOwner = "idea-after-cancel";
+  await server.workspace.ensureSample(ideaOwner, server.actions);
+  const idea = (await server.agent.refreshIdeas(ideaOwner)).find(
+    (candidate) => candidate.kind === "document" && candidate.status === "new",
+  );
+  assert.ok(idea);
+  const cancelled = await server.agent.createTask(
+    ideaOwner,
+    { kind: "document", prompt: "Complete the permission slip", input: idea.input },
+    "chat-request",
+  );
+  await server.agent.control(ideaOwner, cancelled.id, "cancel");
+  const accepted = await server.agent.decideIdea(ideaOwner, idea.id, "accept");
+  assert.ok(accepted?.taskId && accepted.taskId !== cancelled.id);
+  assert.equal((await server.agent.getTask(ideaOwner, accepted.taskId)).status, "queued");
+});
