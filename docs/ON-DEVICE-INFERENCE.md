@@ -8,8 +8,12 @@ caveat was not a sufficient defence — a stale read that is labelled stale is s
 a wrong answer, and the "re-verify before acting" note sat at the bottom of a
 document whose body was confidently wrong.
 
-Current source: `Wiltermoodj/meaty` @ `3e95e5ac` (`origin/main`), fetched this
-session with `GITHUB_TOKEN`. All claims below are against that commit.
+Current source: `Wiltermoodj/meaty` — `origin/main` is at `13f9a59b`, and PR #380's
+branch `feat/localai-tool-calling` is at `ccc6d1d3` (merge-resolved, mergeable);
+the OpenMuse-local checkout at `/home/ubuntu/meaty` matches the latter. Both were
+checked this session with `GITHUB_TOKEN`. Tool-calling claims below are against the
+PR #380 implementation; everything else is against `13f9a59b`. See "Verification
+notes": PR #380 was open with merge conflicts that are now resolved and pushed.
 
 ## What and where: Meaty
 
@@ -23,9 +27,10 @@ Its own docs, worth reading before touching this area:
 - `knowledge/planning/on-device-ai-command-center-plan.md` — the initiative that
   built the localhost daemon this integration depends on. Status **complete**.
 - `knowledge/planning/agent-tool-calling-local-ai-plan.md` — **the plan for the
-  remaining gap**, authored 2026-10-04 in support of this integration.
+  tool-calling feature**, authored 2026-10-04 in support of this integration.
   <https://github.com/Wiltermoodj/meaty/pull/378> (branch
-  `feat/agent-tool-calling-local-ai`).
+  `feat/agent-tool-calling-local-ai`); that PR is **merged** to `main` (plan
+  only). The implementation is [PR #380](https://github.com/Wiltermoodj/meaty/pull/380).
 - `knowledge/planning/README.md` — index; non-trivial plans must be registered
   there.
 - `AGENTS.md` — the repo's mandatory agent workflow (stubs tooling, strictness).
@@ -47,10 +52,16 @@ Other things to know before assessing it:
 `POST /v1/chat/completions` (SSE and non-streaming), plus audio transcription,
 vision and embeddings.
 
-**Two blockers, and the second is the larger.** (1) OpenMuse runs all inference
-in `apps/server` and cannot reach a phone's loopback. (2) The served endpoint
-does not support tool-calling at all, and OpenMuse's agent *is* a tool loop. Both
-must be resolved; neither is a configuration change on our side.
+**One blocker remains, and it is the larger.** (1) OpenMuse runs all inference in
+`apps/server` and cannot reach a phone's loopback. (2) Tool-calling was the second
+blocker; it is **resolved** — implemented (non-streaming) in
+[PR #380](https://github.com/Wiltermoodj/meaty/pull/380), which was open with merge
+conflicts against `main` (whose `dec25f93` grew a second, divergent tool-calling
+impl); those were reconciled in favour of PR #380 and pushed, so the PR is
+mergeable. The contract it imposes: `stream: true` with `tools` returns 400 (use
+non-streaming for tool turns), and `tool_choice` must be `"auto"` or omitted
+(`"required"`/named is refused). Neither is a config change on our side, but (2) is
+no longer a gap.
 
 ## What meaty provides
 
@@ -58,13 +69,14 @@ must be resolved; neither is a configuration change on our side.
 |---|---|
 | `/v1/chat/completions`, SSE | ✅ implemented (`localAi/chatCompletionHandler.ts`) |
 | Reachable so another app can use it | ⚠️ **loopback only — see below** |
-| Tool-calling support | ❌ **not exposed on the endpoint** — see below |
+| Tool-calling support | ✅ implemented (non-streaming), [PR #380](https://github.com/Wiltermoodj/meaty/pull/380) |
 | OpenAI-compatible client plumbing | ✅ pre-existing |
 | Model lifecycle | ✅ GGUF + LiteRT, download and load managed in-app |
 
 Authentication is `Authorization: Bearer` plus two headers: `X-Ecosystem-App`
-(validated against a canonical app registry in `@wiltermoodj/contracts`) and
-`X-Priority`. `/health` is unauthenticated; everything else is.
+(validated against a canonical app registry in `@wiltermoodj/contracts`; `openmuse`
+is registered as an app alias) and `X-Priority`. `/health` is unauthenticated;
+everything else is.
 
 ## The blocker, precisely
 
@@ -115,15 +127,16 @@ Four settled with the user. Superseding the open questions below.
    phone. *Consequence:* a reachability probe and a fallback deadline. Do not
    probe tighter than meaty's own 2000 ms discovery budget, which was raised from
    500 ms after false negatives.
-3. **Tool-calling: propose the change to the meaty repo** as part of this work.
-   Not a reason to abandon on-device inference, and not something OpenMuse can fix
-   alone — it is another repository. **Done 2026-10-04:** the plan is written and
-   open as [PR #378](https://github.com/Wiltermoodj/meaty/pull/378), branch
-   `feat/agent-tool-calling-local-ai`, adding
-   `knowledge/planning/agent-tool-calling-local-ai-plan.md` plus its index entry.
-   It is written to apply to **any** consumer, so it carries no OpenMuse specifics
-   and doubles as the contract OpenMuse will build against. Nothing is implemented
-   yet — this is the gate everything else waits on.
+3. **Tool-calling.** Implemented (non-streaming) in [PR #380](https://github.com/Wiltermoodj/meaty/pull/380)
+   (branch `feat/localai-tool-calling`). The plan shipped as
+   [PR #378](https://github.com/Wiltermoodj/meaty/pull/378) (merged to `main`); PR
+   #380 was open with merge conflicts against `main`, which had grown a second,
+   divergent implementation (`dec25f93` — see Verification notes); the conflicts
+   were reconciled in favour of PR #380 (it matches plan §5 and this contract) and
+   pushed, so the PR is mergeable. The contract PR #380 imposes: `stream: true`
+   with `tools` → 400 (non-streaming for tool turns); `tool_choice`
+   `required`/named → 400 (send `"auto"` or omit). This was the gate everything
+   else waited on; it is closed.
 4. **Whose tools: standard OpenAI semantics.** The served endpoint accepts the
    *request's* tools and emits `tool_calls`; the caller executes them and sends
    results back. Meaty does **not** expose its internal registry to remote
@@ -131,20 +144,20 @@ Four settled with the user. Superseding the open questions below.
    (`useChatStore`, `useAppStore`), and running those because a network client
    asked would be a very different risk from echoing a tool call back.
 
-### What the meaty-side proposal needs
+### What the meaty-side proposal became
 
-`localAi/chatCompletionHandler.ts` currently reads `body.stream` and nothing
-else. The change is: parse `body.tools` / `body.tool_choice`, pass them to the
-model, and emit `delta.tool_calls` fragments in the SSE stream plus a non-streaming
-`tool_calls` array. The pieces largely exist — `openAIMessageBuilder.ts` builds
-tool schemas and `generationToolLoop.ts` assembles calls — but the loop is coupled
-to `useChatStore` / `useAppStore` / `useRemoteServerStore`, so it is not directly
-reusable from a request context and would need decoupling, or a server-side
-equivalent that reuses `src/services/tools/registry.ts` for schema only.
+`localAi/chatCompletionHandler.ts` now parses `body.tools` / `body.tool_choice`,
+gates on model capability (refuses `stream: true` + `tools` and `required`/named
+with 400), and emits OpenAI `tool_calls` non-streaming. It does **not** route
+through `generationToolLoop` — that loop is coupled to `useChatStore` /
+`useAppStore` / `useRemoteServerStore` and runs inside the app for its own chat UI.
+Instead the served path is `handleToolCompletion` → `llmService.generateResponseWithTools`,
+which reuses `src/services/tools/registry.ts` for schema only and never touches the
+stores.
 
-*Not decided:* whether OpenMuse may propose this to `Wiltermoodj/meaty` as a
-contribution, and whether that repo accepts outside contributions. Check before
-assuming a PR is appropriate.
+*Open question, not decided:* whether OpenMuse may propose further changes to
+`Wiltermoodj/meaty` as a contribution, and whether that repo accepts outside
+contributions. Check before assuming a PR is appropriate.
 
 ## Open questions — still open
 
@@ -162,18 +175,20 @@ assuming a PR is appropriate.
 6. **Model viability.** Meaty serves whatever the device has loaded. OpenMuse's
    guidance is a 7B–9B floor for chat and more for task work. What can the target
    phone hold, and what is the cold-start behaviour with nothing loaded?
-7. ~~Tool-calling fidelity.~~ **Answered 2026-10-04, and it is the second
-   blocker.** The served endpoint does not support tool-calling at all.
-   `localAi/chatCompletionHandler.ts` reads `body.stream` and nothing else —
-   no `tools`, no `tool_choice` — and `createSseStream` emits only
-   `delta: { content }`. There is no mention of tools anywhere under
-   `src/services/localAi/`. Meaty *has* a tool loop (`generationToolLoop.ts`,
-   `openAIMessageBuilder.ts`), but it runs inside the app for its own chat UI and
-   is not reachable over HTTP.
+7. ~~Tool-calling fidelity.~~ **Answered 2026-10-05** — tool-calling is on the
+   served endpoint, implemented (non-streaming) as
+   [PR #380](https://github.com/Wiltermoodj/meaty/pull/380).
+   `localAi/chatCompletionHandler.ts` parses `body.tools` / `body.tool_choice`,
+   gates on model capability (refuses `stream: true` + `tools` and `required`/named
+   with 400), and emits OpenAI `tool_calls`; the caller executes them. It does **not**
+   route through `generationToolLoop` (coupled to the app's own chat-UI stores) —
+   see Decision 3. Meaty *has* a tool loop (`generationToolLoop.ts`,
+   `openAIMessageBuilder.ts`) for its own chat UI; that is the unrelated,
+   meaty-internal path.
 
-   OpenMuse's agent is a tool loop. A chat-completions endpoint that cannot call
-   tools is a completion endpoint, not an agent endpoint, so **(a), (b) and (c)
-   all fail without this** too. It is the larger of the two gaps.
+   **Do not build a streaming tool-calling client:** send `stream: false` for tool
+   turns. The "larger gap" framing from 2026-10-04 is obsolete; reachability is now
+   the only blocker (see Summary).
 8. **Fallback budget.** `docs/SYNC.md` says fall back to remote, then API. Meaty's
    own discovery needed 2000 ms after 500 ms produced false negatives, so do not
    probe tighter than that.
@@ -184,22 +199,22 @@ assuming a PR is appropriate.
 
 ## Sequencing
 
-**(c) is settled, so the order follows from the blockers:**
+**(c) is settled and tool-calling is implemented (PR #380), so only OpenMuse-side
+work remains:**
 
-1. **Tool-calling on the meaty side.** Blocks every path — an endpoint that
-   cannot call tools cannot run an agent, however it is reached. Nothing in
-   OpenMuse is worth building until this lands. **Planned and proposed**
-   ([PR #378](https://github.com/Wiltermoodj/meaty/pull/378)); not implemented.
-2. **A streaming client on the phone.** `api.request()` buffers whole responses;
-   relaying token-by-token needs `response.body` streaming, plus a long-lived
-   connection the OS will not kill mid-run.
-3. **The server's relay route and per-request routing decision**, with the
+1. **Provider wiring** — point `OPENAI_BASE_URL` at the relay host, per-device
+   model configuration, and the fallback budget. Buildable **now** against PR #380:
+   send `stream: false` for tool turns and `tool_choice` unset.
+2. **The server's relay route and per-request routing decision**, with the
    reachability probe and remote-then-API fallback.
-4. **Provider wiring** — `OPENAI_BASE_URL` pointed at the relay, per-device
-   configuration, and the fallback budget.
+3. **A streaming client on the phone** — for normal chat text only.
+   `api.request()` buffers whole responses, and relaying token-by-token needs
+   `response.body` streaming plus a long-lived connection the OS will not kill
+   mid-run. (Tool turns are non-streaming, so this step is for chat text, not for
+   tool execution.)
 
-Step 1 is in another repository. Do not begin step 2 until it has a target to aim
-at, or the client gets built twice.
+PR #380 is the target that step 1 waited on; do not build a streaming
+tool-calling client, or the client gets built twice.
 
 ## Existing OpenMuse functionality this would build on
 
@@ -234,15 +249,39 @@ only checked the one thing that happened not to have changed.
 
 ## Verification notes
 
-- Verified against `meaty` `origin/main` @ `3e95e5ac`, fetched this session with
-  `GITHUB_TOKEN`. Ambient git credentials fail with 401 — use the token, as
-  OpenMuse already does for its own pushes.
-- The local checkout at `/home/ubuntu/meaty` is at `6999e641` (PR #240); current is
-  PR #377. It has **not** been fast-forwarded, so anything assessed from that
-  working tree needs re-checking.
+- Verified against `meaty`: `origin/main` @ `13f9a59b` and PR #380's branch
+  `feat/localai-tool-calling` @ `ccc6d1d3` (merge-resolved, mergeable), both
+  fetched this session with `GITHUB_TOKEN`. Ambient git credentials fail with 401
+  — use the token, as OpenMuse already does for its own pushes. PR #380's branch
+  was fast-forwarded to `ccc6d1d3` (the conflict-resolution commit) and pushed; the
+  PR is now mergeable on GitHub — not yet merged to `main`.
+- `tsc --noEmit` is clean on the reconciled tree.
+- PR #380's tool-calling suites (`localAiServer`, `localAiToolCalling`,
+  `localAiToolAdapter`, `localAiToolChoice`) are green — 72 tests, with two
+  `localAiServer` assertions reconciled to PR #380's contract. The branch's
+  mutation harness `scripts/mutation-localai-tools.sh` reports
+  `MUTATION_KILLED=12 SURVIVED=0` — the tests bite, not just pass.
+- **No regressions from the merge.** Full `__tests__/unit/services` on the
+  reconciled tree fails 13 suites / 68 tests — but those are the **same** 13 suites
+  / 68 failures on clean `origin/main @ 13f9a59b` (jules-bot churn on networking,
+  model residency, auth and parsers). The merge introduced none; PR #380 only
+  *adds* green suites.
+- Reconciled the two tool-calling implementations: `main` grew `dec25f93` (PR #381,
+  jules-bot), which *supports* `stream: true` + `tools` and `tool_choice`
+  `required`/named — contradicting plan §5 and this contract. Kept PR #380's
+  implementation (matches plan §5 and this contract); kept main's *independent*
+  work (`types.ts` at `6cae1e3d`, `modelResidency`, `localAiServer.ts`,
+  `offgrid-sync-shim.ts`, `debounce.ts`).
+- Meaty-internal defect, **not** in OpenMuse's path: a duplicate-message bug in
+  the chat-UI store path (`onFinalResponse` + `flushTokenBuffer` two-writer on
+  `generationServiceHelpers.ts` / `generationService.ts`). The served endpoint
+  routes through `handleToolCompletion` → `llmService.generateResponseWithTools`,
+  not `generationToolLoop`, so it is unaffected. Unfixed; flagged so it is not
+  rediscovered.
+- The local checkout at `/home/ubuntu/meaty` is on PR #380's branch @ `ccc6d1d3`.
 - Not determined from the source, and not guessed: whether OpenMuse is an intended
   consumer of this daemon (question 5).
-- Question 7 (tool-calling) was open in the first draft and has since been
-  answered by reading the handler — see the struck-through entry above. The
-  lesson stands: two of the ten questions were answerable from the source, and
-  asking the user questions the code could answer is its own failure mode.
+- Question 7 (tool-calling) was open in the first draft and is answered above:
+  tool-calling is implemented (PR #380). Lesson stands: two of the ten questions
+  were answerable from the source, and "shipped/landed" is a claim that must be
+  checked against `merged_at` (PR #380 is implemented and mergeable, but open).
