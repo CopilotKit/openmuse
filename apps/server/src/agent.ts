@@ -8,6 +8,7 @@ import {
 } from "@copilotkit/runtime/v2";
 import type { Auth } from "./auth.ts";
 import type { Config } from "./config.ts";
+import type { AgentRunner } from "@copilotkit/runtime/v2";
 import { ConversationAgent } from "./engine/conversation.ts";
 import type { AgentService } from "./engine/service.ts";
 import { createJevAdapter, type JevAdapter } from "./jev/adapter.ts";
@@ -29,7 +30,8 @@ export function makeRuntime(
   config: Config,
   service: AgentService,
   auth: Auth,
-  intelligence: CopilotKitIntelligence,
+  intelligence: CopilotKitIntelligence | undefined,
+  runner?: AgentRunner,
 ) {
   // Built on first use, then shared so live mode reuses one TypeSafe client across requests.
   let jevAdapter: JevAdapter | undefined;
@@ -55,14 +57,26 @@ export function makeRuntime(
               sharedJevAdapter(),
             ),
   });
-  const runtime = new CopilotRuntime({
-    agents,
-    intelligence,
-    identifyUser: async (request) => ({
-      id: await auth.owner(request.headers.get("authorization") ?? undefined),
-      name: "OpenMuse user",
-    }),
-    generateThreadNames: false,
-  });
+  // The two branches map to the runtime's two official modes:
+  //  - with Intelligence → cloud (or self-hosted shim) threads + realtime WS
+  //  - without → standard AG-UI/SSE runtime with local thread endpoints
+  const runtime = intelligence
+    ? new CopilotRuntime({
+        agents,
+        intelligence,
+        identifyUser: async (request) => ({
+          id: await auth.owner(request.headers.get("authorization") ?? undefined),
+          name: "OpenMuse user",
+        }),
+        generateThreadNames: false,
+      })
+    : new CopilotRuntime({
+        agents,
+        ...(runner ? { runner } : {}),
+        identifyUser: async (request: Request) => ({
+          id: await auth.owner(request.headers.get("authorization") ?? undefined),
+          name: "OpenMuse user",
+        }),
+      });
   return createCopilotHonoHandler({ runtime, basePath: "/api/copilotkit" });
 }
