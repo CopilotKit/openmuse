@@ -68,7 +68,7 @@ export interface Monitor {
   taskId: string;
   title: string;
   url: string;
-  condition: "change" | "contains" | "price_below";
+  condition: "change" | "contains" | "price_below" | "price_above";
   value: string;
   intervalMinutes: number;
   status: "active" | "paused" | "stopped";
@@ -143,7 +143,7 @@ export const monitorInputSchema = z
   .object({
     title: z.string().min(1).max(160),
     url: z.url().max(4096),
-    condition: z.enum(["change", "contains", "price_below"]).default("change"),
+    condition: z.enum(["change", "contains", "price_below", "price_above"]).default("change"),
     value: z.string().max(300).default(""),
     intervalMinutes: z.number().int().min(1).max(10080).default(15),
   })
@@ -151,7 +151,7 @@ export const monitorInputSchema = z
     if (v.condition !== "change" && !v.value.trim())
       c.addIssue({ code: "custom", message: "Enter a condition value" });
     if (
-      v.condition === "price_below" &&
+      (v.condition === "price_below" || v.condition === "price_above") &&
       (!Number.isFinite(Number(v.value)) || Number(v.value) <= 0)
     )
       c.addIssue({ code: "custom", message: "Enter a positive price" });
