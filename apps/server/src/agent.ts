@@ -10,6 +10,7 @@ import type { Auth } from "./auth.ts";
 import type { Config } from "./config.ts";
 import { ConversationAgent } from "./engine/conversation.ts";
 import type { AgentService } from "./engine/service.ts";
+import { createJevAdapter, type JevAdapter } from "./jev/adapter.ts";
 
 export function agentConfigured(config: Config) {
   return (
@@ -30,6 +31,9 @@ export function makeRuntime(
   auth: Auth,
   intelligence: CopilotKitIntelligence,
 ) {
+  // Built on first use, then shared so live mode reuses one TypeSafe client across requests.
+  let jevAdapter: JevAdapter | undefined;
+  const sharedJevAdapter = () => (jevAdapter ??= createJevAdapter(config));
   const agents: AgentsFactory = async ({ request }) => ({
     default:
       config.agentBackend === "sample"
@@ -37,6 +41,7 @@ export function makeRuntime(
             config,
             service,
             await auth.owner(request.headers.get("authorization") ?? undefined),
+            sharedJevAdapter(),
           )
         : config.agentBackend === "agui"
           ? new HttpAgent({
@@ -47,6 +52,7 @@ export function makeRuntime(
               config,
               service,
               await auth.owner(request.headers.get("authorization") ?? undefined),
+              sharedJevAdapter(),
             ),
   });
   const runtime = new CopilotRuntime({
