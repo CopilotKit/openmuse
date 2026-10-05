@@ -54,13 +54,12 @@ vision and embeddings.
 
 **One blocker remains, and it is the larger.** (1) OpenMuse runs all inference in
 `apps/server` and cannot reach a phone's loopback. (2) Tool-calling was the second
-blocker; it is **resolved** — implemented (non-streaming) in
-[PR #380](https://github.com/Wiltermoodj/meaty/pull/380), which was open with merge
-conflicts against `main` (whose `dec25f93` grew a second, divergent tool-calling
-impl); those were reconciled in favour of PR #380 and pushed, so the PR is
-mergeable. The contract it imposes: `stream: true` with `tools` returns 400 (use
-non-streaming for tool turns), and `tool_choice` must be `"auto"` or omitted
-(`"required"`/named is refused). Neither is a config change on our side, but (2) is
+blocker; it is **resolved** — implemented and merged to `main`.
+[PR #380](https://github.com/Wiltermoodj/meaty/pull/380) added non-streaming tool
+calling; [PR #383](https://github.com/Wiltermoodj/meaty/pull/383) added streaming
+tool calling, removing the legacy `400` on `stream: true` + `tools`. The remaining
+contract: `tool_choice` must be `"auto"` or omitted (`"required"`/named still
+returns 400 — see `toolChoice.ts`). Neither is a config change on our side; (2) is
 no longer a gap.
 
 ## What meaty provides
@@ -69,7 +68,7 @@ no longer a gap.
 |---|---|
 | `/v1/chat/completions`, SSE | ✅ implemented (`localAi/chatCompletionHandler.ts`) |
 | Reachable so another app can use it | ⚠️ **loopback only — see below** |
-| Tool-calling support | ✅ implemented (non-streaming), [PR #380](https://github.com/Wiltermoodj/meaty/pull/380) |
+| Tool-calling support | ✅ implemented (streaming + non-streaming), [PR #380](https://github.com/Wiltermoodj/meaty/pull/380) + [PR #383](https://github.com/Wiltermoodj/meaty/pull/383) |
 | OpenAI-compatible client plumbing | ✅ pre-existing |
 | Model lifecycle | ✅ GGUF + LiteRT, download and load managed in-app |
 
@@ -127,16 +126,15 @@ Four settled with the user. Superseding the open questions below.
    phone. *Consequence:* a reachability probe and a fallback deadline. Do not
    probe tighter than meaty's own 2000 ms discovery budget, which was raised from
    500 ms after false negatives.
-3. **Tool-calling.** Implemented (non-streaming) in [PR #380](https://github.com/Wiltermoodj/meaty/pull/380)
-   (branch `feat/localai-tool-calling`). The plan shipped as
-   [PR #378](https://github.com/Wiltermoodj/meaty/pull/378) (merged to `main`); PR
-   #380 was open with merge conflicts against `main`, which had grown a second,
-   divergent implementation (`dec25f93` — see Verification notes); the conflicts
-   were reconciled in favour of PR #380 (it matches plan §5 and this contract) and
-   pushed, so the PR is mergeable. The contract PR #380 imposes: `stream: true`
-   with `tools` → 400 (non-streaming for tool turns); `tool_choice`
-   `required`/named → 400 (send `"auto"` or omit). This was the gate everything
-   else waited on; it is closed.
+3. **Tool-calling.** Implemented and merged to `main`.
+   [PR #378](https://github.com/Wiltermoodj/meaty/pull/378) (merged) shipped the
+   plan; [PR #380](https://github.com/Wiltermoodj/meaty/pull/380) implemented
+   non-streaming tool calling; [PR #383](https://github.com/Wiltermoodj/meaty/pull/383)
+   added streaming tool calling. Both were merged after resolving conflicts against
+   `main` (whose `dec25f93` grew a second, divergent implementation — see
+   Verification notes). The contract now: `stream: true` + `tools` is **supported**;
+   `tool_choice` must be `"auto"` or omitted (`"required"`/named → 400, per
+   `toolChoice.ts`). This was the gate everything else waited on; it is closed.
 4. **Whose tools: standard OpenAI semantics.** The served endpoint accepts the
    *request's* tools and emits `tool_calls`; the caller executes them and sends
    results back. Meaty does **not** expose its internal registry to remote
@@ -147,13 +145,14 @@ Four settled with the user. Superseding the open questions below.
 ### What the meaty-side proposal became
 
 `localAi/chatCompletionHandler.ts` now parses `body.tools` / `body.tool_choice`,
-gates on model capability (refuses `stream: true` + `tools` and `required`/named
-with 400), and emits OpenAI `tool_calls` non-streaming. It does **not** route
-through `generationToolLoop` — that loop is coupled to `useChatStore` /
+gates on model capability (`required`/named tool_choice → 400; `stream: true` +
+`tools` is supported), and emits OpenAI `tool_calls` in both streaming (SSE
+`delta.tool_calls`) and non-streaming paths. It does **not** route through
+`generationToolLoop` — that loop is coupled to `useChatStore` /
 `useAppStore` / `useRemoteServerStore` and runs inside the app for its own chat UI.
-Instead the served path is `handleToolCompletion` → `llmService.generateResponseWithTools`,
-which reuses `src/services/tools/registry.ts` for schema only and never touches the
-stores.
+Instead the served path is `handleToolCompletion` / `createSseStream` →
+`llmService.generateResponseWithTools`, which reuses `src/services/tools/registry.ts`
+for schema only and never touches the stores.
 
 *Open question, not decided:* whether OpenMuse may propose further changes to
 `Wiltermoodj/meaty` as a contribution, and whether that repo accepts outside
@@ -176,19 +175,20 @@ contributions. Check before assuming a PR is appropriate.
    guidance is a 7B–9B floor for chat and more for task work. What can the target
    phone hold, and what is the cold-start behaviour with nothing loaded?
 7. ~~Tool-calling fidelity.~~ **Answered 2026-10-05** — tool-calling is on the
-   served endpoint, implemented (non-streaming) as
-   [PR #380](https://github.com/Wiltermoodj/meaty/pull/380).
+   served endpoint. [PR #380](https://github.com/Wiltermoodj/meaty/pull/380)
+   implemented non-streaming tool calling; [PR #383](https://github.com/Wiltermoodj/meaty/pull/383)
+   added streaming tool calling (SSE `delta.tool_calls`).
    `localAi/chatCompletionHandler.ts` parses `body.tools` / `body.tool_choice`,
-   gates on model capability (refuses `stream: true` + `tools` and `required`/named
-   with 400), and emits OpenAI `tool_calls`; the caller executes them. It does **not**
-   route through `generationToolLoop` (coupled to the app's own chat-UI stores) —
-   see Decision 3. Meaty *has* a tool loop (`generationToolLoop.ts`,
-   `openAIMessageBuilder.ts`) for its own chat UI; that is the unrelated,
-   meaty-internal path.
+   gates on model capability (`required`/named tool_choice → 400; `stream: true` +
+   `tools` is supported), and emits OpenAI `tool_calls`; the caller executes them.
+   It does **not** route through `generationToolLoop` (coupled to the app's own
+   chat-UI stores) — see Decision 3. Meaty *has* a tool loop
+   (`generationToolLoop.ts`, `openAIMessageBuilder.ts`) for its own chat UI; that
+   is the unrelated, meaty-internal path.
 
-   **Do not build a streaming tool-calling client:** send `stream: false` for tool
-   turns. The "larger gap" framing from 2026-10-04 is obsolete; reachability is now
-   the only blocker (see Summary).
+   **A streaming tool-calling client is now viable:** PR #383 removed the `400`
+   on `stream: true` + `tools`. Reachability (loopback) is the only remaining
+   blocker (see Summary).
 8. **Fallback budget.** `docs/SYNC.md` says fall back to remote, then API. Meaty's
    own discovery needed 2000 ms after 500 ms produced false negatives, so do not
    probe tighter than that.
@@ -199,22 +199,45 @@ contributions. Check before assuming a PR is appropriate.
 
 ## Sequencing
 
-**(c) is settled and tool-calling is implemented (PR #380), so only OpenMuse-side
-work remains:**
+**(c) is settled and tool-calling is implemented and merged (PR #380 + PR #383),
+so only OpenMuse-side work remains:**
 
 1. **Provider wiring** — point `OPENAI_BASE_URL` at the relay host, per-device
-   model configuration, and the fallback budget. Buildable **now** against PR #380:
-   send `stream: false` for tool turns and `tool_choice` unset.
+   model configuration, and the fallback budget. Buildable **now**: `tool_choice`
+   unset (or `"auto"`); streaming tool calls are supported via PR #383.
 2. **The server's relay route and per-request routing decision**, with the
    reachability probe and remote-then-API fallback.
-3. **A streaming client on the phone** — for normal chat text only.
+3. **A streaming client on the phone** — for chat text *and* tool calls.
    `api.request()` buffers whole responses, and relaying token-by-token needs
    `response.body` streaming plus a long-lived connection the OS will not kill
-   mid-run. (Tool turns are non-streaming, so this step is for chat text, not for
-   tool execution.)
+   mid-run. Both text and `delta.tool_calls` now stream (PR #383), so the client
+   must handle both.
 
-PR #380 is the target that step 1 waited on; do not build a streaming
-tool-calling client, or the client gets built twice.
+### Current state of OpenMuse-side work (2026-10-05)
+
+**None of the three steps above have been started.** Verified against the live
+codebase (`feat/device-agent-loop` branch, HEAD `5a47307`):
+
+- **No meaty provider wiring.** `grep -rl 'meaty'` across `apps/` and `packages/`
+  returns zero files. The existing `OPENAI_BASE_URL` plumbing in
+  `tanstack-agent.ts` and `entry.ts` is for the standard OpenAI backend only.
+- **No relay route.** No server-side route relays to a phone loopback. The
+  `outbound-url-guard.ts` "relay" match is a security allowlist, not a proxy.
+- **No phone streaming client.** `api.request()` in the 15 mobile files is the
+  standard buffered HTTP helper; no meaty-specific streaming transport exists.
+
+**What is already in place** (the foundation the integration would build on):
+- Per-device model routing: `agent-settings:device-models:{deviceId}` in
+  `conversation.ts` + `routes.ts` + `service.ts`.
+- `OPENAI_BASE_URL` + `OPENAI_API_FORMAT=chat-completions` backend support with
+  `defined()` normalization.
+- `CHAT_TOOL_ALLOWLIST` and per-device overrides.
+- Step budgets per device (`chatMaxSteps`, `taskMaxSteps`).
+- The phone work loop (`device-agent-loop.ts`) and claim/heartbeat/report flow.
+
+**To start:** pick one sequencing step and verify against the Verification notes
+below that the meaty contract has not changed since this doc was last synced (it
+was verified at origin/main `f2c3d3b`).
 
 ## Existing OpenMuse functionality this would build on
 
@@ -249,12 +272,13 @@ only checked the one thing that happened not to have changed.
 
 ## Verification notes
 
-- Verified against `meaty`: `origin/main` @ `13f9a59b` and PR #380's branch
-  `feat/localai-tool-calling` @ `ccc6d1d3` (merge-resolved, mergeable), both
-  fetched this session with `GITHUB_TOKEN`. Ambient git credentials fail with 401
-  — use the token, as OpenMuse already does for its own pushes. PR #380's branch
-  was fast-forwarded to `ccc6d1d3` (the conflict-resolution commit) and pushed; the
-  PR is now mergeable on GitHub — not yet merged to `main`.
+- Verified against `meaty` (fetched this session with `GITHUB_TOKEN`; ambient git
+  credentials fail with 401 — use the token, as OpenMuse already does for its own
+  pushes): `origin/main` @ `f2c3d3b` (PR #380 and PR #383 both merged), and PR
+  #380's branch `feat/localai-tool-calling` @ `ccc6d1d3` (merge-resolved). PR #380
+  merged 2026-10-05T18:26:08Z; PR #383 merged 2026-10-05T19:46:42Z. The local
+  checkout at `/home/ubuntu/meaty` is on the PR #380 branch @ `ccc6d1d3` and is
+  **2 commits behind** origin/main — it lacks PR #383.
 - `tsc --noEmit` is clean on the reconciled tree.
 - PR #380's tool-calling suites (`localAiServer`, `localAiToolCalling`,
   `localAiToolAdapter`, `localAiToolChoice`) are green — 72 tests, with two
@@ -267,10 +291,13 @@ only checked the one thing that happened not to have changed.
   model residency, auth and parsers). The merge introduced none; PR #380 only
   *adds* green suites.
 - Reconciled the two tool-calling implementations: `main` grew `dec25f93` (PR #381,
-  jules-bot), which *supports* `stream: true` + `tools` and `tool_choice`
-  `required`/named — contradicting plan §5 and this contract. Kept PR #380's
-  implementation (matches plan §5 and this contract); kept main's *independent*
-  work (`types.ts` at `6cae1e3d`, `modelResidency`, `localAiServer.ts`,
+  jules-bot), which supported `stream: true` + `tools` and `tool_choice`
+  `required`/named — contradicting plan §5. PR #380's non-streaming impl was kept
+  as the base; PR #383 subsequently **adopted** the streaming+tools path from
+  `dec25f93` (`delta.tool_calls` SSE chunks, `createSseStream` calling
+  `generateResponseWithTools`), while keeping PR #380's `tool_choice` gate
+  (only `required`/named still returns 400). Main's *independent* work was also
+  kept (`types.ts` at `6cae1e3d`, `modelResidency`, `localAiServer.ts`,
   `offgrid-sync-shim.ts`, `debounce.ts`).
 - Meaty-internal defect, **not** in OpenMuse's path: a duplicate-message bug in
   the chat-UI store path (`onFinalResponse` + `flushTokenBuffer` two-writer on
@@ -278,10 +305,12 @@ only checked the one thing that happened not to have changed.
   routes through `handleToolCompletion` → `llmService.generateResponseWithTools`,
   not `generationToolLoop`, so it is unaffected. Unfixed; flagged so it is not
   rediscovered.
-- The local checkout at `/home/ubuntu/meaty` is on PR #380's branch @ `ccc6d1d3`.
+- The local checkout at `/home/ubuntu/meaty` is on PR #380's branch @ `ccc6d1d3`,
+  **2 commits behind** origin/main (`f2c3d3b`) — it lacks PR #383's streaming
+  tool-calling changes. Run `git checkout main && git pull` to sync.
 - Not determined from the source, and not guessed: whether OpenMuse is an intended
   consumer of this daemon (question 5).
 - Question 7 (tool-calling) was open in the first draft and is answered above:
-  tool-calling is implemented (PR #380). Lesson stands: two of the ten questions
-  were answerable from the source, and "shipped/landed" is a claim that must be
-  checked against `merged_at` (PR #380 is implemented and mergeable, but open).
+  tool-calling is implemented and merged (PR #380 non-streaming, PR #383 streaming).
+  Lesson stands: "shipped/landed" is a claim that must be checked against
+  `merged_at` (both PRs show `merged: true`).

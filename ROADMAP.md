@@ -35,7 +35,25 @@ The release is a personal-agent alpha: delegate a job, inspect its plan, supply 
 - [x] **Mobile client for the device work loop** (shipped 2026-10-04). `apps/mobile/src/device-agent-loop.ts` drives claim/heartbeat/report, aborts and stays silent when it loses a lease, retries through a network blip instead of abandoning live work, and keeps the run in hand going when the app is backgrounded. Off by default; turned on from Apps. Device work runs through the same agent as chat. See [docs/SYNC.md](docs/SYNC.md).
 - [ ] Background continuation when the app is killed, not just backgrounded. The lease already recovers the task, so this is an optimisation rather than a correctness fix.
 - [x] **Device-side pairing UX** (shipped 2026-10-04). An already-paired device lists what is waiting and mints a code; an unpaired one shows a code field to redeem it with. `GET /devices` now reports `paired` per device, without which the approving device has no target to mint for and a second phone could never be paired. See [docs/SYNC.md](docs/SYNC.md).
-- [ ] On-device model provider. **Revised 2026-10-04: the endpoint exists.** `meaty` ships `/v1/chat/completions` (SSE), `/v1/models`, audio, vision and embeddings — but binds `127.0.0.1` on port 11435 only, and OpenMuse runs all inference in `apps/server`, which cannot reach a phone's loopback. **It also does not serve tool-calling** — the agent is a tool loop, so that is a second blocker. Decided 2026-10-04: the phone proxies to its own loopback endpoint, the server routes per request with a remote-then-API fallback, and meaty's endpoint will use standard OpenAI tool semantics. Sequence: meaty-side tool-calling first, then the phone's streaming client, then the server relay. The tool-calling plan is written and open as [meaty PR #378](https://github.com/Wiltermoodj/meaty/pull/378); nothing is implemented yet. Meaty is `Wiltermoodj/meaty` — a separate on-device AI app serving an HTTP contract, never a library OpenMuse imports. Detail in [docs/ON-DEVICE-INFERENCE.md](docs/ON-DEVICE-INFERENCE.md). Decision 2026-10-04: build the OpenMuse side against the documented contract now, treat the endpoint as optional, never gate core agent work on it. `meaty` is a **separate project** providing on-device LLMs to other applications; OpenMuse consumes it as one optional model source and must fall back cleanly when its endpoint is absent. Not a code-level dependency.
+- [ ] On-device model provider. **Revised 2026-10-05: tool-calling is implemented
+  and merged in meaty** (non-streaming [PR #380](https://github.com/Wiltermoodj/meaty/pull/380),
+  streaming [PR #383](https://github.com/Wiltermoodj/meaty/pull/383)). `meaty` serves
+  `/v1/chat/completions` (SSE + non-streaming), `/v1/models`, audio, vision and
+  embeddings, with full OpenAI-compatible tool-calling — but binds `127.0.0.1` on
+  port 11435 only, and OpenMuse runs all inference in `apps/server`, which cannot
+  reach a phone's loopback. That reachability gap is the only remaining blocker.
+  Decided 2026-10-04: the phone proxies to its own loopback endpoint, the server
+  routes per request with a remote-then-API fallback, and meaty's endpoint uses
+  standard OpenAI tool semantics (`tool_choice: "auto"` or omitted; `"required"`/named
+  is refused). Sequence (meaty-side complete; OpenMuse-side not started): provider
+  wiring → server relay → phone streaming client. Meaty is
+  `Wiltermoodj/meaty` — a separate on-device AI app serving an HTTP contract,
+  never a library OpenMuse imports. Detail in
+  [docs/ON-DEVICE-INFERENCE.md](docs/ON-DEVICE-INFERENCE.md). Decision 2026-10-04:
+  treat the endpoint as optional, never gate core agent work on it. `meaty` is a
+  **separate project** providing on-device LLMs to other applications; OpenMuse
+  consumes it as one optional model source and must fall back cleanly when its
+  endpoint is absent. Not a code-level dependency.
 
 ## Integration acceptance next
 
