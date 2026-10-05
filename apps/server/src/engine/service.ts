@@ -31,6 +31,7 @@ import type { Store } from "../db.ts";
 import { AppError } from "../errors.ts";
 import type { Files } from "../files.ts";
 import { backgroundFailure } from "../log.ts";
+import { SearchService } from "../search.ts";
 import type { WorkspaceService } from "../workspace.ts";
 import { analyzeSpending } from "./finance.ts";
 import { executeModelTask } from "./model.ts";
@@ -41,6 +42,7 @@ const date = () => new Date().toISOString();
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
 export class AgentService {
   readonly worker: TaskWorker;
+  readonly search: SearchService;
   private maintenance?: ReturnType<typeof setInterval>;
   private refreshing = false;
   constructor(
@@ -52,6 +54,7 @@ export class AgentService {
     readonly browser: BrowserService,
     readonly computer: ComputerService = new ComputerService(db, config),
   ) {
+    this.search = new SearchService(db);
     this.worker = new TaskWorker(db, (owner, task, context) => this.execute(owner, task, context), {
       settled: (owner, task) => this.publishOutcome(owner, task),
     });
@@ -616,6 +619,28 @@ export class AgentService {
         { status: "dismissed" },
       );
     if (idea.status === "new") {
+      // A task already working on (or done with) the same email is opened instead of copied.
+      const { kind, input } = idea;
+      const handling =
+        typeof input.messageId === "string"
+          ? (await this.db.list<AgentTask>(owner, "tasks")).find(
+              (task) =>
+                task.kind === kind &&
+                task.input.messageId === input.messageId &&
+                task.status !== "failed" &&
+                task.status !== "cancelled",
+            )
+          : undefined;
+      if (handling)
+        return (
+          (await this.db.compareAndSwap<Idea>(
+            owner,
+            "ideas",
+            id,
+            { status: "new" },
+            { status: "accepted", taskId: handling.id },
+          )) ?? this.db.get<Idea>(owner, "ideas", id)
+        );
       const claimed = await this.db.compareAndSwap<Idea>(
         owner,
         "ideas",
@@ -630,6 +655,7 @@ export class AgentService {
       idea = claimed ?? (await this.db.get<Idea>(owner, "ideas", id));
       if (idea?.status !== "accepted") return idea;
     }
+    if (idea.taskId && (await this.db.get(owner, "tasks", idea.taskId))) return idea;
     const goal = await this.createGoal(
       owner,
       { title: idea.title, description: idea.reason },
@@ -714,7 +740,11 @@ export class AgentService {
     try {
       await context.checkpoint({ actionId: proposal.id });
     } catch (error) {
-      if (proposal.status === "awaiting_review")
+      const current = await this.db.get<AgentTask>(owner, "tasks", task.id);
+      if (
+        proposal.status === "awaiting_review" &&
+        (current?.status === "paused" || current?.status === "cancelled")
+      )
         await this.actions.decide(owner, proposal.id, proposal.hash, "deny");
       throw error;
     }
@@ -1017,6 +1047,7 @@ export class AgentService {
         owner,
         monitor.url,
         typeof task.state.sessionId === "string" ? task.state.sessionId : undefined,
+        ctx.signal,
       );
     }
     const text = observation.text.replace(/\s+/g, " ").trim();
@@ -1043,7 +1074,7 @@ export class AgentService {
       owner,
       "monitors",
       monitor.id,
-      { status: "active" },
+      { status: "active", checks: monitor.checks },
       {
         checks: monitor.checks + 1,
         lastCheckedAt: date(),

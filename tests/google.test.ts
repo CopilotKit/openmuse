@@ -88,6 +88,35 @@ test("mail reads nested plain text and attachment references over authenticated 
   assert.deepEqual(mail.attachments, ["msg1:attach1:Permission%3A%20form.pdf"]);
 });
 
+test("a body charset TextDecoder does not know falls back to UTF-8 instead of failing the list", async () => {
+  const charsets: Record<string, string> = { known: "utf-8", unknown: "unknown-8bit" };
+  const bodies: Record<string, string> = { known: "Opening hours", unknown: "Café tickets" };
+  const client = clientWith((request) => {
+    const url = new URL(request.url);
+    if (url.pathname.endsWith("/messages"))
+      return json({ messages: [{ id: "known" }, { id: "unknown" }] });
+    const id = url.pathname.split("/").at(-1) ?? "";
+    return json({
+      id,
+      threadId: `thread-${id}`,
+      labelIds: ["INBOX"],
+      payload: {
+        headers: [
+          { name: "From", value: "Museum <museum@example.com>" },
+          { name: "Content-Type", value: `text/plain; charset=${charsets[id]}` },
+        ],
+        mimeType: "text/plain",
+        body: { data: base64url(bodies[id]) },
+      },
+    });
+  });
+  const mail = await client.listMail();
+  assert.deepEqual(
+    mail.map((item) => item.body),
+    ["Opening hours", "Café tickets"],
+  );
+});
+
 test("HTML-only messages expose complete plain text while removing active and non-content elements", async () => {
   let reads = 0;
   const fullText = "Complete museum itinerary. ".repeat(4500);
@@ -757,4 +786,45 @@ test("single-event validation is repeated at execution and read failures never d
   });
   await assert.rejects(failing.deleteEvent("primary", "event-1"), GoogleApiError);
   assert.equal(writes, 0);
+});
+
+test("a sender's unpaired-surrogate attachment filename does not break the inbox", async () => {
+  const client = clientWith((request) => {
+    const url = new URL(request.url);
+    if (url.pathname.endsWith("/messages")) return json({ messages: [{ id: "msg1" }] });
+    return json({
+      id: "msg1",
+      threadId: "thread1",
+      internalDate: "1791658800000",
+      labelIds: ["INBOX"],
+      payload: {
+        headers: [{ name: "From", value: "sender@example.com" }],
+        mimeType: "multipart/mixed",
+        parts: [
+          { mimeType: "text/plain", body: { data: base64url("See attached.") } },
+          {
+            mimeType: "application/pdf",
+            filename: "form\uD800.pdf",
+            body: { attachmentId: "attach1", size: 10 },
+          },
+        ],
+      },
+    });
+  });
+  const [mail] = await client.listMail();
+  assert.deepEqual(mail.attachments, ["msg1:attach1:form%EF%BF%BD.pdf"]);
+});
+
+test("an outgoing attachment name with an unpaired surrogate still sends", async () => {
+  const client = clientWith(async (request) => {
+    if (new URL(request.url).pathname.endsWith("/profile"))
+      return json({ emailAddress: "me@example.com" });
+    const { raw } = await request.json();
+    const mime = Buffer.from(raw, "base64url").toString("utf8");
+    assert.match(mime, /filename\*=UTF-8''form%EF%BF%BD\.pdf/);
+    return json({ id: "sent1", threadId: "thread1" });
+  });
+  await client.sendEmail(email(), [
+    { name: "form\uD800.pdf", mimeType: "application/pdf", bytes: Buffer.from([1]) },
+  ]);
 });

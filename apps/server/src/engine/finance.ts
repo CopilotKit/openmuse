@@ -28,6 +28,12 @@ export function analyzeSpending(csv: string) {
   const header = rows.shift()?.map((v) => v.trim().toLowerCase());
   if (!header || !["date", "description", "amount", "category"].every((v) => header.includes(v)))
     throw new Error("CSV needs date,description,amount,category columns");
+  if (
+    ["date", "description", "amount", "category"].some(
+      (name) => header.indexOf(name) !== header.lastIndexOf(name),
+    )
+  )
+    throw new Error("CSV has a duplicate required column");
   if (!rows.length || rows.length > 5000)
     throw new Error("Import between 1 and 5,000 transactions");
   const transactions = rows.map((r, index) => {

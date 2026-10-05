@@ -164,6 +164,22 @@ export class ActionService {
       decision === "deny" ? "Declined; no changes made" : "Approved; execution started",
     );
     if (decision === "deny") return claimed;
+    if (claimed.taskId) {
+      const task = await this.db.get<{ status: string }>(owner, "tasks", claimed.taskId);
+      if (!task || !["running", "waiting_approval"].includes(task.status)) {
+        await this.db.compareAndSwap<ActionProposal>(
+          owner,
+          "actions",
+          id,
+          { status: "executing" },
+          { status: "awaiting_review" },
+        );
+        throw new AppError(
+          "Resume the task before approving this action. Cancelled tasks cannot execute.",
+          409,
+        );
+      }
+    }
     let finished: ActionProposal;
     try {
       const input = proposalSchema.parse({ kind: claimed.kind, data: claimed.data });
