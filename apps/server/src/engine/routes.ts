@@ -130,7 +130,7 @@ export function agentRoutes(service: AgentService): Hono<{ Variables: { owner: s
     return c.json(identity);
   });
   app.get("/notifications", async (c) =>
-    c.json((await service.snapshot(c.get("owner"))).notifications),
+    c.json(await service.db.list<AgentNotification>(c.get("owner"), "notifications")),
   );
   app.post("/notifications/:id/read", async (c) => {
     const notification = await service.db.compareAndSwap<AgentNotification>(
