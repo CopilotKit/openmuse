@@ -237,7 +237,7 @@ codebase (`feat/device-agent-loop` branch, HEAD `5a47307`):
 
 **To start:** pick one sequencing step and verify against the Verification notes
 below that the meaty contract has not changed since this doc was last synced (it
-was verified at origin/main `f2c3d3b`).
+was verified at origin/main `423569a`).
 
 ## Existing OpenMuse functionality this would build on
 
