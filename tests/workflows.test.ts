@@ -158,6 +158,40 @@ test("failed page checks back off, expose the error, and pause after repeated fa
   assert.equal((await db.get<Monitor>(owner, "monitors", monitor.id))?.status, "paused");
 });
 
+test("each failure streak of a watch raises its own alerts after it is resumed", async () => {
+  const monitor = await server.agent.createMonitor(owner, {
+    title: "Resumed availability",
+    url: "https://example.com",
+  });
+  const failUntilPaused = async () => {
+    for (let i = 1; i <= 5; i++) {
+      await server.agent.worker.tick();
+      const task = await server.agent.getTask(owner, monitor.taskId);
+      if (i < 5)
+        await db.compareAndSwap(
+          owner,
+          "tasks",
+          task.id,
+          { status: "scheduled" },
+          { nextRunAt: "2020-01-01T00:00:00Z" },
+        );
+    }
+    assert.equal((await server.agent.getTask(owner, monitor.taskId)).status, "paused");
+  };
+  const alerts = async () =>
+    (await db.list<AgentNotification>(owner, "notifications")).filter(
+      (n) => n.taskId === monitor.taskId && n.title === "Watch needs attention",
+    );
+  await failUntilPaused();
+  assert.equal((await alerts()).length, 2, "one retry alert and one paused alert");
+  await server.agent.controlMonitor(owner, monitor.id, "resume");
+  await failUntilPaused();
+  assert.equal((await alerts()).length, 4, "the second streak alerts again");
+  // Replaying the same outcome must not duplicate the alert.
+  await server.agent.worker.tick();
+  assert.equal((await alerts()).length, 4);
+});
+
 test("dismissal racing acceptance never creates work for a dismissed idea", async () => {
   for (let i = 0; i < 4; i++) {
     const idea: Idea = {
@@ -182,4 +216,42 @@ test("dismissal racing acceptance never creates work for a dismissed idea", asyn
       assert.equal(tasks.filter((t) => t.title === idea.title).length, 0);
     else assert.ok(saved?.taskId && tasks.some((t) => t.id === saved.taskId));
   }
+});
+test("accepting an idea opens the task already handling its email instead of starting another", async () => {
+  const ideaOwner = "idea-in-progress";
+  await server.workspace.ensureSample(ideaOwner, server.actions);
+  const idea = (await server.agent.refreshIdeas(ideaOwner)).find(
+    (candidate) => candidate.kind === "document" && candidate.status === "new",
+  );
+  assert.ok(idea);
+  const existing = await server.agent.createTask(
+    ideaOwner,
+    { kind: "document", prompt: "Complete the permission slip", input: idea.input },
+    "chat-request",
+  );
+  const accepted = await server.agent.decideIdea(ideaOwner, idea.id, "accept");
+  assert.equal(accepted?.taskId, existing.id);
+  const again = await server.agent.decideIdea(ideaOwner, idea.id, "accept");
+  assert.equal(again?.taskId, existing.id);
+  const tasks = (await db.list<AgentTask>(ideaOwner, "tasks")).filter(
+    (task) => task.kind === "document" && task.input.messageId === idea.input.messageId,
+  );
+  assert.equal(tasks.length, 1);
+});
+test("a cancelled task does not stop its idea from starting fresh work", async () => {
+  const ideaOwner = "idea-after-cancel";
+  await server.workspace.ensureSample(ideaOwner, server.actions);
+  const idea = (await server.agent.refreshIdeas(ideaOwner)).find(
+    (candidate) => candidate.kind === "document" && candidate.status === "new",
+  );
+  assert.ok(idea);
+  const cancelled = await server.agent.createTask(
+    ideaOwner,
+    { kind: "document", prompt: "Complete the permission slip", input: idea.input },
+    "chat-request",
+  );
+  await server.agent.control(ideaOwner, cancelled.id, "cancel");
+  const accepted = await server.agent.decideIdea(ideaOwner, idea.id, "accept");
+  assert.ok(accepted?.taskId && accepted.taskId !== cancelled.id);
+  assert.equal((await server.agent.getTask(ideaOwner, accepted.taskId)).status, "queued");
 });
