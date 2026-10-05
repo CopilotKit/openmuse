@@ -278,6 +278,17 @@ function decoderFor(charset: string): TextDecoder {
     return new TextDecoder();
   }
 }
+/**
+ * Replace unpaired surrogates with U+FFFD so encodeURIComponent cannot throw "URI
+ * malformed" on a sender-supplied name. (String.prototype.toWellFormed, but the
+ * project targets ES2023.)
+ */
+const wellFormed = (value: string): string =>
+  value.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    "\uFFFD",
+  );
+
 function mapMessage(message: z.infer<typeof messageSchema>): Mail {
   const metadata = headers(message.payload);
   const plain: string[] = [];
@@ -287,7 +298,7 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
     if (depth > 30) throw new Error("Gmail message MIME nesting exceeds the limit");
     if (part.filename && part.body?.attachmentId)
       attachments.push(
-        `${message.id}:${part.body.attachmentId}:${encodeURIComponent(part.filename)}`,
+        `${message.id}:${part.body.attachmentId}:${encodeURIComponent(wellFormed(part.filename))}`,
       );
     if (
       !part.filename &&
@@ -745,7 +756,7 @@ export class GoogleClient {
       const parts = [
         textPart,
         ...attachments.map((attachment) => {
-          const name = encodeURIComponent(attachment.name).replace(
+          const name = encodeURIComponent(wellFormed(attachment.name)).replace(
             /['()*]/g,
             (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
           );

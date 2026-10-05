@@ -139,8 +139,13 @@ export async function createBrowserManager(options: {
     const stored = sessions.get(id);
     if (!stored) throw new WorkerError("SESSION_NOT_FOUND", "Browser session not found.", 404);
     if (instance) {
-      await instance.context.storageState({ path: join(directory(id), "storage.json") });
-      await instance.context.close();
+      try {
+        await instance.context.storageState({ path: join(directory(id), "storage.json") });
+      } catch {
+        // Cookie persistence is best-effort during teardown. A crashed or
+        // unreachable browser must still release its context and session slot.
+      }
+      await instance.context.close().catch(() => {});
       await Promise.allSettled(instance.pending);
       running.delete(id);
     }
