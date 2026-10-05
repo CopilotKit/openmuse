@@ -32,6 +32,8 @@ import { DesktopToolCard } from "./desktop-tool-card";
 import { confirmedJevSelection, displayJevUserMessage, latestJevPanelId } from "./jev-actions";
 import { JevInteractionContext, JevToolCard } from "./jev-tool-card";
 import { MailToolCard } from "./mail-tool-card";
+import { onboarding } from "./onboarding-client";
+import { classifyError, hasFreshAnswer } from "./onboarding-telemetry";
 import { SearchToolCard } from "./search-tool-card";
 import { FileThreadCard, TaskThreadCard } from "./thread-artifacts";
 import { type Selection, useMuseThread } from "./threads";
@@ -232,6 +234,26 @@ export function ChatScreen({
   const followLatest = useRef(true);
   const [awayFromLatest, setAwayFromLatest] = useState(false);
   const runLock = useRef(false);
+  const currentRun = useRef<{ cancelled: boolean } | undefined>(undefined);
+  const visibleNow = useRef(active);
+  const pendingActivation = useRef(false);
+  useEffect(() => {
+    visibleNow.current = active;
+    if (active && isReady && loaded) {
+      void onboarding.stepViewed("first_answer");
+      if (pendingActivation.current) {
+        pendingActivation.current = false;
+        void onboarding.activated();
+      }
+    }
+  }, [active, isReady, loaded]);
+  useEffect(
+    () => () => {
+      visibleNow.current = false;
+      if (currentRun.current) currentRun.current.cancelled = true;
+    },
+    [],
+  );
   const [saveError, setSaveError] = useState("");
   const [historyError, setHistoryError] = useState("");
   const [historyAttempt, setHistoryAttempt] = useState(0);
@@ -283,16 +305,32 @@ export function ChatScreen({
     async (message?: QueuedMessage) => {
       if (runLock.current || agent.isRunning || !isReady || !loaded)
         throw new Error("The conversation is not ready yet.");
+      const before = agent.messages.map((m) => ({ id: m.id, role: m.role, content: m.content }));
+      const marker = { cancelled: false };
+      currentRun.current = marker;
       runLock.current = true;
       setBusy(true);
       setError("");
       if (message) agent.addMessage({ id: message.id, role: "user", content: message.text });
       try {
-        await runConversationTurn(
-          agentId,
-          () => copilotkit.runAgent({ agent }),
-          (onError) => copilotkit.subscribe({ onError }),
-        );
+        try {
+          await runConversationTurn(
+            agentId,
+            () => copilotkit.runAgent({ agent }),
+            (onError) => copilotkit.subscribe({ onError }),
+          );
+        } catch (e) {
+          void onboarding.setupFailed(
+            "first_answer",
+            marker.cancelled ? "cancelled" : classifyError(e),
+          );
+          throw e;
+        }
+        if (marker.cancelled) void onboarding.setupFailed("first_answer", "cancelled");
+        else if (hasFreshAnswer(before, agent.messages)) {
+          if (visibleNow.current) void onboarding.activated();
+          else pendingActivation.current = true;
+        }
         await Promise.all([refresh(), refreshAgent()]);
       } finally {
         try {
@@ -303,6 +341,7 @@ export function ChatScreen({
             `Conversation could not be saved: ${e instanceof Error ? e.message : String(e)}`,
           );
         } finally {
+          currentRun.current = undefined;
           runLock.current = false;
           setBusy(false);
         }
@@ -377,6 +416,7 @@ export function ChatScreen({
     return () => subscription.unsubscribe();
   }, [copilotkit, agentId, queue]);
   async function stop() {
+    if (currentRun.current) currentRun.current.cancelled = true;
     queue.pause();
     try {
       await copilotkit.stopAgent({ agent });

@@ -20,6 +20,7 @@ import { AgentService } from "./engine/service.ts";
 import { AppError } from "./errors.ts";
 import { Files } from "./files.ts";
 import { GoogleAuth } from "./google-auth.ts";
+import { linkOnboarding, onboardingEnabled } from "./onboarding-telemetry.ts";
 import { WorkspaceService } from "./workspace.ts";
 
 export async function createApp(
@@ -111,7 +112,7 @@ export async function createApp(
     await workspace.ensureSample("local-user", actions);
     await agent.ensure("local-user");
     if (config.mode === "sample") await agent.refreshIdeas("local-user");
-    return c.json(session);
+    return c.json({ ...session, telemetryEnabled: onboardingEnabled() });
   });
   app.get("/api/google/callback", async (c) => {
     if (c.req.query("error"))
@@ -136,6 +137,11 @@ export async function createApp(
     c.set("owner", owner);
     await next();
   });
+  app.post(
+    "/api/telemetry/onboarding-link",
+    bodyLimit({ maxSize: 1024, onError: (c) => c.json({ error: "Request is too large" }, 413) }),
+    async (c) => c.json(await linkOnboarding(await c.req.json())),
+  );
   app.get("/api/workspace", async (c) => {
     const [snapshot, reachable] = await Promise.all([
       workspace.snapshot(c.get("owner"), c.req.query("q")),
