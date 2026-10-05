@@ -270,6 +270,14 @@ function htmlToPlainText(html: string): string {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
+/** UTF-8 when the declared charset is not one TextDecoder knows (`unknown-8bit`, `utf-7`). */
+function decoderFor(charset: string): TextDecoder {
+  try {
+    return new TextDecoder(charset);
+  } catch {
+    return new TextDecoder();
+  }
+}
 function mapMessage(message: z.infer<typeof messageSchema>): Mail {
   const metadata = headers(message.payload);
   const plain: string[] = [];
@@ -290,7 +298,7 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
         headers(part)
           .get("content-type")
           ?.match(/charset=["']?([^;"'\s]+)/i)?.[1] ?? "utf-8";
-      const text = new TextDecoder(charset).decode(decodeBase64url(part.body.data, 1024 * 1024));
+      const text = decoderFor(charset).decode(decodeBase64url(part.body.data, 1024 * 1024));
       if (part.mimeType === "text/plain") plain.push(text);
       else html.push(htmlToPlainText(text));
     }

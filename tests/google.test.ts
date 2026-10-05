@@ -88,6 +88,35 @@ test("mail reads nested plain text and attachment references over authenticated 
   assert.deepEqual(mail.attachments, ["msg1:attach1:Permission%3A%20form.pdf"]);
 });
 
+test("a body charset TextDecoder does not know falls back to UTF-8 instead of failing the list", async () => {
+  const charsets: Record<string, string> = { known: "utf-8", unknown: "unknown-8bit" };
+  const bodies: Record<string, string> = { known: "Opening hours", unknown: "Café tickets" };
+  const client = clientWith((request) => {
+    const url = new URL(request.url);
+    if (url.pathname.endsWith("/messages"))
+      return json({ messages: [{ id: "known" }, { id: "unknown" }] });
+    const id = url.pathname.split("/").at(-1) ?? "";
+    return json({
+      id,
+      threadId: `thread-${id}`,
+      labelIds: ["INBOX"],
+      payload: {
+        headers: [
+          { name: "From", value: "Museum <museum@example.com>" },
+          { name: "Content-Type", value: `text/plain; charset=${charsets[id]}` },
+        ],
+        mimeType: "text/plain",
+        body: { data: base64url(bodies[id]) },
+      },
+    });
+  });
+  const mail = await client.listMail();
+  assert.deepEqual(
+    mail.map((item) => item.body),
+    ["Opening hours", "Café tickets"],
+  );
+});
+
 test("HTML-only messages expose complete plain text while removing active and non-content elements", async () => {
   let reads = 0;
   const fullText = "Complete museum itinerary. ".repeat(4500);
