@@ -13,6 +13,14 @@
  * from the note id, which is what makes a double promotion a no-op rather than a
  * second task.
  *
+ * **This is a hard boundary, not a convention.** Confirmed by the user
+ * 2026-10-04. The agent may capture a note (`capture_note`) and may never promote
+ * one, ever — so promotion must stay reachable only from the device-facing HTTP
+ * route and must never be added to the chat tool set. `promoteNote` being called
+ * from a tool is not a missing feature to be filled in later; it is a violation.
+ * `tests/conversation-notes.test.ts` asserts no promotion tool reaches the model,
+ * and that assertion is the enforcement.
+ *
  * Pure, no I/O, like `board.ts` and `device-work.ts`.
  */
 

@@ -273,11 +273,23 @@ loses its lease and the task returns to the queue for another device.
 ## On-device AI: `meaty` is the reference, not yet a provider
 
 `Wiltermoodj/meaty` is the model for on-device AI and is in this ecosystem, so
-OpenMuse can eventually rely on it as its served LLM. **Verified current state: it
-does not host an inference endpoint.** It *consumes* OpenAI-compatible servers
+OpenMuse can eventually rely on it as its served LLM. **Verified 2026-10-04: it
+does not serve an inference endpoint.** It *consumes* OpenAI-compatible servers
 (Ollama, LM Studio, LocalAI) via `OpenAICompatibleProvider`, discovers them over
-the LAN, and runs on-device models in-process through `llama.rn`/LiteRT. There is
-no `.listen()` in its `src/`, so nothing outside the app can call its inference.
+the LAN, and runs on-device models in-process through `llama.rn`/LiteRT.
+
+An earlier version of this paragraph said "there is no `.listen()` in its `src/`,
+so nothing outside the app can call its inference." That is right about HTTP
+inference and wrong as written: the sync subsystem binds a TCP port and
+re-advertises it over mDNS (`sync/engine.ts`, `nativeSync.ts`), so meaty *is*
+reachable on the LAN — it just speaks its own protocol, not OpenAI. The
+conclusion is unchanged; the reasoning would not have survived being repeated.
+Checked against `meaty` @ `6999e641`: no `http.createServer` / `net.createServer`
+in `src/`, and every `/v1/chat/completions` is a `fetch` to a remote base URL.
+The "Meaty Gateway" (:7878) is a URL the app probes, not one it serves.
+
+**Full assessment, open questions and what already exists:
+[ON-DEVICE-INFERENCE.md](ON-DEVICE-INFERENCE.md).**
 
 So the served-LLM capability is a **thing to build**, not an integration to
 configure. OpenMuse needs an OpenAI-compatible endpoint on the device.
