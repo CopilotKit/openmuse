@@ -3,6 +3,8 @@ import { z } from "zod";
 /** CSV amounts use positive expenses and negative income. No currency conversion is inferred. */
 export function analyzeSpending(csv: string) {
   if (csv.length > 500000) throw new Error("Import at most 500 KB of transaction CSV");
+  // Excel and many bank exports start a UTF-8 CSV with a byte order mark. It is not part of the first header.
+  if (csv.charCodeAt(0) === 0xfeff) csv = csv.slice(1);
   const rows: string[][] = [];
   let row: string[] = [],
     cell = "",
