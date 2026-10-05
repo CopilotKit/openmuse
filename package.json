@@ -13,7 +13,7 @@
     "dev:demo": "tsx apps/server/src/demo/entry.ts",
     "dev:mobile": "pnpm --dir apps/mobile start",
     "dev:web": "pnpm --dir apps/mobile web",
-    "test": "tsx --test tests/*.test.ts apps/mobile/test/*.test.ts",
+    "test": "tsx --import ./tests/setup.ts --test tests/*.test.ts apps/mobile/test/*.test.ts",
     "test:browser": "node --experimental-strip-types --test apps/worker/tests/lifecycle.test.ts",
     "typecheck": "tsc --noEmit && pnpm --dir apps/mobile typecheck",
     "lint": "biome check .",

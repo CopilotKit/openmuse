@@ -73,6 +73,7 @@ cp .env.example .env
 npx copilotkit@latest login
 npx copilotkit@latest project select
 # Set CPK_INTELLIGENCE_API_KEY in .env to the generated server-only project key.
+# Keep the CLI-generated CPK_TELEMETRY_ID too, including in deployed server environments.
 pnpm dev
 ```
 
@@ -190,6 +191,10 @@ No hidden retry occurs after an uncertain external write. Review its provider ou
 Every deployment requires `CPK_INTELLIGENCE_API_KEY` on the API server for CopilotKit Intelligence conversation persistence and replay. Create or select a project with `npx copilotkit@latest login` and `npx copilotkit@latest project select`, set the generated server-only key, and restart the API. The native menu uses `useThreads`; rich tool results link back to saved tasks, documents, and browser sessions.
 
 Intelligence is a separate service and is not included in this repository's MIT license. No project key is shipped. [Configuration and validation boundaries](docs/RICH-THREADS.md).
+
+## Signup and runtime tracking
+
+The CopilotKit SDK sends runtime telemetry through the shared CopilotKit sink to PostHog with `accessibility_title: "OpenMuse"`. Telemetry defaults to full capture; explicit SDK opt-outs and sampling settings take precedence. Keep the CLI-generated `CPK_TELEMETRY_ID` alongside the server-only project key when deploying. Intelligence records completed account signups separately; OpenMuse runtime usage can be joined to those accounts after the sink resolves the identity. [Setup, opt-out and PostHog validation](docs/TELEMETRY.md).
 
 ## Architecture
 
