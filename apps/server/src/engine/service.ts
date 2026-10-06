@@ -656,11 +656,16 @@ export class AgentService {
       if (idea?.status !== "accepted") return idea;
     }
     if (idea.taskId && (await this.db.get(owner, "tasks", idea.taskId))) return idea;
-    const goal = await this.createGoal(
-      owner,
-      { title: idea.title, description: idea.reason },
-      hash(`idea-goal:${id}`),
-    );
+    const goalId =
+      typeof idea.input.goalId === "string"
+        ? idea.input.goalId
+        : (
+            await this.createGoal(
+              owner,
+              { title: idea.title, description: idea.reason },
+              hash(`idea-goal:${id}`),
+            )
+          ).id;
     const task = await this.createTask(
       owner,
       {
@@ -668,7 +673,7 @@ export class AgentService {
         prompt: idea.prompt,
         kind: idea.kind,
         input: idea.input,
-        goalId: goal.id,
+        goalId,
       },
       `idea:${id}`,
     );
@@ -986,7 +991,7 @@ export class AgentService {
     let filledId = typeof task.state.filledId === "string" ? task.state.filledId : undefined;
     if (!filledId) {
       await ctx.guard();
-      const filled = await this.files.fill(owner, source.fileId, fields);
+      const filled = await this.files.fill(owner, source.fileId, fields, `document:${task.id}`);
       filledId = filled.id;
       task = await ctx.checkpoint({
         state: { ...task.state, source, filledId },
@@ -1062,11 +1067,11 @@ export class AgentService {
           : this.matchesPrice(text, Number(monitor.value));
     const previouslyMatched = Boolean(task.state.matched);
     const shouldNotify = matched && (monitor.condition === "change" || !previouslyMatched);
-    // A condition becoming true again is a new event, even with identical page text.
-    // Commit its sequence with the outcome so publication retries still deduplicate.
-    const alertSequence =
-      Number(task.state.alertSequence ?? 0) +
-      (shouldNotify && monitor.condition !== "change" ? 1 : 0);
+    // A notification-worthy observation is a new event, even when the page text is
+    // identical to an earlier one (a change back to a seen state, or a condition that
+    // cleared and reappeared). Commit its sequence with the outcome so publication
+    // retries still deduplicate on the same saved notice key.
+    const alertSequence = Number(task.state.alertSequence ?? 0) + (shouldNotify ? 1 : 0);
     const nextCheckAt = new Date(Date.now() + monitor.intervalMinutes * 60000).toISOString();
     await ctx.guard();
     // Worker lease is checked before each publication; monitor control also invalidates that lease.
@@ -1112,10 +1117,7 @@ export class AgentService {
           ? {
               title: monitor.title,
               body: `Condition met at ${observation.url}: ${text.slice(0, 240)}`,
-              key:
-                monitor.condition === "change"
-                  ? `monitor:${monitor.id}:${currentHash}`
-                  : `monitor:${monitor.id}:${alertSequence}:${currentHash}`,
+              key: `monitor:${monitor.id}:${alertSequence}:${currentHash}`,
             }
           : null,
       },

@@ -30,3 +30,14 @@ test("transaction imports preserve valid quoted fields at CSV boundaries", () =>
     assert.equal(report.transactions[1].category, "Uncategorized");
   }
 });
+
+test("transaction imports accept a UTF-8 byte order mark before the header", () => {
+  for (const header of [
+    "date,description,amount,category",
+    '"date","description","amount","category"',
+  ]) {
+    const report = analyzeSpending(`\uFEFF${header}\n2026-09-01,Coffee,10.10,Food`);
+    assert.equal(report.count, 1);
+    assert.equal(report.spending, 10.1);
+  }
+});
