@@ -94,17 +94,19 @@ export const eventDraftSchema = z
     ) {
       ctx.addIssue({ code: "custom", message: "End must be after a valid start", path: ["end"] });
     }
-    const dateOnly = /^\d{4}-\d{2}-\d{2}$/;
+    const dateOnly = z.iso.date();
     const timed = /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/;
-    if (
-      !(value.allDay ? dateOnly : timed).test(value.start) ||
-      !(value.allDay ? dateOnly : timed).test(value.end)
-    ) {
+    // Validate the calendar date separately so timed values can retain minute precision.
+    const validTimestamp = (timestamp: string) =>
+      value.allDay
+        ? dateOnly.safeParse(timestamp).success
+        : timed.test(timestamp) && dateOnly.safeParse(timestamp.slice(0, 10)).success;
+    if (!validTimestamp(value.start) || !validTimestamp(value.end)) {
       ctx.addIssue({
         code: "custom",
         message: value.allDay
-          ? "All-day events need date-only values"
-          : "Timed events need an explicit offset",
+          ? "All-day events need valid date-only values"
+          : "Timed events need valid date-times with an explicit offset",
         path: ["start"],
       });
     }
