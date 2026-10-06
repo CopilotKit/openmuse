@@ -449,3 +449,136 @@ test("manual milestone completion preserves current titles, ordering and concurr
     404,
   );
 });
+
+test("a change watch alert lists the new and updated lines of the page", async () => {
+  await read("/sample-page", {
+    text: "AI jobs in Munich\nSiemens · Werkstudent AI · 2 openings\nBCG · Intern",
+  });
+  const monitor = await read<Monitor>(
+    "/monitors",
+    {
+      title: "Munich AI jobs",
+      url: "sample://availability",
+      condition: "change",
+      intervalMinutes: 1,
+    },
+    201,
+  );
+  await server.agent.worker.tick();
+  await read("/sample-page", {
+    text: "AI jobs in Munich\nSAP · Working Student AI Engineer\nSiemens · Werkstudent AI · 3 openings\nBCG · Intern",
+  });
+  await read(`/monitors/${monitor.id}/control`, { action: "check" });
+  await server.agent.worker.tick();
+  const [alert] = (await read<AgentNotification[]>("/notifications")).filter(
+    (item) => item.taskId === monitor.taskId,
+  );
+  assert.equal(
+    alert?.body,
+    "Changed at sample://availability\nNew:\n• SAP · Working Student AI Engineer\nUpdated:\n• Siemens · Werkstudent AI · 3 openings",
+  );
+  const { task } = await read<{ task: AgentTask }>(`/tasks/${monitor.taskId}`);
+  assert.equal(
+    task.result,
+    "Change found: 2 lines changed (1 new, 1 updated). A notification is ready.",
+  );
+  await read(`/monitors/${monitor.id}/control`, { action: "stop" });
+});
+
+test("a change watch stays quiet when only relative times change", async () => {
+  await read("/sample-page", { text: "Jobs\nSiemens · Werkstudent AI · 3 minutes ago" });
+  const monitor = await read<Monitor>(
+    "/monitors",
+    { title: "Quiet jobs", url: "sample://availability", condition: "change", intervalMinutes: 1 },
+    201,
+  );
+  const alerts = async () =>
+    (await read<AgentNotification[]>("/notifications")).filter(
+      (item) => item.taskId === monitor.taskId,
+    );
+  await server.agent.worker.tick();
+  for (const text of [
+    "Jobs\nSiemens · Werkstudent AI · 58 minutes ago",
+    "Jobs\nSiemens · Werkstudent AI · 1 hour ago",
+  ]) {
+    await read("/sample-page", { text });
+    await read(`/monitors/${monitor.id}/control`, { action: "check" });
+    await server.agent.worker.tick();
+  }
+  assert.equal((await alerts()).length, 0, "ticking timestamps are not news");
+  await read("/sample-page", {
+    text: "Jobs\nSAP · Working Student AI\nSiemens · Werkstudent AI · 2 hours ago",
+  });
+  await read(`/monitors/${monitor.id}/control`, { action: "check" });
+  await server.agent.worker.tick();
+  const [alert] = await alerts();
+  assert.match(alert?.body ?? "", /New:\n• SAP · Working Student AI/);
+  await read(`/monitors/${monitor.id}/control`, { action: "stop" });
+});
+
+test("a change watch alerts when only a price changes", async () => {
+  await read("/sample-page", { text: "Headphones\nPrice: $399.99\nOnly 3 left" });
+  const monitor = await read<Monitor>(
+    "/monitors",
+    { title: "Headphones", url: "sample://availability", condition: "change", intervalMinutes: 1 },
+    201,
+  );
+  await server.agent.worker.tick();
+  await read("/sample-page", { text: "Headphones\nPrice: $279.99\nOnly 3 left" });
+  await read(`/monitors/${monitor.id}/control`, { action: "check" });
+  await server.agent.worker.tick();
+  const alerts = (await read<AgentNotification[]>("/notifications")).filter(
+    (item) => item.taskId === monitor.taskId,
+  );
+  assert.equal(alerts.length, 1, "a price change is news");
+  assert.equal(alerts[0]?.body, "Changed at sample://availability\nUpdated:\n• Price: $279.99");
+  await read(`/monitors/${monitor.id}/control`, { action: "stop" });
+});
+
+test("a change watch alerts when a numbered listing is removed", async () => {
+  await read("/sample-page", { text: "Rentals\nListing 101 · 2 bed\nListing 102 · 2 bed" });
+  const monitor = await read<Monitor>(
+    "/monitors",
+    { title: "Rentals", url: "sample://availability", condition: "change", intervalMinutes: 1 },
+    201,
+  );
+  await server.agent.worker.tick();
+  await read("/sample-page", { text: "Rentals\nListing 102 · 2 bed" });
+  await read(`/monitors/${monitor.id}/control`, { action: "check" });
+  await server.agent.worker.tick();
+  const alerts = (await read<AgentNotification[]>("/notifications")).filter(
+    (item) => item.taskId === monitor.taskId,
+  );
+  assert.equal(alerts.length, 1, "a removed listing is news");
+  assert.equal(
+    alerts[0]?.body,
+    "Changed at sample://availability\nRemoved:\n• Listing 101 · 2 bed",
+  );
+  await read(`/monitors/${monitor.id}/control`, { action: "stop" });
+});
+
+test("a change watch alerts on a change past the saved lines", async () => {
+  const long = "x".repeat(300);
+  const many = Array.from({ length: 2000 }, (_, i) => `Row ${i}`).join("\n");
+  for (const [before, after] of [
+    [`Terms\n${long} version 1`, `Terms\n${long} version 2`],
+    [`${many}\nLast row: open`, `${many}\nLast row: closed`],
+  ]) {
+    await read("/sample-page", { text: before });
+    const monitor = await read<Monitor>(
+      "/monitors",
+      { title: "Long page", url: "sample://availability", condition: "change", intervalMinutes: 1 },
+      201,
+    );
+    await server.agent.worker.tick();
+    await read("/sample-page", { text: after });
+    await read(`/monitors/${monitor.id}/control`, { action: "check" });
+    await server.agent.worker.tick();
+    const alerts = (await read<AgentNotification[]>("/notifications")).filter(
+      (item) => item.taskId === monitor.taskId,
+    );
+    assert.equal(alerts.length, 1, "a change past the saved lines is still news");
+    assert.match(alerts[0]?.body ?? "", /^Condition met at sample:\/\/availability: /);
+    await read(`/monitors/${monitor.id}/control`, { action: "stop" });
+  }
+});

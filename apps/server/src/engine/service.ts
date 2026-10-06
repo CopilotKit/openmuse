@@ -35,9 +35,18 @@ import { SearchService } from "../search.ts";
 import type { WorkspaceService } from "../workspace.ts";
 import { analyzeSpending } from "./finance.ts";
 import { executeModelTask } from "./model.ts";
+import {
+  countPageDiff,
+  describePageDiff,
+  diffPage,
+  pageLines,
+  withoutRelativeTimes,
+} from "./page-diff.ts";
 import { LostLeaseError, type TaskContext, TaskWorker } from "./worker.ts";
 
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
+/** A change watch's last saved page: its hash, relative-time-free fingerprint and lines. */
+type MonitorPage = { id: string; hash?: string; timelessHash?: string; lines: string[] };
 const date = () => new Date().toISOString();
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
 export class AgentService {
@@ -1074,7 +1083,23 @@ export class AgentService {
           ? text.toLowerCase().includes(monitor.value.toLowerCase())
           : this.matchesPrice(text, Number(monitor.value));
     const previouslyMatched = Boolean(task.state.matched);
-    const shouldNotify = matched && (monitor.condition === "change" || !previouslyMatched);
+    // For change watches, keep the page lines and a relative-time-free fingerprint of the whole text.
+    const change = monitor.condition === "change";
+    const lines = change ? pageLines(observation.text) : [];
+    const timelessHash = change ? hash(withoutRelativeTimes(text)) : undefined;
+    const savedPage =
+      matched && change
+        ? await this.db.get<MonitorPage>(owner, "monitor-pages", monitor.id)
+        : undefined;
+    // Saved lines can run ahead of a lost task outcome; use them only for the committed baseline.
+    const baseline = savedPage?.hash === previousHash ? savedPage : undefined;
+    // Only relative times changed anywhere on the page ("3 minutes ago"): keep watching quietly.
+    const quiet = Boolean(baseline?.timelessHash && baseline.timelessHash === timelessHash);
+    const shouldNotify =
+      matched && !quiet && (monitor.condition === "change" || !previouslyMatched);
+    const diff = baseline && shouldNotify ? diffPage(baseline.lines, lines) : undefined;
+    // Empty when the change is past the saved lines; the alert then quotes the page instead.
+    const changes = diff ? describePageDiff(diff) : "";
     // A notification-worthy observation is a new event, even when the page text is
     // identical to an earlier one (a change back to a seen state, or a condition that
     // cleared and reappeared). Commit its sequence with the outcome so publication
@@ -1098,6 +1123,13 @@ export class AgentService {
       },
     );
     if (!savedMonitor) throw new LostLeaseError();
+    if (change)
+      await this.db.put(owner, "monitor-pages", {
+        id: monitor.id,
+        hash: currentHash,
+        timelessHash,
+        lines,
+      });
     await ctx.event(
       "observation",
       previousHash ? "Checked for changes" : "Saved the first observation",
@@ -1105,13 +1137,16 @@ export class AgentService {
     );
     if (shouldNotify) {
       await ctx.guard();
-      await ctx.event("result", "A meaningful change was found", text.slice(0, 500));
+      await ctx.event("result", "A meaningful change was found", changes || text.slice(0, 500));
     }
+    const count = diff ? countPageDiff(diff) : "";
     return {
       status: "scheduled",
       nextRunAt: nextCheckAt,
       result: shouldNotify
-        ? "Change found. A notification is ready."
+        ? count
+          ? `Change found: ${count}. A notification is ready.`
+          : "Change found. A notification is ready."
         : "Watching. I'll check again on schedule.",
       state: {
         ...task.state,
@@ -1124,7 +1159,9 @@ export class AgentService {
         notice: shouldNotify
           ? {
               title: monitor.title,
-              body: `Condition met at ${observation.url}: ${text.slice(0, 240)}`,
+              body: changes
+                ? `Changed at ${observation.url}\n${changes}`
+                : `Condition met at ${observation.url}: ${text.slice(0, 240)}`,
               key: `monitor:${monitor.id}:${alertSequence}:${currentHash}`,
             }
           : null,
