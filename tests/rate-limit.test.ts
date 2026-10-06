@@ -3,32 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { Hono } from "hono";
 import { createApp } from "../apps/server/src/app.ts";
 import type { Config } from "../apps/server/src/config.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
-import { createRateLimitStore, resolveClientKey } from "../apps/server/src/rate-limit.ts";
-
-test("resolveClientKey keys authenticated requests by session token, independent of IP", () => {
-  const keyA = resolveClientKey({
-    authorization: "Bearer token-a",
-    trustProxy: false,
-    forwardedFor: "1.2.3.4",
-  });
-  const keyB = resolveClientKey({
-    authorization: "Bearer token-b",
-    trustProxy: false,
-    forwardedFor: "1.2.3.4",
-  });
-  assert.notEqual(keyA, keyB);
-  assert.equal(
-    keyA,
-    resolveClientKey({
-      authorization: "Bearer token-a",
-      trustProxy: false,
-      forwardedFor: "9.9.9.9",
-    }),
-  );
-});
+import { createRateLimitStore, rateLimit, resolveClientKey } from "../apps/server/src/rate-limit.ts";
 
 test("resolveClientKey ignores forwarding headers unless trustProxy is enabled", () => {
   const untrustedA = resolveClientKey({
@@ -112,20 +91,16 @@ async function login() {
   return token as string;
 }
 
-test("two authenticated sessions are rate-limited independently", async () => {
-  const tokenA = await login();
-  const tokenB = await login();
-  const headersFor = (token: string) => ({ Authorization: `Bearer ${token}` });
-
+test("session token rotation does not create new pre-auth buckets", async () => {
   let lastStatus = 200;
   for (let i = 0; i < 121; i++) {
-    const response = await app.request("/api/workspace", { headers: headersFor(tokenA) });
+    const token = i % 2 ? "rotated-token" : `rotated-token-${i}`;
+    const response = await app.request("/api/workspace", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     lastStatus = response.status;
   }
-  assert.equal(lastStatus, 429, "session A should eventually be rate-limited");
-
-  const responseB = await app.request("/api/workspace", { headers: headersFor(tokenB) });
-  assert.equal(responseB.status, 200, "session B must not be affected by session A's limit");
+  assert.equal(lastStatus, 429, "rotating tokens from one connection must share one bucket");
 });
 
 test("unauthenticated requests cannot multiply buckets by spoofing X-Forwarded-For", async () => {
@@ -141,4 +116,54 @@ test("unauthenticated requests cannot multiply buckets by spoofing X-Forwarded-F
     429,
     "spoofed per-request X-Forwarded-For values must not create independent buckets",
   );
+});
+
+function limitedApp(options: Parameters<typeof rateLimit>[1]) {
+  const app = new Hono();
+  app.onError((error, c) =>
+    c.json({ error: error.message }, "status" in error ? (error.status as 429) : 500),
+  );
+  app.use("/api/*", rateLimit(false, options));
+  app.get("/api/ping", (c) => c.text("ok"));
+  return app;
+}
+
+test("spoofed bearer tokens from one connection share a single bucket", async () => {
+  let address = "203.0.113.1";
+  const app = limitedApp({ maxRequests: 3, maxEntries: 5, getAddress: () => address });
+  const statuses: number[] = [];
+  for (let i = 0; i < 20; i++) {
+    const response = await app.request("/api/ping", {
+      headers: { Authorization: `Bearer fake-${i}` },
+    });
+    statuses.push(response.status);
+  }
+  assert.deepEqual(statuses.slice(0, 4), [200, 200, 200, 429]);
+  assert.ok(statuses.slice(3).every((status) => status === 429));
+
+  // Fake tokens did not consume the shared capacity: other connections still get in.
+  address = "203.0.113.2";
+  const other = await app.request("/api/ping", { headers: { Authorization: "Bearer fake-x" } });
+  assert.equal(other.status, 200);
+});
+
+test("capacity exhaustion fails closed and recovers once entries expire", async () => {
+  const addresses = ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"];
+  let current = 0;
+  const app = limitedApp({ maxEntries: 3, windowMs: 60_000, getAddress: () => addresses[current] });
+  const statuses: number[] = [];
+  for (current = 0; current < 4; current++) {
+    statuses.push((await app.request("/api/ping")).status);
+  }
+  assert.deepEqual(statuses, [200, 200, 200, 429], "the fourth connection is rejected");
+  current = 0;
+  assert.equal((await app.request("/api/ping")).status, 200, "existing entries keep working");
+});
+
+test("capacity exhaustion reclaims expired entries", () => {
+  const store = createRateLimitStore({ windowMs: 1000, maxEntries: 3 });
+  for (const key of ["conn:a", "conn:b", "conn:c"]) assert.equal(store.take(key, 0), true);
+  assert.equal(store.take("conn:d", 500), false);
+  assert.equal(store.take("conn:d", 1500), true);
+  assert.equal(store.size(), 1);
 });

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context } from "hono";
 import { AppError } from "./errors.ts";
@@ -44,15 +43,14 @@ export function createRateLimitStore(options: RateLimitStoreOptions = {}) {
   return { take, size: () => entries.size };
 }
 
+// This limiter runs before authentication, so the key must never be derived from
+// caller-supplied credentials (e.g. Authorization): any string would mint a new bucket.
 export function resolveClientKey(input: {
-  authorization?: string;
   trustProxy: boolean;
   forwardedFor?: string;
   realIp?: string;
   connectionAddress?: string;
 }): string {
-  if (input.authorization?.startsWith("Bearer "))
-    return `session:${createHash("sha256").update(input.authorization).digest("hex")}`;
   if (input.trustProxy) {
     const forwarded = input.forwardedFor?.split(",")[0]?.trim();
     if (forwarded) return `proxy:${forwarded}`;
@@ -72,15 +70,18 @@ function connectionAddress(c: Context): string | undefined {
   }
 }
 
-export function rateLimit(trustProxy: boolean, options?: RateLimitStoreOptions) {
+export function rateLimit(
+  trustProxy: boolean,
+  options: RateLimitStoreOptions & { getAddress?: (c: Context) => string | undefined } = {},
+) {
   const store = createRateLimitStore(options);
+  const getAddress = options.getAddress ?? connectionAddress;
   return async (c: Context, next: () => Promise<void>) => {
     const key = resolveClientKey({
-      authorization: c.req.header("authorization"),
       trustProxy,
       forwardedFor: c.req.header("x-forwarded-for"),
       realIp: c.req.header("x-real-ip"),
-      connectionAddress: connectionAddress(c),
+      connectionAddress: getAddress(c),
     });
     if (!store.take(key, Date.now()))
       throw new AppError("Too many requests. Try again in a minute.", 429);
