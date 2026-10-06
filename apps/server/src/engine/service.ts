@@ -619,6 +619,28 @@ export class AgentService {
         { status: "dismissed" },
       );
     if (idea.status === "new") {
+      // A task already working on (or done with) the same email is opened instead of copied.
+      const { kind, input } = idea;
+      const handling =
+        typeof input.messageId === "string"
+          ? (await this.db.list<AgentTask>(owner, "tasks")).find(
+              (task) =>
+                task.kind === kind &&
+                task.input.messageId === input.messageId &&
+                task.status !== "failed" &&
+                task.status !== "cancelled",
+            )
+          : undefined;
+      if (handling)
+        return (
+          (await this.db.compareAndSwap<Idea>(
+            owner,
+            "ideas",
+            id,
+            { status: "new" },
+            { status: "accepted", taskId: handling.id },
+          )) ?? this.db.get<Idea>(owner, "ideas", id)
+        );
       const claimed = await this.db.compareAndSwap<Idea>(
         owner,
         "ideas",
@@ -633,6 +655,7 @@ export class AgentService {
       idea = claimed ?? (await this.db.get<Idea>(owner, "ideas", id));
       if (idea?.status !== "accepted") return idea;
     }
+    if (idea.taskId && (await this.db.get(owner, "tasks", idea.taskId))) return idea;
     const goal = await this.createGoal(
       owner,
       { title: idea.title, description: idea.reason },
@@ -717,7 +740,11 @@ export class AgentService {
     try {
       await context.checkpoint({ actionId: proposal.id });
     } catch (error) {
-      if (proposal.status === "awaiting_review")
+      const current = await this.db.get<AgentTask>(owner, "tasks", task.id);
+      if (
+        proposal.status === "awaiting_review" &&
+        (current?.status === "paused" || current?.status === "cancelled")
+      )
         await this.actions.decide(owner, proposal.id, proposal.hash, "deny");
       throw error;
     }
@@ -1020,6 +1047,7 @@ export class AgentService {
         owner,
         monitor.url,
         typeof task.state.sessionId === "string" ? task.state.sessionId : undefined,
+        ctx.signal,
       );
     }
     const text = observation.text.replace(/\s+/g, " ").trim();
@@ -1034,6 +1062,11 @@ export class AgentService {
           : this.matchesPrice(text, Number(monitor.value));
     const previouslyMatched = Boolean(task.state.matched);
     const shouldNotify = matched && (monitor.condition === "change" || !previouslyMatched);
+    // A condition becoming true again is a new event, even with identical page text.
+    // Commit its sequence with the outcome so publication retries still deduplicate.
+    const alertSequence =
+      Number(task.state.alertSequence ?? 0) +
+      (shouldNotify && monitor.condition !== "change" ? 1 : 0);
     const nextCheckAt = new Date(Date.now() + monitor.intervalMinutes * 60000).toISOString();
     await ctx.guard();
     // Worker lease is checked before each publication; monitor control also invalidates that lease.
@@ -1041,7 +1074,7 @@ export class AgentService {
       owner,
       "monitors",
       monitor.id,
-      { status: "active" },
+      { status: "active", checks: monitor.checks },
       {
         checks: monitor.checks + 1,
         lastCheckedAt: date(),
@@ -1073,12 +1106,16 @@ export class AgentService {
         lastHash: currentHash,
         resumingMonitor: false,
         matched,
+        alertSequence,
         failures: 0,
         notice: shouldNotify
           ? {
               title: monitor.title,
               body: `Condition met at ${observation.url}: ${text.slice(0, 240)}`,
-              key: `monitor:${monitor.id}:${currentHash}`,
+              key:
+                monitor.condition === "change"
+                  ? `monitor:${monitor.id}:${currentHash}`
+                  : `monitor:${monitor.id}:${alertSequence}:${currentHash}`,
             }
           : null,
       },
