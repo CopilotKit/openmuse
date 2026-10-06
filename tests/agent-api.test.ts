@@ -254,6 +254,15 @@ test("idea dismissal survives refresh and concurrent acceptance creates one goal
   await read(`/tasks/${results[0].taskId}/control`, { action: "cancel" });
 });
 
+test("notification reads do not load the full agent workspace", async (t) => {
+  t.mock.method(server.agent, "snapshot", async () => {
+    throw new Error("notifications route must not call snapshot");
+  });
+  const response = await request("/notifications");
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.ok(Array.isArray(await response.json()));
+});
+
 test("sample monitor saves its baseline and deduplicates notifications for repeated changes", async () => {
   await read("/sample-page", { text: "No tables available" });
   const monitor = await read<Monitor>(
