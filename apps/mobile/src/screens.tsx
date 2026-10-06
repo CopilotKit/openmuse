@@ -453,10 +453,19 @@ export function MailScreen() {
   const [drafts, setDrafts] = useState<(EmailDraft & { id: string; createdAt: string })[]>([]);
   const [error, setError] = useState("");
   useEffect(() => {
+    let active = true;
+    setError("");
     void api
       .request<(EmailDraft & { id: string; createdAt: string })[]>("/api/drafts")
-      .then(setDrafts)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+      .then((next) => {
+        if (active) setDrafts(next);
+      })
+      .catch((e) => {
+        if (active) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      active = false;
+    };
   }, [api, w]);
   const items = w.mail.filter(
     (m) =>
