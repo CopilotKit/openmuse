@@ -39,7 +39,7 @@ import type {
   EmailDraft,
 } from "../../../packages/domain/src";
 import { API_URL } from "./api";
-import { localDateTime, zonedInstant } from "./date-time";
+import { localDateTime, startOfZonedDay, zonedInstant } from "./date-time";
 import {
   Button,
   Card,
@@ -636,8 +636,8 @@ export function CalendarScreen() {
       .then(() => {
         const query = new URLSearchParams({
           calendarId,
-          timeMin: zonedInstant(date, "00:00", zone),
-          timeMax: zonedInstant(plusDays(date, all ? 30 : 1), "00:00", zone),
+          timeMin: startOfZonedDay(date, zone),
+          timeMax: startOfZonedDay(plusDays(date, all ? 30 : 1), zone),
         });
         return api.request<CalendarEvent[]>(`/api/calendar/events?${query}`);
       })
