@@ -241,12 +241,14 @@ export async function createBrowserManager(
         void dialog.dismiss();
       });
       page.on("download", (download) => {
+        // The current download is not in pending yet, so reaching 20 saved or
+        // in-flight downloads means this one exceeds the documented 20-PDF limit.
         const pending = downloads(id).then((saved) =>
           capturePdfDownload({
             directory: directory(id),
             tempDirectory,
             download,
-            limitReached: saved.length + instance.pending.size > 20,
+            limitReached: saved.length + instance.pending.size >= 20,
           }),
         );
         instance.pending.add(pending);
