@@ -53,6 +53,11 @@ test("file names never collapse to an empty display name", () => {
   const long = sanitizeFileName(`${"a".repeat(300)}.pdf`);
   assert.ok(long.length <= 180);
   assert.ok(long.length > 0);
+  // The 180-character bound slices whole code points, never half a surrogate pair.
+  const emoji = sanitizeFileName(`${"x".repeat(179)}😀.pdf`);
+  assert.equal(emoji, `${"x".repeat(179)}😀`);
+  assert.equal([...emoji].length, 180);
+  assert.equal([...sanitizeFileName(`${"x".repeat(180)}😀.pdf`)].length, 180);
 });
 
 test("file lookups reject malformed IDs instead of probing storage", async (t) => {

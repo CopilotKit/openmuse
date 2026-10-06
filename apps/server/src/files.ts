@@ -12,10 +12,11 @@ const FILE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 
 export function sanitizeFileName(name: string): string {
   const base = name.split(/[\\/]/).at(-1) ?? "document.pdf";
+  // Slice code points, not UTF-16 units, so a surrogate pair is never split in half.
   const cleaned = Array.from(base)
     .filter((character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127)
-    .join("")
-    .slice(0, 180);
+    .slice(0, 180)
+    .join("");
   return cleaned || "document.pdf";
 }
 
