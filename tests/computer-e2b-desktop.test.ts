@@ -1195,13 +1195,10 @@ test("commands and files reuse the verified inspection instead of finding twice"
   }
 });
 
-
 test("desktop command cannot bypass an interrupted receipt after lease validation", async () => {
   const f = fake({ boxes: [{}] });
   const { computer, owner } = service(f);
-  const cmdId = createHash("sha256")
-    .update("computer-command:desktop-dead-row-case")
-    .digest("hex");
+  const cmdId = createHash("sha256").update("computer-command:desktop-dead-row-case").digest("hex");
   const originalGet = db.get.bind(db);
   let intercepted = false;
   db.get = (async (o: string, kind: string, id: string) => {
