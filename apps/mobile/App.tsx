@@ -308,7 +308,7 @@ function WorkspaceShell({
                 onPress={() => setThreadsOpen(true)}
               />
             </View>
-            <View style={{ alignItems: "center", gap: 1 }}>
+            <View pointerEvents="box-none" style={{ alignItems: "center", gap: 1 }}>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Open ${agentName} activity and approvals`}

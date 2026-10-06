@@ -33,7 +33,7 @@ pnpm test:browser
 pnpm --dir apps/worker test:docker
 ```
 
-Browser integration checks use public fixture websites and disposable profiles. They never use your saved browser sessions. CI runs lint, types, tests, platform exports, Chromium lifecycle, and the disposable browser-container suite.
+Both browser suites use controlled HTTP fixtures through the real worker and proxy URL checks, with disposable profiles instead of your saved sessions. The container runner builds the normal worker image and mounts its test entrypoint read-only. Building the image and installing dependencies require registry access; fixture navigation and downloads do not need external DNS or websites. CI runs lint, types, tests, platform exports, Chromium lifecycle, and the disposable browser-container suite.
 
 ## Change guidelines
 

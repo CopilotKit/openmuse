@@ -1,6 +1,8 @@
 export interface ComputerCommand {
   id: string;
   command: string;
+  /** Full input binding for keyed desktop actions; command is only a short display label. */
+  actionHash?: string;
   cwd: string;
   status: "running" | "succeeded" | "failed" | "timed_out" | "interrupted";
   exitCode?: number;
