@@ -169,14 +169,6 @@ function decodeHeader(value: string): string {
       },
     );
 }
-/** Decode a message-body part; unknown or malformed charset labels fall back to UTF-8. */
-function decodeText(bytes: Buffer, charset: string): string {
-  try {
-    return new TextDecoder(charset).decode(bytes);
-  } catch {
-    return new TextDecoder("utf-8").decode(bytes);
-  }
-}
 function decodeSnippet(value: string): string {
   const entities: Record<string, string> = {
     amp: "&",
@@ -284,6 +276,25 @@ function htmlToPlainText(html: string): string {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
+/** UTF-8 when the declared charset is not one TextDecoder knows (`unknown-8bit`, `utf-7`). */
+function decoderFor(charset: string): TextDecoder {
+  try {
+    return new TextDecoder(charset);
+  } catch {
+    return new TextDecoder();
+  }
+}
+/**
+ * Replace unpaired surrogates with U+FFFD so encodeURIComponent cannot throw "URI
+ * malformed" on a sender-supplied name. (String.prototype.toWellFormed, but the
+ * project targets ES2023.)
+ */
+const wellFormed = (value: string): string =>
+  value.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    "\uFFFD",
+  );
+
 function mapMessage(message: z.infer<typeof messageSchema>): Mail {
   const metadata = headers(message.payload);
   const plain: string[] = [];
@@ -297,7 +308,7 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
     const attached = Boolean(part.filename) || part.mimeType === "message/rfc822";
     if (part.filename && part.body?.attachmentId)
       attachments.push(
-        `${message.id}:${part.body.attachmentId}:${encodeURIComponent(part.filename)}`,
+        `${message.id}:${part.body.attachmentId}:${encodeURIComponent(wellFormed(part.filename))}`,
       );
     if (
       !attached &&
@@ -308,7 +319,7 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
         headers(part)
           .get("content-type")
           ?.match(/charset=["']?([^;"'\s]+)/i)?.[1] ?? "utf-8";
-      const text = decodeText(decodeBase64url(part.body.data, 1024 * 1024), charset);
+      const text = decoderFor(charset).decode(decodeBase64url(part.body.data, 1024 * 1024));
       if (part.mimeType === "text/plain") plain.push(text);
       else html.push(htmlToPlainText(text));
     }
@@ -756,7 +767,7 @@ export class GoogleClient {
       const parts = [
         textPart,
         ...attachments.map((attachment) => {
-          const name = encodeURIComponent(attachment.name).replace(
+          const name = encodeURIComponent(wellFormed(attachment.name)).replace(
             /['()*]/g,
             (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
           );
