@@ -31,3 +31,54 @@ test("idle Postgres client errors are logged instead of crashing the process", a
     await pool.end();
   }
 });
+test("workspace section reads match the selected snapshot sections", async () => {
+  const { WorkspaceService } = await import("../apps/server/src/workspace.ts");
+  const { Files } = await import("../apps/server/src/files.ts");
+  const store = await createStore();
+  try {
+    const config = { mode: "sample" } as unknown as import("../apps/server/src/config.ts").Config;
+    const workspace = new WorkspaceService(
+      store,
+      config,
+      new Files(store, config, { sign: () => "sig" } as never),
+      {} as never,
+    );
+    await store.put("owner", "settings", { id: "google", enabled: true });
+    await store.put("owner", "mail", {
+      id: "m1",
+      sender: "a@example.com",
+      subject: "Subject",
+      body: "Body",
+      date: "2026-01-02T00:00:00Z",
+      label: "INBOX",
+      threadId: "t1",
+      attachments: [],
+    });
+    await store.put("owner", "events", {
+      id: "e1",
+      title: "Event",
+      start: "2026-01-02T00:00:00Z",
+      end: "2026-01-02T01:00:00Z",
+    });
+    const full = await workspace.snapshot("owner");
+
+    const mail = await workspace.sectionSnapshot("owner", "mail");
+    assert.deepEqual(mail.mail, full.mail);
+    assert.equal(mail.events, undefined);
+    assert.equal(mail.files, undefined);
+
+    const calendar = await workspace.sectionSnapshot("owner", "calendar");
+    assert.deepEqual(calendar.events, full.events);
+    assert.equal(calendar.mail, undefined);
+
+    const files = await workspace.sectionSnapshot("owner", "files");
+    assert.deepEqual(
+      files.files,
+      full.files.map(({ url: _url, ...file }) => file),
+    );
+    assert.equal(files.mail, undefined);
+    assert.equal(files.events, undefined);
+  } finally {
+    await store.close();
+  }
+});
