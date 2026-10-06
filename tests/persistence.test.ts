@@ -83,7 +83,6 @@ test("workspace section reads match the selected snapshot sections", async () =>
   }
 });
 
-
 test("listByGoalId matches list plus goalId filtering", async () => {
   const store = await createStore();
   try {
