@@ -1,10 +1,22 @@
 import { once } from "node:events";
-import { createServer, type OutgoingHttpHeaders, request } from "node:http";
+import {
+  type ClientRequest,
+  createServer,
+  type IncomingMessage,
+  type OutgoingHttpHeaders,
+  type RequestOptions,
+  request,
+} from "node:http";
 import { connect, type Socket } from "node:net";
 import { validatePublicUrl } from "./network.ts";
 
 /** All upstream sockets connect to a validated IP, never a second DNS lookup. */
-export async function startEgressProxy() {
+export async function startEgressProxy(
+  sendHttpRequest: (
+    options: RequestOptions,
+    onResponse: (response: IncomingMessage) => void,
+  ) => ClientRequest = request,
+) {
   const sockets = new Set<Socket>();
   const server = createServer(async (incoming, response) => {
     try {
@@ -13,7 +25,7 @@ export async function startEgressProxy() {
       const headers: OutgoingHttpHeaders = { ...incoming.headers, host: target.url.host };
       delete headers["proxy-authorization"];
       delete headers["proxy-connection"];
-      const upstream = request(
+      const upstream = sendHttpRequest(
         {
           hostname: target.address,
           family: target.family,

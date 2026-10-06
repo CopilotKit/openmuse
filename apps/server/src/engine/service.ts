@@ -31,6 +31,7 @@ import type { Store } from "../db.ts";
 import { AppError } from "../errors.ts";
 import type { Files } from "../files.ts";
 import { backgroundFailure } from "../log.ts";
+import { SearchService } from "../search.ts";
 import type { WorkspaceService } from "../workspace.ts";
 import { analyzeSpending } from "./finance.ts";
 import { executeModelTask } from "./model.ts";
@@ -41,6 +42,7 @@ const date = () => new Date().toISOString();
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
 export class AgentService {
   readonly worker: TaskWorker;
+  readonly search: SearchService;
   private maintenance?: ReturnType<typeof setInterval>;
   private refreshing = false;
   constructor(
@@ -52,6 +54,7 @@ export class AgentService {
     readonly browser: BrowserService,
     readonly computer: ComputerService = new ComputerService(db, config),
   ) {
+    this.search = new SearchService(db);
     this.worker = new TaskWorker(db, (owner, task, context) => this.execute(owner, task, context), {
       settled: (owner, task) => this.publishOutcome(owner, task),
     });
@@ -616,6 +619,28 @@ export class AgentService {
         { status: "dismissed" },
       );
     if (idea.status === "new") {
+      // A task already working on (or done with) the same email is opened instead of copied.
+      const { kind, input } = idea;
+      const handling =
+        typeof input.messageId === "string"
+          ? (await this.db.list<AgentTask>(owner, "tasks")).find(
+              (task) =>
+                task.kind === kind &&
+                task.input.messageId === input.messageId &&
+                task.status !== "failed" &&
+                task.status !== "cancelled",
+            )
+          : undefined;
+      if (handling)
+        return (
+          (await this.db.compareAndSwap<Idea>(
+            owner,
+            "ideas",
+            id,
+            { status: "new" },
+            { status: "accepted", taskId: handling.id },
+          )) ?? this.db.get<Idea>(owner, "ideas", id)
+        );
       const claimed = await this.db.compareAndSwap<Idea>(
         owner,
         "ideas",
@@ -630,6 +655,7 @@ export class AgentService {
       idea = claimed ?? (await this.db.get<Idea>(owner, "ideas", id));
       if (idea?.status !== "accepted") return idea;
     }
+    if (idea.taskId && (await this.db.get(owner, "tasks", idea.taskId))) return idea;
     const goalId =
       typeof idea.input.goalId === "string"
         ? idea.input.goalId
@@ -710,18 +736,29 @@ export class AgentService {
         409,
       );
     const proposal = await this.actions.propose(owner, input, `${task.id}:${key}`, task.id);
+    if (proposal.status === "succeeded") return proposal;
+    if (proposal.status !== "awaiting_review" && proposal.status !== "executing")
+      throw new AppError(
+        `Reviewed action ${proposal.status}: ${proposal.error ?? "No further action was taken"}`,
+        409,
+      );
     try {
       await context.checkpoint({ actionId: proposal.id });
     } catch (error) {
-      if (proposal.status === "awaiting_review")
+      const current = await this.db.get<AgentTask>(owner, "tasks", task.id);
+      if (
+        proposal.status === "awaiting_review" &&
+        (current?.status === "paused" || current?.status === "cancelled")
+      )
         await this.actions.decide(owner, proposal.id, proposal.hash, "deny");
       throw error;
     }
-    await context.event(
-      "approval",
-      proposal.title,
-      `Review prepared for ${proposal.account ?? "the connected account"}`,
-    );
+    if (proposal.status === "awaiting_review")
+      await context.event(
+        "approval",
+        proposal.title,
+        `Review prepared for ${proposal.account ?? "the connected account"}`,
+      );
     return proposal;
   }
   private async execute(
@@ -759,6 +796,8 @@ export class AgentService {
         if (error instanceof LostLeaseError || context.signal.aborted) throw error;
         await context.guard();
         const failures = Number(task.state.failures ?? 0) + 1;
+        // Each streak of failures (after a success or a resume) gets its own alerts.
+        const failureStreak = Number(task.state.failureStreak ?? 0) + (failures === 1 ? 1 : 0);
         const detail = error instanceof Error ? error.message : "Page check failed";
         const nextCheckAt = new Date(
           Date.now() + Math.min(60, 2 ** failures) * 60000,
@@ -783,10 +822,11 @@ export class AgentService {
             ...task.state,
             failures,
             resumingMonitor: false,
+            failureStreak,
             notice: {
               title: "Watch needs attention",
               body: detail,
-              key: `watch-error:${task.id}:${failures >= 5 ? "paused" : "retry"}`,
+              key: `watch-error:${task.id}:${failureStreak}:${failures >= 5 ? "paused" : "retry"}`,
             },
           },
         };
@@ -1012,6 +1052,7 @@ export class AgentService {
         owner,
         monitor.url,
         typeof task.state.sessionId === "string" ? task.state.sessionId : undefined,
+        ctx.signal,
       );
     }
     const text = observation.text.replace(/\s+/g, " ").trim();
@@ -1026,6 +1067,11 @@ export class AgentService {
           : this.matchesPrice(text, Number(monitor.value));
     const previouslyMatched = Boolean(task.state.matched);
     const shouldNotify = matched && (monitor.condition === "change" || !previouslyMatched);
+    // A condition becoming true again is a new event, even with identical page text.
+    // Commit its sequence with the outcome so publication retries still deduplicate.
+    const alertSequence =
+      Number(task.state.alertSequence ?? 0) +
+      (shouldNotify && monitor.condition !== "change" ? 1 : 0);
     const nextCheckAt = new Date(Date.now() + monitor.intervalMinutes * 60000).toISOString();
     await ctx.guard();
     // Worker lease is checked before each publication; monitor control also invalidates that lease.
@@ -1033,7 +1079,7 @@ export class AgentService {
       owner,
       "monitors",
       monitor.id,
-      { status: "active" },
+      { status: "active", checks: monitor.checks },
       {
         checks: monitor.checks + 1,
         lastCheckedAt: date(),
@@ -1065,12 +1111,16 @@ export class AgentService {
         lastHash: currentHash,
         resumingMonitor: false,
         matched,
+        alertSequence,
         failures: 0,
         notice: shouldNotify
           ? {
               title: monitor.title,
               body: `Condition met at ${observation.url}: ${text.slice(0, 240)}`,
-              key: `monitor:${monitor.id}:${currentHash}`,
+              key:
+                monitor.condition === "change"
+                  ? `monitor:${monitor.id}:${currentHash}`
+                  : `monitor:${monitor.id}:${alertSequence}:${currentHash}`,
             }
           : null,
       },

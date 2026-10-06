@@ -1,20 +1,31 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { posix } from "node:path";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { join, posix } from "node:path";
 import { z } from "zod";
 import type {
   ComputerCommand,
   ComputerDirectory,
   ComputerSnapshot,
 } from "../../../packages/domain/src/computer.ts";
+import {
+  type ComputerBackend,
+  DesktopComputerBackend,
+  DockerComputer,
+} from "./computer-backend.ts";
+import {
+  describeDesktopAction,
+  desktopActionSchema,
+  E2BDesktopComputer,
+  resolution,
+} from "./computer-e2b-desktop.ts";
 import type { Config } from "./config.ts";
 import type { Store } from "./db.ts";
 import { AppError } from "./errors.ts";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
-const outputLimit = 128 * 1024;
+export const computerOutputLimit = 128 * 1024;
 const fileLimit = 256 * 1024;
-const controlTimeout = 10000;
 const leaseDuration = 180000;
 export const computerCommandSchema = z.object({
   command: z.string().trim().min(1).max(16000),
@@ -22,6 +33,7 @@ export const computerCommandSchema = z.object({
 });
 export const computerPathSchema = z.object({ path: z.string().min(1).max(2048) });
 export const computerWriteSchema = computerPathSchema.extend({ text: z.string().max(fileLimit) });
+export type ComputerState = "missing" | "stopped" | "running";
 export interface DockerResult {
   stdout: string;
   stderr: string;
@@ -35,23 +47,47 @@ export type DockerRunner = (
   options: { timeoutMs: number; input?: string; signal?: AbortSignal; maxOutputBytes?: number },
 ) => Promise<DockerResult>;
 
+/** Shared byte cap for both providers; stdout and stderr consume one budget. */
+export function computerOutput(maxOutputBytes = computerOutputLimit) {
+  const limit = Math.min(maxOutputBytes, 15 * 1024 * 1024);
+  const result: DockerResult = {
+    stdout: "",
+    stderr: "",
+    exitCode: null,
+    timedOut: false,
+    interrupted: false,
+    truncated: false,
+  };
+  const stdout: Buffer[] = [],
+    stderr: Buffer[] = [];
+  let count = 0;
+  const capture = (chunks: Buffer[]) => (data: string | Buffer) => {
+    const chunk = Buffer.from(data);
+    const remaining = Math.max(0, limit - count);
+    if (chunk.length > remaining) result.truncated = true;
+    if (remaining) chunks.push(chunk.subarray(0, remaining));
+    count += Math.min(remaining, chunk.length);
+  };
+  return {
+    result,
+    limit,
+    stdout: capture(stdout),
+    stderr: capture(stderr),
+    finish() {
+      result.stdout = Buffer.concat(stdout).toString("utf8");
+      result.stderr = Buffer.concat(stderr).toString("utf8");
+      return result;
+    },
+  };
+}
+
 // The only host process this provider can launch is Docker. User input is an argv
 // element or stdin, never a host shell program. Do not add a shell fallback here.
 export const runDocker: DockerRunner = (args, options) =>
   new Promise((resolve) => {
-    const limit = Math.min(options.maxOutputBytes ?? outputLimit, 15 * 1024 * 1024);
-    const result: DockerResult = {
-      stdout: "",
-      stderr: "",
-      exitCode: null,
-      timedOut: false,
-      interrupted: false,
-      truncated: false,
-    };
-    const stdout: Buffer[] = [],
-      stderr: Buffer[] = [];
-    let count = 0,
-      settled = false;
+    const output = computerOutput(options.maxOutputBytes);
+    const { result } = output;
+    let settled = false;
     const env: Record<string, string> = {};
     for (const key of [
       "PATH",
@@ -69,15 +105,7 @@ export const runDocker: DockerRunner = (args, options) =>
       settled = true;
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", abort);
-      result.stdout = Buffer.concat(stdout).toString("utf8");
-      result.stderr = Buffer.concat(stderr).toString("utf8");
-      resolve(result);
-    };
-    const capture = (chunks: Buffer[], chunk: Buffer) => {
-      const remaining = Math.max(0, limit - count);
-      if (chunk.length > remaining) result.truncated = true;
-      if (remaining) chunks.push(chunk.subarray(0, remaining));
-      count += Math.min(remaining, chunk.length);
+      resolve(output.finish());
     };
     const abort = () => {
       result.interrupted = true;
@@ -89,13 +117,10 @@ export const runDocker: DockerRunner = (args, options) =>
       child.kill("SIGKILL");
       finish();
     }, options.timeoutMs);
-    child.stdout.on("data", (chunk: Buffer) => capture(stdout, chunk));
-    child.stderr.on("data", (chunk: Buffer) => capture(stderr, chunk));
+    child.stdout.on("data", output.stdout);
+    child.stderr.on("data", output.stderr);
     child.on("error", () => {
-      capture(
-        stderr,
-        Buffer.from("Docker CLI could not be started. Install Docker and start its engine."),
-      );
+      output.stderr("Docker CLI could not be started. Install Docker and start its engine.");
       finish();
     });
     child.on("close", (code) => {
@@ -137,50 +162,15 @@ export function workspacePath(path: string): string {
     throw new AppError("Choose an absolute path inside /workspace", 422);
   return normalized;
 }
-const inspectionSchema = z.object({
-  Id: z.string(),
-  Name: z.string(),
-  Config: z.object({
-    Image: z.string(),
-    User: z.string(),
-    Labels: z.record(z.string(), z.string()).nullable(),
-    Env: z.array(z.string()),
-    Entrypoint: z.array(z.string()).nullable(),
-    Cmd: z.array(z.string()).nullable(),
-    WorkingDir: z.string(),
-  }),
-  HostConfig: z.object({
-    ReadonlyRootfs: z.boolean(),
-    Privileged: z.boolean(),
-    CapDrop: z.array(z.string()).nullable(),
-    CapAdd: z.array(z.string()).nullable(),
-    SecurityOpt: z.array(z.string()).nullable(),
-    NetworkMode: z.string(),
-    Memory: z.number(),
-    MemorySwap: z.number(),
-    PidsLimit: z.number().nullable(),
-    NanoCpus: z.number(),
-    Binds: z.array(z.string()).nullable(),
-    Devices: z.array(z.unknown()).nullable(),
-    DeviceRequests: z.array(z.unknown()).nullable(),
-    PortBindings: z.record(z.string(), z.unknown()).nullable(),
-    PidMode: z.string(),
-    IpcMode: z.string(),
-    Tmpfs: z.record(z.string(), z.string()).nullable(),
-    RestartPolicy: z.object({ Name: z.string() }),
-  }),
-  Mounts: z.array(
-    z.object({
-      Type: z.string(),
-      Name: z.string().optional(),
-      Destination: z.string(),
-      RW: z.boolean(),
-    }),
-  ),
-  NetworkSettings: z.object({ Networks: z.record(z.string(), z.unknown()) }),
-  State: z.object({ Running: z.boolean() }),
-});
-type Inspection = z.infer<typeof inspectionSchema>;
+/** Metadata for the latest screenshot blob, using the same shared data directory as Files. */
+interface Screen {
+  id: "latest";
+  receiptId: string;
+  mimeType: string;
+  blob?: string;
+  data?: string; // Older deployments stored base64; accepted until the next screenshot.
+  takenAt?: string;
+}
 type Lease = {
   id: string;
   token: string;
@@ -193,129 +183,43 @@ type Lease = {
   operation: "command" | "operation";
 };
 export class ComputerService {
+  private readonly backend: ComputerBackend;
   constructor(
     readonly db: Store,
     readonly config: Config,
-    private readonly docker: DockerRunner = runDocker,
-  ) {}
+    docker: DockerRunner = runDocker,
+    // Set only for COMPUTER_PROVIDER=e2b-desktop; the Docker paths below never use it.
+    private readonly desktop: E2BDesktopComputer | undefined = config.computerProvider ===
+    "e2b-desktop"
+      ? new E2BDesktopComputer(config)
+      : undefined,
+  ) {
+    this.backend = desktop
+      ? new DesktopComputerBackend(config, desktop)
+      : new DockerComputer(config, docker);
+  }
+  // Receipts are kept per provider, so Docker history never shows up on the desktop.
+  private get receipts() {
+    return this.backend.receipts;
+  }
+  get provider() {
+    return this.backend.provider;
+  }
+  private labels(owner: string) {
+    return computerIdentity(this.config, owner).labels;
+  }
+  /** Whether the owner's computer runs, on whichever provider is configured. */
+  private async isRunning(owner: string) {
+    return (await this.backend.state(owner)) === "running";
+  }
   private enabled() {
     if (!this.config.computerEnabled)
       throw new AppError(
-        "Computer is not configured. Enable COMPUTER_ENABLED and build the local computer image.",
+        this.provider === "docker"
+          ? "Computer is not configured. Enable COMPUTER_ENABLED and build the local computer image."
+          : "Computer is not configured. Enable COMPUTER_ENABLED and configure the desktop provider.",
         503,
       );
-  }
-  private image() {
-    const image = this.config.computerImage ?? "openmuse-computer:local";
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{0,250}$/.test(image))
-      throw new AppError("COMPUTER_IMAGE is invalid", 503);
-    return image;
-  }
-  private async checked(args: string[]) {
-    const result = await this.docker(args, { timeoutMs: controlTimeout });
-    if (result.timedOut)
-      throw new AppError("Docker did not respond within 10 seconds. Check the Docker engine.", 503);
-    if (result.interrupted || result.exitCode !== 0 || result.truncated)
-      throw new AppError(
-        "Docker operation failed. Check that the engine is running and the computer image is built locally.",
-        503,
-      );
-    return result.stdout;
-  }
-  private async inspect(owner: string): Promise<Inspection | undefined> {
-    const identity = computerIdentity(this.config, owner);
-    const found = (
-      await this.checked([
-        "container",
-        "ls",
-        "--all",
-        "--filter",
-        `name=^/${identity.container}$`,
-        "--format",
-        "{{.ID}}",
-      ])
-    ).trim();
-    if (!found) return undefined;
-    const raw = JSON.parse(await this.checked(["container", "inspect", identity.container]));
-    const result = z.array(inspectionSchema).length(1).safeParse(raw);
-    if (!result.success)
-      throw new AppError("Computer isolation inspection failed; refusing to attach", 409);
-    const c = result.data[0],
-      h = c.HostConfig;
-    const empty = (list: unknown[] | null) => !list?.length;
-    const safe =
-      c.Name === `/${identity.container}` &&
-      c.Config.Image === this.image() &&
-      c.Config.User === "1000:1000" &&
-      c.Config.WorkingDir === "/workspace" &&
-      Object.entries(identity.labels).every(([key, value]) => c.Config.Labels?.[key] === value) &&
-      c.Config.Env.every((value) =>
-        ["PATH", "HOME", "LANG", "NODE_VERSION", "YARN_VERSION"].includes(value.split("=")[0]),
-      ) &&
-      JSON.stringify(c.Config.Entrypoint) === '["/usr/bin/sleep"]' &&
-      JSON.stringify(c.Config.Cmd) === '["infinity"]' &&
-      h.ReadonlyRootfs &&
-      !h.Privileged &&
-      h.CapDrop?.includes("ALL") &&
-      empty(h.CapAdd) &&
-      h.SecurityOpt?.length === 1 &&
-      h.SecurityOpt.includes("no-new-privileges") &&
-      h.NetworkMode === "none" &&
-      h.Memory > 0 &&
-      h.Memory <= 536870912 &&
-      h.MemorySwap === h.Memory &&
-      h.PidsLimit !== null &&
-      h.PidsLimit > 0 &&
-      h.PidsLimit <= 128 &&
-      h.NanoCpus > 0 &&
-      h.NanoCpus <= 1000000000 &&
-      empty(h.Binds) &&
-      empty(h.Devices) &&
-      empty(h.DeviceRequests) &&
-      !Object.keys(h.PortBindings ?? {}).length &&
-      h.PidMode === "" &&
-      h.IpcMode === "private" &&
-      h.RestartPolicy.Name === "no" &&
-      Object.keys(h.Tmpfs ?? {}).length === 1 &&
-      h.Tmpfs?.["/tmp"] === "rw,nosuid,nodev,noexec,size=67108864,mode=1777" &&
-      c.Mounts.length === 1 &&
-      c.Mounts[0].Type === "volume" &&
-      c.Mounts[0].Name === identity.volume &&
-      c.Mounts[0].Destination === "/workspace" &&
-      c.Mounts[0].RW &&
-      Object.keys(c.NetworkSettings.Networks).every((network) => network === "none");
-    if (!safe)
-      throw new AppError(
-        "Computer ownership or isolation does not match this deployment; refusing to attach",
-        409,
-      );
-    await this.verifyVolume(owner);
-    return c;
-  }
-  private async verifyVolume(owner: string) {
-    const identity = computerIdentity(this.config, owner);
-    const parsed = z
-      .array(
-        z.object({
-          Name: z.string(),
-          Labels: z.record(z.string(), z.string()).nullable(),
-          Driver: z.string(),
-          Options: z.record(z.string(), z.unknown()).nullable(),
-          Scope: z.string(),
-        }),
-      )
-      .length(1)
-      .safeParse(JSON.parse(await this.checked(["volume", "inspect", identity.volume])));
-    if (!parsed.success) throw new AppError("Computer workspace ownership inspection failed", 409);
-    const v = parsed.data[0];
-    if (
-      v.Name !== identity.volume ||
-      v.Driver !== "local" ||
-      v.Scope !== "local" ||
-      Object.keys(v.Options ?? {}).length ||
-      !Object.entries(identity.labels).every(([key, value]) => v.Labels?.[key] === value)
-    )
-      throw new AppError("Computer workspace ownership or isolation does not match", 409);
   }
   private async acquire(owner: string, operation: Lease["operation"] = "operation") {
     this.enabled();
@@ -385,14 +289,14 @@ export class ComputerService {
     );
   }
   private async commands(owner: string) {
-    const commands = await this.db.list<ComputerCommand>(owner, "computer-commands");
+    const commands = await this.db.list<ComputerCommand>(owner, this.receipts);
     const lease = await this.db.get<Lease>(owner, "computer-state", "lease");
     if (!lease || lease.expiresAt <= Date.now()) {
       for (const command of commands)
         if (command.status === "running") {
           const saved = await this.db.compareAndSwap<ComputerCommand>(
             owner,
-            "computer-commands",
+            this.receipts,
             command.id,
             { status: "running" },
             {
@@ -410,9 +314,9 @@ export class ComputerService {
   async snapshot(owner: string): Promise<ComputerSnapshot> {
     const base = {
       enabled: Boolean(this.config.computerEnabled),
-      provider: "docker" as const,
+      provider: this.provider,
       workspacePath: "/workspace" as const,
-      network: "disabled" as const,
+      network: this.backend.network,
       commands: await this.commands(owner),
     };
     if (!base.enabled)
@@ -420,13 +324,12 @@ export class ComputerService {
         ...base,
         status: "unconfigured",
         message:
-          "Enable the Docker computer on the server to use its terminal and workspace files.",
+          this.provider === "e2b-desktop"
+            ? "Enable the E2B desktop computer on the server to use its desktop, terminal and workspace files."
+            : "Enable the Docker computer on the server to use its terminal and workspace files.",
       };
     try {
-      return {
-        ...base,
-        status: (await this.inspect(owner))?.State.Running ? "running" : "stopped",
-      };
+      return { ...base, status: (await this.isRunning(owner)) ? "running" : "stopped" };
     } catch (error) {
       return {
         ...base,
@@ -434,81 +337,12 @@ export class ComputerService {
         message:
           error instanceof AppError
             ? error.message
-            : "Computer inspection failed. Check Docker setup.",
+            : "Computer inspection failed. Check the computer provider setup.",
       };
     }
   }
   async start(owner: string) {
-    await this.exclusive(owner, async () => {
-      const identity = computerIdentity(this.config, owner);
-      const existing = await this.inspect(owner);
-      if (existing) {
-        if (!existing.State.Running) await this.checked(["container", "start", identity.container]);
-        return;
-      }
-      const labels = Object.entries(identity.labels).flatMap(([key, value]) => [
-        "--label",
-        `${key}=${value}`,
-      ]);
-      const volume = (
-        await this.checked([
-          "volume",
-          "ls",
-          "--filter",
-          `name=^${identity.volume}$`,
-          "--format",
-          "{{.Name}}",
-        ])
-      ).trim();
-      if (!volume) await this.checked(["volume", "create", ...labels, identity.volume]);
-      await this.verifyVolume(owner);
-      await this.checked([
-        "container",
-        "create",
-        "--pull",
-        "never",
-        "--name",
-        identity.container,
-        ...labels,
-        "--user",
-        "1000:1000",
-        "--workdir",
-        "/workspace",
-        "--read-only",
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--network",
-        "none",
-        "--ipc",
-        "private",
-        "--memory",
-        "512m",
-        "--memory-swap",
-        "512m",
-        "--cpus",
-        "1",
-        "--pids-limit",
-        "128",
-        "--restart",
-        "no",
-        "--tmpfs",
-        "/tmp:rw,nosuid,nodev,noexec,size=67108864,mode=1777",
-        "--mount",
-        `type=volume,source=${identity.volume},target=/workspace`,
-        "--env",
-        "HOME=/workspace",
-        "--env",
-        "LANG=C.UTF-8",
-        "--entrypoint",
-        "/usr/bin/sleep",
-        this.image(),
-        "infinity",
-      ]);
-      await this.inspect(owner);
-      await this.checked(["container", "start", identity.container]);
-    });
+    await this.exclusive(owner, () => this.backend.start(owner));
     return this.snapshot(owner);
   }
   async stop(owner: string) {
@@ -539,11 +373,11 @@ export class ComputerService {
     try {
       // Record intent before Docker Stop so a concurrently exiting command
       // cannot report success over the user's interruption.
-      for (const command of await this.db.list<ComputerCommand>(owner, "computer-commands"))
+      for (const command of await this.db.list<ComputerCommand>(owner, this.receipts))
         if (command.status === "running")
           await this.db.compareAndSwap(
             owner,
-            "computer-commands",
+            this.receipts,
             command.id,
             { status: "running" },
             {
@@ -552,14 +386,7 @@ export class ComputerService {
               stderr: "Stopped by the user. Inspect the workspace before repeating this command.",
             },
           );
-      if ((await this.inspect(owner))?.State.Running)
-        await this.checked([
-          "container",
-          "stop",
-          "--time",
-          "2",
-          computerIdentity(this.config, owner).container,
-        ]);
+      await this.backend.stop(owner);
       await this.db.compareAndSwap(
         owner,
         "computer-state",
@@ -584,9 +411,7 @@ export class ComputerService {
   }
   private async running(owner: string) {
     this.enabled();
-    if (!(await this.inspect(owner))?.State.Running)
-      throw new AppError("Start the computer before using its terminal or files", 409);
-    return computerIdentity(this.config, owner).container;
+    return this.backend.running(owner);
   }
   async execute(
     owner: string,
@@ -599,17 +424,17 @@ export class ComputerService {
     const id = options.idempotencyKey
       ? hash(`computer-command:${options.idempotencyKey}`)
       : randomUUID();
-    const previous = await this.db.get<ComputerCommand>(owner, "computer-commands", id);
+    const previous = await this.db.get<ComputerCommand>(owner, this.receipts, id);
     if (previous) {
       if (previous.command !== args.command || previous.cwd !== cwd)
         throw new AppError("This operation ID already belongs to a different command", 409);
       await this.commands(owner);
-      return (await this.db.get<ComputerCommand>(owner, "computer-commands", id)) ?? previous;
+      return (await this.db.get<ComputerCommand>(owner, this.receipts, id)) ?? previous;
     }
     return this.exclusive(
       owner,
       async (lease) => {
-        const container = await this.running(owner);
+        const session = await this.running(owner);
         if (options.signal?.aborted)
           throw new AppError("Computer command was interrupted before execution", 409);
         const command: ComputerCommand = {
@@ -622,9 +447,9 @@ export class ComputerService {
           truncated: false,
           startedAt: new Date().toISOString(),
         };
-        const saved = await this.db.insertIfAbsent(owner, "computer-commands", command);
+        const saved = await this.db.insertIfAbsent(owner, this.receipts, command);
         if (!saved) {
-          const existing = await this.db.get<ComputerCommand>(owner, "computer-commands", id);
+          const existing = await this.db.get<ComputerCommand>(owner, this.receipts, id);
           if (existing) return existing;
           throw new AppError("Computer receipt could not be saved", 500);
         }
@@ -635,7 +460,7 @@ export class ComputerService {
           active.stopping ||
           active.expiresAt <= Date.now()
         )
-          return this.db.put(owner, "computer-commands", {
+          return this.db.put(owner, this.receipts, {
             ...command,
             status: "interrupted",
             stderr: "Stopped before execution",
@@ -643,30 +468,11 @@ export class ComputerService {
           });
         let result: DockerResult;
         try {
-          result = await this.docker(
-            [
-              "exec",
-              "--user",
-              "1000:1000",
-              "--workdir",
-              cwd,
-              container,
-              "/usr/bin/timeout",
-              "--signal=TERM",
-              "--kill-after=2s",
-              "30s",
-              "/bin/bash",
-              "--noprofile",
-              "--norc",
-              "-c",
-              args.command,
-            ],
-            { timeoutMs: 35000, signal: options.signal },
-          );
+          result = await session.exec(args.command, cwd, options.signal);
         } catch {
           result = {
             stdout: "",
-            stderr: "Docker execution was interrupted; inspect the workspace before retrying.",
+            stderr: "Execution was interrupted; inspect the workspace before retrying.",
             exitCode: null,
             interrupted: true,
             timedOut: false,
@@ -695,7 +501,7 @@ export class ComputerService {
           // cannot release until cleanup is confirmed and this executor is done.
           if (cleanup) {
             try {
-              await this.checked(["container", "stop", "--time", "2", container]);
+              await session.stop();
               await this.db.compareAndSwap(
                 owner,
                 "computer-state",
@@ -712,7 +518,7 @@ export class ComputerService {
                 { stopInFlight: false, stopConfirmed: false },
               );
               result.stderr +=
-                "\nCould not confirm container stop. The computer remains locked; retry Stop after checking Docker.";
+                "\nCould not confirm the computer stopped. It remains locked; retry Stop after checking the computer provider.";
             }
           }
         }
@@ -733,14 +539,14 @@ export class ComputerService {
         };
         const finished = await this.db.compareAndSwap<ComputerCommand>(
           owner,
-          "computer-commands",
+          this.receipts,
           id,
           { status: "running" },
           { ...final },
         );
         if (finished) return finished;
-        const interrupted = await this.db.get<ComputerCommand>(owner, "computer-commands", id);
-        return this.db.put(owner, "computer-commands", {
+        const interrupted = await this.db.get<ComputerCommand>(owner, this.receipts, id);
+        return this.db.put(owner, this.receipts, {
           ...final,
           status: "interrupted",
           stderr: [result.stderr, interrupted?.stderr].filter(Boolean).join("\n"),
@@ -760,27 +566,14 @@ export class ComputerService {
     if (text !== undefined && Buffer.byteLength(text) > fileLimit)
       throw new AppError("Text files must be 256 KB or smaller", 413);
     return this.exclusive(owner, async () => {
-      const container = await this.running(owner);
-      const result = await this.docker(
-        [
-          "exec",
-          "-i",
-          "--user",
-          "1000:1000",
-          container,
-          "/usr/bin/timeout",
-          "--kill-after=1s",
-          "8s",
-          "/usr/bin/python3",
-          "-I",
-          "/opt/openmuse/files.py",
-        ],
-        {
-          timeoutMs: 10000,
-          input: JSON.stringify({ operation, path, text, base64 }),
-          maxOutputBytes: operation === "read_pdf" ? 15 * 1024 * 1024 : 2 * 1024 * 1024,
-        },
-      );
+      const session = await this.running(owner);
+      const input = JSON.stringify({ operation, path, text, base64 });
+      const maxOutputBytes = operation === "read_pdf" ? 15 * 1024 * 1024 : 2 * 1024 * 1024;
+      // On E2B the request crosses the network on stdin after the process starts, so
+      // the limit accounts for upload and expected download (PDF JSON can reach 14 MB).
+      const expectedOutput = operation === "read_pdf" ? maxOutputBytes : 0;
+      const seconds = 8 + Math.ceil(Math.max(input.length, expectedOutput) / (1024 * 1024));
+      const result = await session.file(input, seconds, maxOutputBytes);
       if (result.exitCode !== 0 || result.timedOut || result.interrupted || result.truncated)
         throw new AppError(
           "Computer file operation failed. Check the path, permissions and file size; symlinks cannot be opened.",
@@ -792,6 +585,144 @@ export class ComputerService {
         throw new AppError("Computer returned an invalid file response", 502);
       }
     });
+  }
+  private desktopOnly() {
+    this.enabled();
+    if (!this.desktop)
+      throw new AppError("This computer has no desktop. Set COMPUTER_PROVIDER=e2b-desktop.", 404);
+    return this.desktop;
+  }
+  /** Desktop stream URL for the owner's running E2B desktop (e2b-desktop provider only).
+   * The first connection takes the lifecycle lease so it cannot race startup or Stop.
+   * Cached viewers only check the stream and never block commands or actions. */
+  async desktopUrl(owner: string) {
+    const desktop = this.desktopOnly();
+    return {
+      url: await desktop.desktopUrl(this.labels(owner), (work) => this.exclusive(owner, work)),
+    };
+  }
+  /** One screenshot, click, key or typing action on the running desktop, recorded as a
+   * receipt in a separate action history. A stopped computer fails; it is never resumed here. */
+  async desktopAction(owner: string, raw: unknown, options: { idempotencyKey?: string } = {}) {
+    const desktop = this.desktopOnly();
+    const action = desktopActionSchema.parse(raw);
+    const id = options.idempotencyKey
+      ? hash(`computer-desktop-action:${options.idempotencyKey}`)
+      : randomUUID();
+    // The display label truncates typed text, so bind the complete validated input.
+    const actionHash = hash(JSON.stringify(action));
+    return this.exclusive(owner, async () => {
+      const previous = options.idempotencyKey
+        ? await this.db.get<ComputerCommand>(owner, "computer-desktop-actions", id)
+        : null;
+      if (previous) {
+        if (previous.actionHash !== actionHash)
+          throw new AppError(
+            "This operation ID already belongs to a different desktop action",
+            409,
+          );
+        // Only the latest image is retained. Never dispatch again just to refresh it.
+        const screen = await this.latestScreenshot(owner, id).catch(() => null);
+        const image = screen?.bytes ?? Buffer.alloc(0);
+        return {
+          receipt: previous,
+          width: resolution[0],
+          height: resolution[1],
+          image,
+          mimeType: screen?.mimeType ?? "image/jpeg",
+          data: image.toString("base64"),
+          uncertain: previous.status === "interrupted",
+          warning:
+            "This operation ID already has a receipt; no new desktop input was sent. " +
+            (screen
+              ? "The saved screenshot is attached."
+              : "Take a fresh screenshot before deciding what to do next."),
+        };
+      }
+      const receipt: ComputerCommand = {
+        id,
+        command: describeDesktopAction(action),
+        ...(options.idempotencyKey ? { actionHash } : {}),
+        cwd: "/workspace",
+        status: "succeeded",
+        stdout: "",
+        stderr: "",
+        truncated: false,
+        startedAt: new Date().toISOString(),
+      };
+      let shot: Awaited<ReturnType<typeof desktop.act>>;
+      try {
+        shot = await desktop.act(this.labels(owner), action, async () => {
+          // Save intent before dispatch: a process crash must not erase uncertain input.
+          await this.db.put(owner, "computer-desktop-actions", {
+            ...receipt,
+            status: "interrupted",
+            stderr:
+              "Desktop input is being dispatched; its outcome is unknown until confirmed. Inspect a fresh screenshot before repeating the action; do not automatically retry it.",
+          });
+        });
+      } catch (error) {
+        if (!(error instanceof AppError && error.status === 409))
+          await this.db.put(owner, "computer-desktop-actions", {
+            ...receipt,
+            status: "failed",
+            stderr: error instanceof Error ? error.message : "Desktop action failed",
+            completedAt: new Date().toISOString(),
+          });
+        throw error;
+      }
+      const saved: ComputerCommand = {
+        ...receipt,
+        status: shot.uncertain ? "interrupted" : "succeeded",
+        ...(shot.uncertain ? {} : { exitCode: 0 }),
+        stdout: shot.warning ?? `Screenshot ${shot.width}x${shot.height}`,
+        stderr: shot.uncertain ? (shot.warning ?? "Desktop input outcome is unknown") : "",
+        completedAt: new Date().toISOString(),
+      };
+      const data = Buffer.from(shot.image).toString("base64");
+      let warning = shot.warning;
+      try {
+        await this.db.put(owner, "computer-desktop-actions", saved);
+        if (data) {
+          const directory = join(this.config.dataDir, "desktop-screens");
+          await mkdir(directory, { recursive: true, mode: 0o700 });
+          const blob = `${hash(owner)}.jpg`;
+          const temporary = join(directory, `${receipt.id}.tmp`);
+          try {
+            await writeFile(temporary, shot.image, { mode: 0o600, flag: "wx" });
+            await rename(temporary, join(directory, blob));
+          } finally {
+            await unlink(temporary).catch(() => {});
+          }
+          await this.db.put<Screen>(owner, "computer-desktop-screens", {
+            id: "latest",
+            receiptId: saved.id,
+            mimeType: shot.mimeType,
+            blob,
+            takenAt: saved.completedAt,
+          });
+        }
+      } catch {
+        warning = shot.uncertain
+          ? `${shot.warning} Its final receipt or screenshot could not be saved.`
+          : "Action performed; its receipt or screenshot could not be saved. Take a screenshot before retrying the action.";
+      }
+      return { receipt: saved, ...shot, data, warning };
+    });
+  }
+  /** The latest desktop screenshot, or the one `receiptId` took if it is still the latest. */
+  async latestScreenshot(owner: string, receiptId?: string) {
+    this.desktopOnly();
+    const shot = await this.db.get<Screen>(owner, "computer-desktop-screens", "latest");
+    if (!shot || (receiptId && shot.receiptId !== receiptId))
+      throw new AppError("No desktop screenshot yet", 404);
+    return {
+      mimeType: shot.mimeType,
+      bytes:
+        shot.blob === `${hash(owner)}.jpg`
+          ? await readFile(join(this.config.dataDir, "desktop-screens", shot.blob))
+          : Buffer.from(shot.data ?? "", "base64"),
+    };
   }
   list(owner: string, path = "/workspace") {
     return this.file<ComputerDirectory>(owner, "list", path);

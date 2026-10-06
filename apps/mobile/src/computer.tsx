@@ -7,9 +7,10 @@ import {
   RefreshCw,
   Terminal,
 } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AppState, Image, Pressable, Text, View } from "react-native";
 import type { BrowserSession } from "../../../packages/domain/src";
+import type { ComputerSnapshot } from "../../../packages/domain/src/computer";
 import { browserAddress } from "./browser-address";
 import { useComputerDraft } from "./computer-drafts";
 import { LinuxWorkspace } from "./computer-workspace";
@@ -42,7 +43,7 @@ export function ComputerEntry() {
       <Monitor size={13} color={colors.muted} />
       <Text style={{ fontSize: 12, color: colors.muted }}>
         Computer
-        {active ? " · take control" : available ? " · ready" : " · offline"}
+        {!available ? " · offline" : active ? " · take control" : " · ready"}
       </Text>
       <View
         style={{
@@ -114,12 +115,26 @@ export function BrowserThreadCard({ browser }: { browser: BrowserSession }) {
     </Card>
   );
 }
+const tabIcons = { Browser: Globe2, Desktop: Monitor, Terminal, Files: FolderOpen } as const;
 export function ComputerSheet() {
   const { workspace, api, refresh, close, open, navigate } = useWorkspace();
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [tab, setTab] = useComputerDraft("tab");
+  // Unknown until the first snapshot, so a remembered Desktop tab survives reopening.
+  const [desktop, setDesktop] = useState<boolean>();
+  const onSnapshot = useCallback((snapshot: ComputerSnapshot) => {
+    // A transient provider error keeps the last known state instead of closing the tab.
+    if (snapshot.status !== "error")
+      setDesktop(snapshot.provider === "e2b-desktop" && snapshot.status === "running");
+  }, []);
+  // A remembered Desktop tab falls back to Terminal while the desktop is off; the draft
+  // keeps "Desktop", so the tab returns by itself once the computer runs again.
+  const shown = desktop === false && tab === "Desktop" ? "Terminal" : tab;
+  const tabs = desktop
+    ? (["Browser", "Desktop", "Terminal", "Files"] as const)
+    : (["Browser", "Terminal", "Files"] as const);
   const available = workspace.connections.some(
     (c) => c.id === "browser" && c.status === "connected",
   );
@@ -159,7 +174,7 @@ export function ComputerSheet() {
       onClose={close}
     >
       <View style={{ gap: 20 }}>
-        {tab === "Browser" && (
+        {shown === "Browser" && (
           <View
             style={[s.row, { gap: 12, padding: 18, borderRadius: 20, backgroundColor: colors.sky }]}
           >
@@ -174,23 +189,23 @@ export function ComputerSheet() {
             </View>
           </View>
         )}
-        <View style={[s.row, { gap: 8 }]}>
-          {(["Browser", "Terminal", "Files"] as const).map((item) => (
+        <View style={[s.row, { gap: 8, flexWrap: "wrap" }]}>
+          {tabs.map((item) => (
             <Button
               key={item}
-              primary={tab === item}
-              icon={item === "Browser" ? Globe2 : item === "Terminal" ? Terminal : FolderOpen}
+              primary={shown === item}
+              icon={tabIcons[item]}
               onPress={() => setTab(item)}
             >
               {item}
             </Button>
           ))}
         </View>
-        <View style={{ display: tab === "Browser" ? "none" : "flex" }}>
-          <LinuxWorkspace tab={tab === "Files" ? "Files" : "Terminal"} />
+        <View style={{ display: shown === "Browser" ? "none" : "flex" }}>
+          <LinuxWorkspace tab={shown === "Browser" ? "Terminal" : shown} onSnapshot={onSnapshot} />
         </View>
         <ErrorNotice error={error} />
-        {tab === "Browser" ? (
+        {shown === "Browser" ? (
           <>
             <View>
               <Field
