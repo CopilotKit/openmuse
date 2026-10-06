@@ -153,6 +153,51 @@ test("unsubscribing from chat stops queued browser navigation and further model 
   assert.equal(requests.length, 1);
 });
 
+test("unsubscribing from chat aborts an in-flight computer command", async (t) => {
+  await modelFixture(t, (index) =>
+    index === 0
+      ? {
+          name: "run_computer_command",
+          arguments: { operationId: "slow", command: "sleep 30" },
+        }
+      : undefined,
+  );
+  const fixture = await chatFixture(t);
+  let started!: () => void;
+  const commandStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let release!: () => void;
+  let signal: AbortSignal | undefined;
+  fixture.computer.execute = async (_owner, args, options) => {
+    signal = options?.signal;
+    started();
+    await new Promise<void>((resolve) => {
+      release = resolve;
+      signal?.addEventListener("abort", () => resolve(), { once: true });
+    });
+    return {
+      id: "slow",
+      command: (args as { command: string }).command,
+      cwd: "/workspace",
+      status: "interrupted",
+      stdout: "",
+      stderr: "Stopped by user",
+      truncated: false,
+      startedAt: new Date().toISOString(),
+    };
+  };
+  const subscription = fixture.conversation.run(runInput()).subscribe();
+  try {
+    await commandStarted;
+    subscription.unsubscribe();
+    assert.equal(signal?.aborted, true, "Stop must reach the running computer command");
+  } finally {
+    subscription.unsubscribe();
+    release?.();
+  }
+});
+
 test("chat searches and reads actual owner mail without creating a task or sending", async (t) => {
   const { requests } = await modelFixture(t, (index) =>
     index === 0
@@ -211,3 +256,40 @@ test("chat mail tools report disconnected mail and refuse another owner's thread
   call = { name: "read_mail_thread", arguments: { threadId: "trip-thread" } };
   assert.match(await toolError(), /not found/);
 });
+
+for (const missing of ["workerUrl", "workerToken", "both"] as const) {
+  test(`chat and tasks omit browser tools when ${missing} is missing`, async (t) => {
+    const { requests } = await modelFixture(t, () => undefined);
+    const fixture = await browserFixture(t, () => {
+      throw new Error("An unconfigured browser must not receive requests");
+    });
+    const config = {
+      ...fixture.config,
+      agentBackend: "model",
+      model: "openai/fixture",
+      jevMode: "sample",
+      workerUrl: missing === "workerToken" ? fixture.config.workerUrl : undefined,
+      workerToken: missing === "workerUrl" ? fixture.config.workerToken : undefined,
+    } as const;
+    const app = await createApp(fixture.db, config);
+    t.after(() => app.agent.stop());
+    await lastValueFrom(
+      new ConversationAgent(config, app.agent, "local-user").run(runInput()).pipe(toArray()),
+    );
+    const chatCount = requests.length;
+    assert.ok(chatCount > 0);
+    await app.agent.createTask("local-user", { kind: "agent", prompt: "Read a public webpage" });
+    await app.agent.worker.tick();
+    assert.ok(requests.length > chatCount);
+    for (const { body } of requests) {
+      const request = JSON.parse(body);
+      assert.ok(
+        !request.tools.some((tool: { name: string }) =>
+          ["browse_web", "read_web"].includes(tool.name),
+        ),
+      );
+      assert.doesNotMatch(body, /call browse_web|read_web can read/);
+      assert.match(body, /Full-page browsing is not configured/);
+    }
+  });
+}

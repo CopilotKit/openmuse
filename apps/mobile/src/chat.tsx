@@ -28,9 +28,11 @@ import { BrowserRunContext, BrowserToolCard } from "./browser-tool-card";
 import { BrowserThreadCard } from "./computer";
 import { ConversationQueue, type QueuedMessage } from "./conversation-queue";
 import { runConversationTurn } from "./conversation-run";
+import { DesktopToolCard } from "./desktop-tool-card";
 import { confirmedJevSelection, displayJevUserMessage, latestJevPanelId } from "./jev-actions";
 import { JevInteractionContext, JevToolCard } from "./jev-tool-card";
 import { MailToolCard } from "./mail-tool-card";
+import { SearchToolCard } from "./search-tool-card";
 import { FileThreadCard, TaskThreadCard } from "./thread-artifacts";
 import { type Selection, useMuseThread } from "./threads";
 import { Button, Card, CheckRow, colors, ErrorNotice, s } from "./ui";
@@ -66,11 +68,27 @@ export function WorkspaceTools() {
     ),
   });
   useRenderTool({
+    name: "search_web",
+    description: "Show public web search progress and sources",
+    parameters: displayParameters,
+    render: ({ result, status }) => (
+      <SearchToolCard result={result} loading={status !== "complete"} />
+    ),
+  });
+  useRenderTool({
     name: "browse_web",
     description: "Follow the agent as it reads a webpage",
     parameters: displayParameters,
     render: ({ args, result, status }) => (
       <BrowserToolCard url={args.url} result={result} loading={status !== "complete"} />
+    ),
+  });
+  useRenderTool({
+    name: "use_desktop",
+    description: "Show the agent working on the computer's desktop",
+    parameters: displayParameters,
+    render: ({ toolCallId, result, status }) => (
+      <DesktopToolCard toolCallId={toolCallId} result={result} loading={status !== "complete"} />
     ),
   });
   useRenderTool({
@@ -396,6 +414,10 @@ export function ChatScreen({
       ? messages[latestUserIndex].content
       : null;
   const visible = messages.filter((m) => m.role === "user" || m.role === "assistant");
+  const latestDesktop = messages
+    .flatMap((m) => ("toolCalls" in m ? m.toolCalls || [] : []))
+    .filter((call) => call.function.name === "use_desktop")
+    .at(-1)?.id;
   const replying = busy || agent.isRunning;
   return (
     <View style={{ flex: 1 }}>
@@ -557,6 +579,18 @@ export function ChatScreen({
               </View>
             );
           })
+        )}
+        {!!latestDesktop && (
+          <DesktopToolCard
+            live
+            toolCallId={latestDesktop}
+            result={
+              messages.find(
+                (message) => message.role === "tool" && message.toolCallId === latestDesktop,
+              )?.content
+            }
+            loading={replying}
+          />
         )}
         {!richThreads && (
           <>

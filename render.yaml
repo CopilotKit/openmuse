@@ -46,6 +46,9 @@ services:
         sync: false
       - key: CPK_INTELLIGENCE_API_KEY
         sync: false
+      # Use the CLI-issued identity for the same Intelligence project as the key.
+      - key: CPK_TELEMETRY_ID
+        sync: false
       # Delete these two entries, and the openmuse-browser service below, to
       # deploy without browsing. The API boots either way.
       - key: BROWSER_WORKER_URL
