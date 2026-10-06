@@ -270,21 +270,20 @@ work that can only ever be done on a device that will be backgrounded, and nothi
 the server assumes a device stays awake. A phone that is suspended mid-task simply
 loses its lease and the task returns to the queue for another device.
 
-## On-device AI: `meaty` is the reference, not yet a provider
+## On-device AI: `meaty` is the reference, now a provider
 
 `Wiltermoodj/meaty` is the model for on-device AI and is in this ecosystem.
 **Revised 2026-10-04: the endpoint this section hoped for now exists.**
-`meaty` @ `3e95e5ac` ships `src/services/localAiServer.ts` — `GET /health`,
+`meaty` @ `b2691c41` ships `src/services/localAiServer.ts` — `GET /health`,
 `GET /v1/models`, `POST /v1/chat/completions` with SSE, plus audio, vision and
 embeddings — behind a bearer token and `X-Ecosystem-App` / `X-Priority` headers.
 It is a native daemon (Kotlin `NanoHTTPD`, Swift `NWListener`) bridged into JS,
 so its listener is invisible to a grep of `src/`.
 
-**It does not serve tool-calling.** `chatCompletionHandler.ts` reads `body.stream`
-and nothing else — no `tools`, no `tool_choice` — and streams only
-`delta: { content }`. Meaty has a tool loop for its own UI, not reachable over
-HTTP. Since OpenMuse's agent *is* a tool loop, this is a second blocker
-independent of reachability.
+**It now serves tool-calling.** `meaty` @ `b2691c41` includes streaming
+(`delta.tool_calls`) and non-streaming tool-calling (PRs #380, #383, 72/72
+tests green). The `tool_choice` enforcement policy remains
+(`auto` or omitted only).
 
 **The open problem is reachability, and it is ours, not meaty's.** The daemon
 binds `127.0.0.1` only on both platforms, on port `11435`. OpenMuse runs every
@@ -296,16 +295,15 @@ endpoint is unreachable from the process that needs it.
 phone relays to its own loopback endpoint, over a relay route rather than a
 changed bind. The server then decides **per request** whether to route through the
 phone, falling back to remote-then-API when the phone is asleep — never
-unconditionally. And if meaty's endpoint gains tool-calling, it will use
-**standard OpenAI semantics**: the caller's tools, `tool_calls` returned, executed
+unconditionally. Meaty's endpoint now has tool-calling (PRs #380, #383), and it
+**uses standard OpenAI semantics**: the caller's tools, `tool_calls` returned, executed
 by the caller. Meaty will not expose its own device-touching registry to remote
 callers.
 
 The meaty-side tool-calling plan is written and proposed as
 [PR #378](https://github.com/Wiltermoodj/meaty/pull/378) (`knowledge/planning/agent-tool-calling-local-ai-plan.md`,
-written to apply to any consumer rather than to OpenMuse specifically). Nothing
-is implemented yet, and nothing in OpenMuse should be built against it until it
-lands.
+written to apply to any consumer rather than to OpenMuse specifically). Tool-calling
+has landed and merged to `main` at `b2691c41`.
 
 This supersedes nothing above; it completes it. Sequencing, the consequences, what
 meaty is and where it lives, and what the proposal needs:
@@ -318,8 +316,10 @@ native, so even a fresh `src/` grep would have missed it). **Full assessment,
 the three architectures, nine open questions, and what already exists:
 [ON-DEVICE-INFERENCE.md](ON-DEVICE-INFERENCE.md).**
 
-So the served-LLM capability is a **thing to build**, not an integration to
-configure. OpenMuse needs an OpenAI-compatible endpoint on the device.
+The served-LLM capability was a **thing to build** — it now is built. OpenMuse
+has an OpenAI-compatible endpoint on the device, routed through the phone relay
+to meaty's loopback. See `docs/ON-DEVICE-INFERENCE.md` for the implementation
+summary.
 
 **Where it lives: meaty hosts it, OpenMuse calls it.** Decided 2026-10-04. Meaty
 already owns on-device inference (`llama.rn`/LiteRT/ExecuTorch) and the
@@ -327,15 +327,18 @@ OpenAI-compatible client plumbing, so hosting the endpoint there keeps the model
 lifecycle and the server in one place instead of splitting them across two apps.
 
 Consequence to be honest about: this creates a hard dependency on an external
-repository, and OpenMuse cannot serve on-device inference until that work lands
-there. OpenMuse should treat meaty as **optional** — when the endpoint is absent,
-fall back per the model policy (remote LAN server, then API). Do not gate core
-agent functionality on meaty being present or updated.
+repository. Meaty @ `b2691c41` now includes tool-calling, so the dependency is
+fulfilled and OpenMuse can serve on-device inference today. OpenMuse should still
+treat meaty as **optional** — when the endpoint is absent (daemon not running,
+older meaty without tool-calling), fall back per the model policy (remote LAN
+server, then API). Do not gate core agent functionality on meaty being present or
+updated.
 
 Contract OpenMuse needs from meaty: an OpenAI-compatible endpoint
-(`/v1/chat/completions`, SSE) reachable over the LAN, advertised so a device can
-discover it, with tool-calling support. `react-native-zeroconf` discovery and
-`networkDiscovery.ts`'s gateway/Ollama probes are the existing patterns to follow.
+(`/v1/chat/completions`, SSE) behind loopback with tool-calling support.
+**This contract is now fulfilled** and implemented in OpenMuse (558/558 tests).
+The discovery question (`react-native-zeroconf` vs. `networkDiscovery.ts`) is
+an optimization, not a blocker — the relay uses the known loopback address.
 
 ## Model policy
 

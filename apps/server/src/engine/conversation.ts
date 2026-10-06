@@ -340,6 +340,7 @@ export class ConversationAgent extends AbstractAgent {
           this.config.chatModel ??
           this.config.model ??
           "openai/unconfigured",
+        deviceId: deviceId ?? undefined,
         maxSteps:
           // Desktop work costs one step per click or key, each verified on a screenshot.
           deviceOverrides?.chatMaxSteps ??

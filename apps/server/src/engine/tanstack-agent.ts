@@ -23,7 +23,7 @@ import { MODEL_MAX_RETRIES } from "../config.ts";
 
 // Same "provider/model" strings, env vars and base URL formats as the AI SDK resolver in
 // @copilotkit/runtime. Each provider SDK retries transient failures up to MODEL_MAX_RETRIES times.
-function adapter(spec: string) {
+export function adapter(spec: string, deviceId?: string) {
   const [, provider = "", model = ""] = spec.trim().match(/^([^/:]*)[/:](.*)$/) ?? [];
   if (!provider || !model.trim())
     throw new Error(
@@ -58,6 +58,25 @@ function adapter(spec: string) {
           retryOptions: { attempts: MODEL_MAX_RETRIES + 1 },
         }),
       });
+    case "local":
+    case "meaty":
+      if (!deviceId)
+        throw new Error(
+          `Local model "${spec}" requires a device ID for relay routing. ` +
+            "Ensure the task or conversation is associated with a device.",
+        );
+      return openaiChatCompletions(id as OpenAIChatModel, {
+        baseURL:
+          process.env.LOCALAI_RELAY_URL ??
+          `http://localhost:${process.env.PORT ?? 8787}/api/agent/localai`,
+        defaultHeaders: {
+          "X-Device-ID": deviceId,
+          "X-Ecosystem-App": "openmuse",
+          Authorization: `Bearer ${process.env.MEATY_AUTH_TOKEN ?? "omnibutler-local-dev-token"}`,
+          "X-Priority": "interactive",
+        },
+        maxRetries: MODEL_MAX_RETRIES,
+      });
     default:
       throw unknownProvider(provider, spec);
   }
@@ -73,7 +92,7 @@ export function unknownProvider(
     ? ` For a model on your OPENAI_BASE_URL gateway, use "openai/${spec.trim()}".`
     : "";
   return new Error(
-    `Unknown provider "${provider}" in "${spec}". Supported: openai, anthropic, google (gemini).${hint}`,
+    `Unknown provider "${provider}" in "${spec}". Supported: openai, anthropic, google (gemini), local (meaty).${hint}`,
   );
 }
 
@@ -117,6 +136,8 @@ export function tanstackAgent(options: {
   prompt: string;
   /** Said when the step limit, not the model, ends a run; otherwise the reply just stops. */
   stepLimitNote?: string;
+  /** Device ID for local model relay routing (e.g. "local/qwen3-8b"). */
+  deviceId?: string | undefined;
 }) {
   const agent = new BuiltInAgent({
     type: "tanstack",
@@ -135,7 +156,7 @@ export function tanstackAgent(options: {
       )
         system += `\n## Application State\nThis is state from the application that you can edit by calling AGUISendStateSnapshot or AGUISendStateDelta.\n\`\`\`json\n${JSON.stringify(input.state, null, 2)}\n\`\`\`\n`;
       return chat({
-        adapter: adapter(options.model),
+        adapter: adapter(options.model, options.deviceId),
         messages: converted.messages,
         systemPrompts: system ? [system] : [],
         tools: [

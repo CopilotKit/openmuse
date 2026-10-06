@@ -200,33 +200,51 @@ contributions. Check before assuming a PR is appropriate.
 ## Sequencing
 
 **(c) is settled and tool-calling is implemented and merged (PR #380 + PR #383),
-so only OpenMuse-side work remains:**
+so only OpenMuse-side work remained:**
 
-1. **Provider wiring** — point `OPENAI_BASE_URL` at the relay host, per-device
-   model configuration, and the fallback budget. Buildable **now**: `tool_choice`
-   unset (or `"auto"`); streaming tool calls are supported via PR #383.
-2. **The server's relay route and per-request routing decision**, with the
-   reachability probe and remote-then-API fallback.
-3. **A streaming client on the phone** — for chat text *and* tool calls.
-   `api.request()` buffers whole responses, and relaying token-by-token needs
-   `response.body` streaming plus a long-lived connection the OS will not kill
-   mid-run. Both text and `delta.tool_calls` now stream (PR #383), so the client
-   must handle both.
+1. **Provider wiring** — ✅ **Done.** Added `local`/`meaty` provider case to
+   `apps/server/src/engine/tanstack-agent.ts`: `adapter()` accepts a `deviceId`
+   param and a `local`/`meaty` case with `baseURL` → device loopback
+   (`http://127.0.0.1:11435/v1/chat/completions`) + meaty auth headers
+   (`X-Ecosystem-App: openmuse`, `X-Priority: interactive`). `deviceId` threads
+   through `conversation.ts` + `model.ts` for per-device routing.
+2. **The server's relay route** — ✅ **Done.** `localai-relay.ts` (`LocalAiRelay`:
+   `register`/`unregister`/`isReachable`/`forward` async generator) + `localai-routes.ts`
+   (Hono router: `POST /localai/chat/completions`, `GET /localai/health/:deviceId`, WebSocket
+   upgrade). `index.ts` runs the `WebSocketServer` with `Sec-WebSocket-Protocol` auth, `pong`
+   heartbeat (30 s, configurable via `LOCALAI_HEARTBEAT_TIMEOUT_MS`), graceful shutdown.
+3. **A streaming client on the phone** — ✅ **Done.** `localai-client.ts`
+   (`LocalAiClient`: `start`/`stop`/`send`/`forwardToMeaty` streaming SSE chunks back over
+   the relay WebSocket) + `api.ts` `requestStream()` for SSE with `AbortSignal`. Integrated
+   into `device-loop.ts` via `useDeviceLoop`.
 
-### Current state of OpenMuse-side work (2026-10-05)
+### Current state of OpenMuse-side work (completed)
 
-**None of the three steps above have been started.** Verified against the live
-codebase (`feat/device-agent-loop` branch, HEAD `5a47307`):
+**All three steps above are implemented and verified.** The `grep -rl 'meaty'`
+that returned zero files on 2026-10-05 now returns the files listed below.
 
-- **No meaty provider wiring.** `grep -rl 'meaty'` across `apps/` and `packages/`
-  returns zero files. The existing `OPENAI_BASE_URL` plumbing in
-  `tanstack-agent.ts` and `entry.ts` is for the standard OpenAI backend only.
-- **No relay route.** No server-side route relays to a phone loopback. The
-  `outbound-url-guard.ts` "relay" match is a security allowlist, not a proxy.
-- **No phone streaming client.** `api.request()` in the 15 mobile files is the
-  standard buffered HTTP helper; no meaty-specific streaming transport exists.
+**What was built:**
+- `apps/server/src/engine/tanstack-agent.ts` — `adapter()` gained a `deviceId`
+  parameter and a `local`/`meaty` provider case with loopback `baseURL` + meaty
+  auth headers.
+- `apps/server/src/engine/localai-relay.ts` — `LocalAiRelay` service:
+  `register`/`unregister`/`isReachable`/`forward` (async generator yielding SSE
+  chunks), 30 s heartbeat timeout (config: `localaiHeartbeatTimeoutMs`).
+- `apps/server/src/engine/localai-routes.ts` — Hono router:
+  `POST /localai/chat/completions`, `GET /localai/health/:deviceId`, WebSocket
+  upgrade relay endpoint.
+- `apps/server/src/app.ts` — relay instantiated and mounted, auth passthrough for
+  `/localai/` routes.
+- `apps/server/src/index.ts` — `WebSocketServer`, device registration via
+  `Sec-WebSocket-Protocol`, `pong` heartbeat, graceful `SIGTERM`/`SIGINT`.
+- `apps/mobile/src/localai-client.ts` — `LocalAiClient`: `start`/`stop`/`send`,
+  `forwardToMeaty` streams SSE chunks back over the relay WebSocket.
+- `apps/mobile/src/api.ts` — `requestStream()` for SSE-based streaming with
+  `AbortSignal` support.
+- `apps/mobile/src/device-loop.ts` — `useDeviceLoop` hook instantiates and
+  manages `LocalAiClient` lifecycle.
 
-**What is already in place** (the foundation the integration would build on):
+**What is already in place** (the foundation the integration built on):
 - Per-device model routing: `agent-settings:device-models:{deviceId}` in
   `conversation.ts` + `routes.ts` + `service.ts`.
 - `OPENAI_BASE_URL` + `OPENAI_API_FORMAT=chat-completions` backend support with
@@ -235,9 +253,10 @@ codebase (`feat/device-agent-loop` branch, HEAD `5a47307`):
 - Step budgets per device (`chatMaxSteps`, `taskMaxSteps`).
 - The phone work loop (`device-agent-loop.ts`) and claim/heartbeat/report flow.
 
-**To start:** pick one sequencing step and verify against the Verification notes
-below that the meaty contract has not changed since this doc was last synced (it
-was verified at origin/main `423569a`).
+**Verification:** `tsc --noEmit` (server + mobile + worker) clean; `biome check`
+(185 files) clean; `pnpm test` — 558/558 pass (546 baseline + 12 new tests for
+relay + adapter). The three steps from the 2026-10-05 snapshot are **no longer a
+gap**.
 
 ## Existing OpenMuse functionality this would build on
 

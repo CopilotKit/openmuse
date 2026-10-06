@@ -24,6 +24,7 @@ import { AppState, Platform } from "react-native";
 import type { MuseApi } from "./api";
 import { DeviceAgentLoop, type LoopSnapshot } from "./device-agent-loop";
 import { agentExecutor, type DeviceRunner, deviceTransport } from "./device-protocol";
+import { LocalAiClient } from "./localai-client";
 
 export type { AgentRequester, DeviceRunner } from "./device-protocol";
 export { agentExecutor, deviceTransport } from "./device-protocol";
@@ -67,17 +68,31 @@ export function useDeviceLoop(api: MuseApi, runAgent: DeviceRunner): DeviceLoop 
     () => new DeviceAgentLoop(deviceTransport(api), agentExecutor(runAgent)),
     [api, runAgent],
   );
+  const relay = useMemo(() => new LocalAiClient({ token: api.token }), [api.token]);
   useEffect(() => {
     return () => {
       void loop.shutdown();
+      void relay.stop();
     };
-  }, [loop]);
+  }, [loop, relay]);
   const subscribe = useCallback((listener: () => void) => loop.subscribe(listener), [loop]);
   const snapshot = useSyncExternalStore(subscribe, loop.getSnapshot, loop.getSnapshot);
+  const start = useCallback(() => {
+    loop.start();
+    void relay.start();
+  }, [loop, relay]);
+  const stop = useCallback(() => {
+    loop.stop();
+    void relay.stop();
+  }, [loop, relay]);
+  const shutdown = useCallback(async () => {
+    await loop.shutdown();
+    await relay.stop();
+  }, [loop, relay]);
   return {
     snapshot,
-    start: loop.start,
-    stop: loop.stop,
-    shutdown: loop.shutdown,
+    start,
+    stop,
+    shutdown,
   };
 }

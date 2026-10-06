@@ -16,6 +16,8 @@ import { ComputerService, type DockerRunner } from "./computer.ts";
 import { computerRoutes } from "./computer-routes.ts";
 import { assertApiDeploymentConfig, type Config } from "./config.ts";
 import type { Store } from "./db.ts";
+import { LocalAiRelay } from "./engine/localai-relay.ts";
+import { localAiRoutes } from "./engine/localai-routes.ts";
 import { agentRoutes } from "./engine/routes.ts";
 import { AgentService } from "./engine/service.ts";
 import { AppError } from "./errors.ts";
@@ -46,6 +48,7 @@ export async function createApp(
   const agent = new AgentService(db, config, workspace, files, actions, browser, computer);
   const intelligence = new CopilotKitIntelligence({ apiKey: config.intelligenceApiKey });
   const runtime = makeRuntime(config, agent, auth, intelligence);
+  const relay = new LocalAiRelay(config);
   const app = new Hono<{ Variables: { owner: string; device: DeviceInfo } }>();
   const origins = new Set([...config.allowedOrigins, new URL(config.publicUrl).origin]);
   app.use("*", async (c, next) => {
@@ -141,6 +144,21 @@ export async function createApp(
     );
   });
   app.use("/api/*", async (c, next) => {
+    // Local AI relay is authenticated by the adapter's meaty headers
+    // (X-Ecosystem-App + meaty Bearer token), not by session tokens.
+    if (c.req.path.startsWith("/api/agent/localai")) {
+      const ecosystemApp = c.req.header("x-ecosystem-app");
+      if (ecosystemApp !== "openmuse") {
+        throw new AppError("Invalid ecosystem app for local AI relay", 403);
+      }
+      c.set("owner", "local-user");
+      c.set("device", {
+        deviceId: c.req.header("x-device-id") ?? null,
+        deviceName: null,
+      });
+      await next();
+      return;
+    }
     const signedRoute =
       /^\/api\/files\/[^/]+\/content$|^\/api\/browsers\/[^/]+\/(?:preview|console)$/.test(
         c.req.path,
@@ -168,6 +186,7 @@ export async function createApp(
     return c.json(snapshot);
   });
   app.route("/api/agent", agentRoutes(agent, auth));
+  app.route("/api/agent", localAiRoutes({ relay, config }));
   app.route("/api/computer", computerRoutes(computer, files));
   app.get("/api/calendars", async (c) => c.json(await workspace.calendars(c.get("owner"))));
   app.get("/api/calendar/events", async (c) => {
@@ -373,5 +392,5 @@ export async function createApp(
   app.get("/", (c) =>
     c.json({ name: "OpenMuse", app: "http://localhost:8081", health: "/api/health" }),
   );
-  return { app, auth, files, actions, workspace, agent, computer };
+  return { app, auth, files, actions, workspace, agent, computer, relay };
 }

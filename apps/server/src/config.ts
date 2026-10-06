@@ -91,6 +91,14 @@ export interface Config {
   computerE2bTemplate?: string;
   e2bApiKey?: string | undefined;
   allowedOrigins: string[];
+  /** Enable relay for on-device LLM inference (phone → meaty → server). Default: false. */
+  localaiRelayEnabled?: boolean | undefined;
+  /** Token sent to meaty for on-device inference auth. Falls back to dev token. */
+  meatyAuthToken?: string | undefined;
+  /** How long (ms) the relay waits for a device to respond before falling back to the API. Default: 60000. */
+  localaiFallbackBudgetMs?: number | undefined;
+  /** How long (ms) since last device heartbeat before considering the device disconnected. Default: 30000. */
+  localaiHeartbeatTimeoutMs?: number | undefined;
 }
 
 export type ComputerProvider = "docker" | "e2b-desktop";
@@ -207,6 +215,14 @@ export function readConfig(): Config {
     streamPollIntervalMs: process.env.STREAM_POLL_INTERVAL_MS
       ? Number(process.env.STREAM_POLL_INTERVAL_MS)
       : undefined,
+    localaiRelayEnabled: process.env.LOCALAI_RELAY_ENABLED === "true",
+    meatyAuthToken: process.env.MEATY_AUTH_TOKEN ?? "omnibutler-local-dev-token",
+    localaiFallbackBudgetMs: process.env.LOCALAI_FALLBACK_BUDGET_MS
+      ? Number(process.env.LOCALAI_FALLBACK_BUDGET_MS)
+      : 60000,
+    localaiHeartbeatTimeoutMs: process.env.LOCALAI_HEARTBEAT_TIMEOUT_MS
+      ? Number(process.env.LOCALAI_HEARTBEAT_TIMEOUT_MS)
+      : 30000,
   };
   if (
     mode === "live" &&
