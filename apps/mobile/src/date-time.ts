@@ -40,6 +40,29 @@ export function zonedInstant(date: string, time: string, timeZone: string): stri
   throw new Error("This time does not exist in the selected time zone. Choose another time.");
 }
 
+/**
+ * The first existing instant of a local day. Day-range boundaries are an internal
+ * computation, not a user-entered appointment time, so when a DST gap removes
+ * midnight (e.g. America/Santiago springs forward 00:00→01:00) the boundary
+ * clamps to the first existing local time instead of failing the whole query.
+ */
+export function startOfZonedDay(date: string, timeZone: string): string {
+  try {
+    return zonedInstant(date, "00:00", timeZone);
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes("does not exist")) throw error;
+  }
+  for (let minutes = 1; minutes < 24 * 60; minutes++) {
+    const time = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+    try {
+      return zonedInstant(date, time, timeZone);
+    } catch {
+      // Still inside the gap; keep walking toward the first existing time.
+    }
+  }
+  throw new Error("This day has no existing local time in the selected time zone.");
+}
+
 /** Only fully serialized instants may reset a date editor's local text. */
 export function isCompleteInstant(value: string): boolean {
   return (
