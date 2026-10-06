@@ -42,6 +42,12 @@ export async function createApp(
   const browser = new BrowserService(db, config, auth, files);
   const computer = new ComputerService(db, config, options.docker);
   const agent = new AgentService(db, config, workspace, files, actions, browser, computer);
+  // The browser connects straight to Intelligence's managed realtime host, as
+  // advertized by GET /api/copilotkit/info. An earlier attempt proxied that
+  // socket through /api/ws, but WebSocketPair/response.webSocket are
+  // Cloudflare Workers APIs that throw in Node, so every upgrade 502'd and the
+  // chat was stuck on "Loading conversation…". The joinToken+topic handshake
+  // still happens over our REST /connect; only the socket is direct.
   const intelligence = new CopilotKitIntelligence({ apiKey: config.intelligenceApiKey });
   const runtime = makeRuntime(config, agent, auth, intelligence);
   const app = new Hono<{ Variables: { owner: string } }>();
@@ -217,7 +223,7 @@ export async function createApp(
     try {
       await intelligence.getOrCreateThread({
         threadId: main.threadId,
-        userId: owner,
+        userId: config.intelligenceUserId,
         agentId: "default",
       });
     } catch {

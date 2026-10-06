@@ -15,7 +15,7 @@ import {
 } from "@tanstack/ai";
 import { type AnthropicChatModel, anthropicText } from "@tanstack/ai-anthropic";
 import { type GeminiTextModel, geminiText } from "@tanstack/ai-gemini";
-import { type OpenAIChatModel, openaiText } from "@tanstack/ai-openai";
+import { type OpenAIChatModel, openaiChatCompletions } from "@tanstack/ai-openai";
 import { map, mergeMap, type Observable } from "rxjs";
 import { z } from "zod";
 import { MODEL_MAX_RETRIES } from "../config.ts";
@@ -31,7 +31,12 @@ function adapter(spec: string) {
   const id = model.trim();
   switch (provider.toLowerCase()) {
     case "openai":
-      return openaiText(id as OpenAIChatModel, {
+      // Chat Completions, not the Responses API: this LiteLLM gateway's
+      // Responses→Vertex bridge rejects its own tool-call ids when replaying
+      // history ("Expected an ID that begins with 'fc'") and its Groq bridge
+      // rejects strict no-argument tool schemas, while /chat/completions
+      // round-trips both natively.
+      return openaiChatCompletions(id as OpenAIChatModel, {
         baseURL: process.env.OPENAI_BASE_URL,
         maxRetries: MODEL_MAX_RETRIES,
       });
@@ -103,6 +108,25 @@ const stateTools = [
   }),
 ];
 
+/**
+ * Reasoning effort sent with model requests.
+ *
+ * Without an explicit effort, the gateway injects `thinking_level: MINIMAL`
+ * on Vertex-backed models, which reject it with 400 "Thinking level MINIMAL
+ * is not supported for this model". Sending a supported effort explicitly
+ * overrides the gateway default. OPENAI_REASONING_EFFORT=none|minimal|low|
+ * medium|high adjusts per deployment; unset means low.
+ */
+const REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high"] as const;
+type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+export function reasoningEffort(env = process.env): { reasoning_effort: ReasoningEffort } {
+  const raw = env.OPENAI_REASONING_EFFORT?.trim().toLowerCase();
+  const effort: ReasoningEffort = REASONING_EFFORTS.find((value) => value === raw) ?? "low";
+  // Wire name (OpenAI Chat Completions), cast through the provider-options union,
+  // which models this field per-provider and does not expose the shared wire name.
+  return { reasoning_effort: effort } as { reasoning_effort: ReasoningEffort };
+}
+
 /** A BuiltInAgent in TanStack factory mode with the options of the classic AI SDK mode. */
 export function tanstackAgent(options: {
   model: string;
@@ -132,6 +156,9 @@ export function tanstackAgent(options: {
         adapter: adapter(options.model),
         messages: converted.messages,
         systemPrompts: system ? [system] : [],
+        // The chat-completions wire name for reasoning effort. The provider-options
+        // union types the Responses-API shape instead, so route through unknown.
+        modelOptions: reasoningEffort() as unknown as Record<string, never>,
         tools: [
           ...converted.tools,
           ...[...options.tools, ...stateTools].map((tool) =>

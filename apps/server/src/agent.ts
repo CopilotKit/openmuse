@@ -61,7 +61,10 @@ export function makeRuntime(
     // The shared CopilotKit sink carries this tag onto existing PostHog events.
     telemetryProperties: { accessibility_title: "OpenMuse" },
     identifyUser: async (request) => ({
-      id: await auth.owner(request.headers.get("authorization") ?? undefined),
+      // Intelligence's userId differs from the local DB owner (auth.owner()
+      // returns "local-user", which the platform rejects as a slug). Keep it in
+      // lockstep with app.ts's getOrCreateThread via config.intelligenceUserId.
+      id: config.intelligenceUserId,
       name: "OpenMuse user",
     }),
     generateThreadNames: false,

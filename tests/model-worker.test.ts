@@ -47,6 +47,7 @@ test("CopilotKit model worker executes server tools and persists the confirmed o
       publicUrl: "http://localhost:8787",
       dataDir: directory,
       agentBackend: "model",
+    intelligenceUserId: "local-user",
       intelligenceApiKey: "test-project-key-never-sent",
       model: "openai/fixture",
       googleRedirectUri: "http://localhost:8787/api/google/callback",
@@ -69,7 +70,9 @@ test("CopilotKit model worker executes server tools and persists the confirmed o
       result.events.some((event) => event.title === "Read the authorized workspace sources"),
     );
     assert.ok(requests.length >= 4 && requests.length <= 6);
-    assert.ok(requests.every((request) => request.path === "/v1/responses"));
+    // The engine speaks OpenAI Chat Completions — the wire format the LiteLLM
+    // gateway handles correctly for streamed tool loops.
+    assert.ok(requests.every((request) => request.path === "/v1/chat/completions"));
     assert.ok(requests[0].body.includes('"name":"prepare_email"'));
     assert.ok(requests[0].body.includes('"name":"run_computer_command"'));
     assert.ok(
@@ -143,6 +146,7 @@ test("the model worker keeps the text a model replies with when it calls no tool
     publicUrl: "http://localhost:8787",
     dataDir: directory,
     agentBackend: "model",
+    intelligenceUserId: "local-user",
     intelligenceApiKey: "test-project-key-never-sent",
     model: demoModel,
     googleRedirectUri: "http://localhost:8787/api/google/callback",
@@ -187,6 +191,7 @@ test("replaying a completed prepared action returns its receipt without reopenin
     publicUrl: "http://localhost:8787",
     dataDir: directory,
     agentBackend: "model",
+    intelligenceUserId: "local-user",
     intelligenceApiKey: "test-project-key-never-sent",
     model: "openai/fixture",
     googleRedirectUri: "http://localhost:8787/api/google/callback",
@@ -273,6 +278,7 @@ test("browser reads keep observation identity distinct while reusing one session
   const app = await createApp(browser.db, {
     ...browser.config,
     agentBackend: "model",
+    intelligenceUserId: "local-user",
     model: "openai/fixture",
   });
   t.after(() => app.agent.stop());

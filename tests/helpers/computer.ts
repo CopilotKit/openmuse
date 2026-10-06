@@ -11,6 +11,7 @@ export const config: Config = {
   publicUrl: "http://localhost:8787",
   dataDir: "/unused",
   agentBackend: "sample",
+  intelligenceUserId: "local-user",
   intelligenceApiKey: "test-project-key-never-sent",
   googleRedirectUri: "http://localhost/callback",
   allowedOrigins: [],
