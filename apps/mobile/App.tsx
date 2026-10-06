@@ -12,7 +12,7 @@ import {
   SquareCheck,
   X,
 } from "lucide-react-native";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -37,6 +37,8 @@ import { ChatScreen, WorkspaceTools } from "./src/chat";
 import { ComputerEntry } from "./src/computer";
 import { ComputerDraftProvider } from "./src/computer-drafts";
 import { Details } from "./src/details";
+import { authenticatedOnboarding, observeOnboarding, onboarding } from "./src/onboarding-client";
+import { classifyError } from "./src/onboarding-telemetry";
 import { BrowserScreen, CalendarScreen, FilesScreen, MailScreen } from "./src/screens";
 import { ThreadsProvider, ThreadsSheet, useMuseThread } from "./src/threads";
 import { Button, Card, colors, ErrorNotice, Field, IconButton, Mascot, s } from "./src/ui";
@@ -76,13 +78,20 @@ export default function App() {
     setError("");
     try {
       const session = await createSession(key);
+      void authenticatedOnboarding(session.token, API_URL, session.telemetryEnabled);
       setToken(session.token);
     } catch (e) {
+      void onboarding.setupFailed("connect", classifyError(e));
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   }, []);
+  useEffect(() => observeOnboarding(), []);
+  useEffect(() => {
+    if (!token) void onboarding.stepViewed("welcome");
+    if (!token && !busy) void onboarding.stepViewed("connect");
+  }, [token, busy]);
   useEffect(() => {
     void connect();
   }, [connect]);
@@ -150,10 +159,19 @@ function WorkspaceApp({ token }: { token: string }) {
   const [error, setError] = useState("");
   const [prompt, setPrompt] = useState<{ id: number; text: string }>();
   const refresh = useCallback(async () => {
-    const snapshot = await api.request<Workspace>("/api/workspace");
+    let snapshot: Workspace;
+    try {
+      snapshot = await api.request<Workspace>("/api/workspace");
+    } catch (e) {
+      void onboarding.setupFailed("workspace", classifyError(e));
+      throw e;
+    }
     setWorkspace(snapshot);
     setError("");
   }, [api]);
+  useLayoutEffect(() => {
+    if (workspace) void onboarding.stepViewed("workspace");
+  }, [workspace]);
   useEffect(() => {
     void refresh().catch((e) => setError(String(e)));
   }, [refresh]);

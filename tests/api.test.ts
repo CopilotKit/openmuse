@@ -214,3 +214,45 @@ test("guided document delegation streams a rich tool result bound to its saved t
   assert.equal(task?.kind, "document");
   assert.equal(task?.input.messageId, "mail-fieldtrip");
 });
+
+test("onboarding endpoints require authentication and enforce closed linkage input", async () => {
+  assert.equal(
+    (
+      await app.request("/api/telemetry/onboarding-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      })
+    ).status,
+    401,
+  );
+  const invalid = await app.request("/api/telemetry/onboarding-link", {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({
+      installation_id: "00000000-0000-4000-8000-000000000001",
+      event_id: "00000000-0000-4000-8000-000000000002",
+      platform: "web",
+      app_version: "0.1.0",
+      project_id: "spoof",
+    }),
+  });
+  assert.equal(invalid.status, 422);
+  const malformed = await app.request("/api/telemetry/onboarding-link", {
+    method: "POST",
+    headers: headers(),
+    body: "{",
+  });
+  assert.equal(malformed.status, 400);
+  const valid = await app.request("/api/telemetry/onboarding-link", {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({
+      installation_id: "00000000-0000-4000-8000-000000000001",
+      event_id: "00000000-0000-4000-8000-000000000002",
+      platform: "web",
+      app_version: "0.1.0",
+    }),
+  });
+  assert.deepEqual(await valid.json(), { enabled: false, linked: false });
+});
