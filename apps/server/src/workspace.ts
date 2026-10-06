@@ -258,27 +258,42 @@ export class WorkspaceService {
     await this.db.put(owner, "settings", { id: "google", enabled: true });
     await this.db.put(owner, "settings", { id: "seeded", value: true });
   }
-  async snapshot(owner: string, query?: string): Promise<Workspace> {
-    let mail: Mail[], events: CalendarEvent[];
+  private async sourceSections(
+    owner: string,
+    wantMail: boolean,
+    wantEvents: boolean,
+    query?: string,
+  ): Promise<{ mail: Mail[]; events: CalendarEvent[]; connected: boolean }> {
+    let mail: Mail[] = [];
+    let events: CalendarEvent[] = [];
     const connected = await this.connected(owner);
     if (this.config.mode === "live" && connected) {
       const connection = await this.connection(owner);
       if (!connection) throw new AppError("Google is disconnected", 409);
       const google = this.google(owner, connection.id);
-      [mail, events] = await Promise.all([google.listMail(query), google.listEvents()]);
-      mail = await this.cacheMail(owner, mail, connection.id);
+      const [mailResult, eventResult] = await Promise.all([
+        wantMail ? google.listMail(query) : Promise.resolve([] as Mail[]),
+        wantEvents ? google.listEvents() : Promise.resolve([] as CalendarEvent[]),
+      ]);
+      mail = mailResult;
+      events = eventResult;
+      if (wantMail) mail = await this.cacheMail(owner, mail, connection.id);
       for (const event of events) await this.db.put(owner, "events", event);
     } else if (this.config.mode === "sample" && connected) {
-      mail = await this.db.list<Mail>(owner, "mail");
-      events = await this.db.list<CalendarEvent>(owner, "events");
-      if (query)
-        mail = mail.filter((m) =>
-          `${m.sender} ${m.subject} ${m.body}`.toLowerCase().includes(query.toLowerCase()),
-        );
-    } else {
-      mail = [];
-      events = [];
+      if (wantMail) {
+        mail = await this.db.list<Mail>(owner, "mail");
+        if (query)
+          mail = mail.filter((m) =>
+            `${m.sender} ${m.subject} ${m.body}`.toLowerCase().includes(query.toLowerCase()),
+          );
+      }
+      if (wantEvents) events = await this.db.list<CalendarEvent>(owner, "events");
     }
+    return { mail, events, connected };
+  }
+
+  async snapshot(owner: string, query?: string): Promise<Workspace> {
+    const { mail, events, connected } = await this.sourceSections(owner, true, true, query);
     const tokens = this.config.mode === "live" ? await this.googleAuth.tokens(owner) : null;
     return {
       mode: this.config.mode,
@@ -325,6 +340,27 @@ export class WorkspaceService {
         openbotConfigured: false,
         richThreads: true,
       },
+    };
+  }
+
+  async sectionSnapshot(
+    owner: string,
+    section: "mail" | "calendar" | "files" | "all",
+  ): Promise<{ mail?: Mail[]; events?: CalendarEvent[]; files?: Omit<Artifact, "url">[] }> {
+    const wantMail = section === "mail" || section === "all";
+    const wantEvents = section === "calendar" || section === "all";
+    const wantFiles = section === "files" || section === "all";
+    const { mail, events } =
+      wantMail || wantEvents
+        ? await this.sourceSections(owner, wantMail, wantEvents)
+        : { mail: [], events: [] };
+    const files = wantFiles
+      ? (await this.files.list(owner)).map(({ url: _url, ...file }) => file)
+      : undefined;
+    return {
+      mail: wantMail ? mail.sort((a, b) => b.date.localeCompare(a.date)) : undefined,
+      events: wantEvents ? events.sort((a, b) => a.start.localeCompare(b.start)) : undefined,
+      files,
     };
   }
   async prepare(owner: string, input: ProposalInput, connectionId?: string) {
