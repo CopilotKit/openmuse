@@ -37,7 +37,7 @@ import BrowserConsole from "./BrowserConsole";
 import { browserAddress, browserSite } from "./browser-address";
 import { ComputerSheet } from "./computer";
 import DateTimeEditor from "./DateTimeEditor";
-import { localDateTime, zonedInstant } from "./date-time";
+import { calendarOverlap, localDateTime, zonedInstant } from "./date-time";
 import PdfReader from "./PdfReader";
 import {
   Button,
@@ -388,10 +388,7 @@ function EventEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const conflicts = (neighbors || w.events).filter(
-    (item) =>
-      item.id !== e?.id &&
-      Date.parse(start) < Date.parse(item.end) &&
-      Date.parse(end) > Date.parse(item.start),
+    (item) => item.id !== e?.id && calendarOverlap({ start, end, allDay, timeZone: zone }, item),
   );
   async function propose(remove = false) {
     setBusy(true);
@@ -514,7 +511,10 @@ function EventEditor({
           <Text style={s.heading}>This time overlaps</Text>
           {conflicts.map((c) => (
             <Text key={c.id} style={s.muted}>
-              {c.title} · {timeLabel(c.start, c.timeZone)}–{timeLabel(c.end, c.timeZone)}
+              {c.title} ·{" "}
+              {c.allDay
+                ? "All day"
+                : `${timeLabel(c.start, c.timeZone)}–${timeLabel(c.end, c.timeZone)}`}
             </Text>
           ))}
         </Card>

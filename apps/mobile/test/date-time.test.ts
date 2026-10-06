@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isCompleteInstant, localDateTime, zonedInstant } from "../src/date-time.ts";
+import {
+  calendarInterval,
+  calendarOverlap,
+  isCompleteInstant,
+  localDateTime,
+  zonedInstant,
+} from "../src/date-time.ts";
 
 test("calendar time is rendered and entered in the selected named zone", () => {
   assert.deepEqual(localDateTime("2026-09-15T17:30:00Z", "America/Los_Angeles"), {
@@ -37,4 +43,112 @@ test("partial native date edits never normalize from Date.parse", () => {
     assert.equal(isCompleteInstant(value), false);
   assert.equal(isCompleteInstant("2026-09-15T17:30:00.000Z"), true);
   assert.equal(isCompleteInstant("2026-09-15T10:30:00-07:00"), true);
+});
+
+const allDay = (start: string, end: string, timeZone = "America/Los_Angeles") => ({
+  start,
+  end,
+  allDay: true,
+  timeZone,
+});
+const timed = (start: string, end: string, timeZone = "America/Los_Angeles") => ({
+  start,
+  end,
+  allDay: false,
+  timeZone,
+});
+
+test("an all-day event covers its date in its own time zone, not UTC", () => {
+  assert.deepEqual(calendarInterval(allDay("2026-09-30", "2026-10-01")), {
+    start: Date.parse("2026-09-30T00:00:00-07:00"),
+    end: Date.parse("2026-10-01T00:00:00-07:00"),
+  });
+  const tokyo = calendarInterval(allDay("2026-09-30", "2026-10-01", "Asia/Tokyo"));
+  assert.deepEqual(tokyo, {
+    start: Date.parse("2026-09-30T00:00:00+09:00"),
+    end: Date.parse("2026-10-01T00:00:00+09:00"),
+  });
+});
+
+test("an all-day event starts at the first instant of a day whose midnight is skipped", () => {
+  const skipped = allDay("2026-03-08", "2026-03-09", "America/Havana");
+  assert.deepEqual(calendarInterval(skipped), {
+    start: Date.parse("2026-03-08T01:00:00-04:00"),
+    end: Date.parse("2026-03-09T00:00:00-04:00"),
+  });
+  assert.equal(
+    calendarOverlap(
+      skipped,
+      timed("2026-03-08T12:00:00-04:00", "2026-03-08T13:00:00-04:00", "America/Havana"),
+    ),
+    true,
+  );
+});
+
+test("an all-day event ends at the first instant of a day whose midnight is skipped", () => {
+  const skippedEnd = allDay("2026-03-07", "2026-03-08", "America/Havana");
+  assert.deepEqual(calendarInterval(skippedEnd), {
+    start: Date.parse("2026-03-07T00:00:00-05:00"),
+    end: Date.parse("2026-03-08T01:00:00-04:00"),
+  });
+  assert.equal(
+    calendarOverlap(
+      skippedEnd,
+      timed("2026-03-07T23:00:00-05:00", "2026-03-07T23:30:00-05:00", "America/Havana"),
+    ),
+    true,
+  );
+  assert.equal(
+    calendarOverlap(
+      skippedEnd,
+      timed("2026-03-08T01:00:00-04:00", "2026-03-08T02:00:00-04:00", "America/Havana"),
+    ),
+    false,
+  );
+});
+
+test("a timed evening event overlaps the all-day event on the same local day", () => {
+  assert.equal(
+    calendarOverlap(
+      timed("2026-09-30T20:00:00-07:00", "2026-09-30T21:00:00-07:00"),
+      allDay("2026-09-30", "2026-10-01"),
+    ),
+    true,
+  );
+  assert.equal(
+    calendarOverlap(
+      timed("2026-09-29T22:00:00-07:00", "2026-09-29T23:00:00-07:00"),
+      allDay("2026-09-30", "2026-10-01"),
+    ),
+    false,
+  );
+});
+
+test("all-day overlap follows the calendar's zone across the UTC date boundary", () => {
+  assert.equal(
+    calendarOverlap(
+      allDay("2026-09-30", "2026-10-01", "Asia/Tokyo"),
+      timed("2026-09-29T23:00:00Z", "2026-09-30T00:00:00Z", "UTC"),
+    ),
+    true,
+  );
+});
+
+test("events that only touch at a boundary do not conflict", () => {
+  assert.equal(
+    calendarOverlap(
+      allDay("2026-09-30", "2026-10-01"),
+      timed("2026-10-01T00:00:00-07:00", "2026-10-01T01:00:00-07:00"),
+    ),
+    false,
+  );
+});
+
+test("unparseable ranges never report a conflict", () => {
+  assert.equal(calendarInterval(allDay("not-a-date", "2026-10-01")), null);
+  assert.equal(calendarInterval(allDay("2026-09-30", "2026-10-01", "Not/AZone")), null);
+  assert.equal(
+    calendarOverlap(allDay("garbage", "garbage"), allDay("2026-09-30", "2026-10-01")),
+    false,
+  );
 });

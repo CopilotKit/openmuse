@@ -1,3 +1,5 @@
+import type { CalendarEvent } from "../../../packages/domain/src/index";
+
 /** Format a timed event in its calendar's named time zone. */
 export function localDateTime(value: string, timeZone: string): { date: string; time: string } {
   const instant = new Date(value);
@@ -38,6 +40,42 @@ export function zonedInstant(date: string, time: string, timeZone: string): stri
     candidate += delta;
   }
   throw new Error("This time does not exist in the selected time zone. Choose another time.");
+}
+
+/** Earliest instant of a calendar date; a skipped midnight starts at the first existing time. */
+function zonedDayStart(date: string, timeZone: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  for (let minutes = 0; minutes < 24 * 60; minutes++) {
+    const time = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+    try {
+      return zonedInstant(date, time, timeZone);
+    } catch (error) {
+      if (error instanceof RangeError) return null;
+    }
+  }
+  return null;
+}
+
+/** Instant range for an event; all-day events cover their date in the event's own zone. */
+export function calendarInterval(
+  event: Pick<CalendarEvent, "start" | "end" | "allDay" | "timeZone">,
+): { start: number; end: number } | null {
+  const start = event.allDay ? zonedDayStart(event.start, event.timeZone) : event.start;
+  const end = event.allDay ? zonedDayStart(event.end, event.timeZone) : event.end;
+  if (!start || !end) return null;
+  const from = Date.parse(start);
+  const to = Date.parse(end);
+  return Number.isFinite(from) && Number.isFinite(to) ? { start: from, end: to } : null;
+}
+
+/** Half-open overlap: events that only touch at a boundary are not a conflict. */
+export function calendarOverlap(
+  left: Pick<CalendarEvent, "start" | "end" | "allDay" | "timeZone">,
+  right: Pick<CalendarEvent, "start" | "end" | "allDay" | "timeZone">,
+): boolean {
+  const a = calendarInterval(left);
+  const b = calendarInterval(right);
+  return Boolean(a && b && a.start < b.end && a.end > b.start);
 }
 
 /** Only fully serialized instants may reset a date editor's local text. */
