@@ -39,7 +39,8 @@ import type {
   EmailDraft,
 } from "../../../packages/domain/src";
 import { API_URL } from "./api";
-import { localDateTime, zonedInstant } from "./date-time";
+import { browserAddress } from "./browser-address";
+import { localDateTime, startOfZonedDay, zonedInstant } from "./date-time";
 import {
   Button,
   Card,
@@ -50,7 +51,7 @@ import {
   ErrorNotice,
   IconButton,
   LinkRow,
-  Orb,
+  Mascot,
   relativeDate,
   resultSummary,
   SectionHeading,
@@ -141,7 +142,7 @@ export function TodayScreen() {
                 borderColor: "#C8DBE6",
               }}
             />
-            <Orb size={94} />
+            <Mascot size={94} />
             <View
               style={[
                 s.row,
@@ -453,10 +454,19 @@ export function MailScreen() {
   const [drafts, setDrafts] = useState<(EmailDraft & { id: string; createdAt: string })[]>([]);
   const [error, setError] = useState("");
   useEffect(() => {
+    let active = true;
+    setError("");
     void api
       .request<(EmailDraft & { id: string; createdAt: string })[]>("/api/drafts")
-      .then(setDrafts)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+      .then((next) => {
+        if (active) setDrafts(next);
+      })
+      .catch((e) => {
+        if (active) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      active = false;
+    };
   }, [api, w]);
   const items = w.mail.filter(
     (m) =>
@@ -636,8 +646,8 @@ export function CalendarScreen() {
       .then(() => {
         const query = new URLSearchParams({
           calendarId,
-          timeMin: zonedInstant(date, "00:00", zone),
-          timeMax: zonedInstant(plusDays(date, all ? 30 : 1), "00:00", zone),
+          timeMin: startOfZonedDay(date, zone),
+          timeMax: startOfZonedDay(plusDays(date, all ? 30 : 1), zone),
         });
         return api.request<CalendarEvent[]>(`/api/calendar/events?${query}`);
       })
@@ -778,7 +788,7 @@ export function CalendarScreen() {
           {selected?.name || "Your calendar"} · {zone}. Events show their own time zone.
         </Text>
         <ErrorNotice error={error} />
-        {error && (
+        {!!error && (
           <Button small onPress={() => setRetry(retry + 1)}>
             Try again
           </Button>
@@ -828,7 +838,9 @@ export function BrowserScreen() {
     setError("");
     setBusy(true);
     try {
-      const browser = await api.request<BrowserSession>("/api/browsers", { url });
+      const browser = await api.request<BrowserSession>("/api/browsers", {
+        url: browserAddress(url),
+      });
       await refresh();
       setUrl("");
       open({ type: "browser", browser });
@@ -898,7 +910,7 @@ export function BrowserScreen() {
                 <Chip tint={b.status === "active" ? colors.green : colors.canvas}>{b.status}</Chip>
                 <ArrowUpRight size={17} color={colors.muted} />
               </View>
-              {b.previewUrl && (
+              {!!b.previewUrl && (
                 <Image
                   source={{ uri: api.url(b.previewUrl) }}
                   resizeMode="cover"

@@ -61,7 +61,14 @@ export function Details({ detail }: { detail: Detail }) {
   const { close, navigate } = useWorkspace();
   if (detail.type === "computer") return <ComputerSheet />;
   if (detail.type === "task") return <TaskDetail taskId={detail.taskId} />;
-  if (detail.type === "delegate") return <DelegateSheet />;
+  if (detail.type === "delegate")
+    return (
+      <DelegateSheet
+        key={`${detail.goalId}:${detail.milestoneId}`}
+        goalId={detail.goalId}
+        milestoneId={detail.milestoneId}
+      />
+    );
   if (detail.type === "notifications") return <NotificationsSheet />;
   if (detail.type === "mail") return <MailDetail mail={detail.mail} />;
   if (detail.type === "email") return <EmailEditor draft={detail.draft} />;
@@ -184,7 +191,7 @@ function MailDetail({ mail: m }: { mail: Mail }) {
         </Card>
       ))}
       <ErrorNotice error={error} />
-      {error && <Button onPress={() => setRetry(retry + 1)}>Reload conversation</Button>}
+      {!!error && <Button onPress={() => setRetry(retry + 1)}>Reload conversation</Button>}
       <Button
         primary
         icon={Reply}
@@ -674,7 +681,7 @@ function ReviewDetail({ initial }: { initial: ActionProposal }) {
         )}
       </Card>
       <ErrorNotice error={error || action.error} />
-      {action.result && (
+      {!!action.result && (
         <Card style={{ marginTop: 16, backgroundColor: colors.green, padding: 18 }}>
           <Text selectable style={s.text}>
             {resultSummary(action.result)}

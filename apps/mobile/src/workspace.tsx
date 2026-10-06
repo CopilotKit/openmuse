@@ -19,7 +19,7 @@ export type Detail =
   | { type: "browser"; browser: BrowserSession }
   | { type: "review"; action: ActionProposal }
   | { type: "task"; taskId: string }
-  | { type: "delegate" }
+  | { type: "delegate"; goalId?: string; milestoneId?: string }
   | { type: "notifications" }
   | { type: "computer" }
   | { type: "menu" };

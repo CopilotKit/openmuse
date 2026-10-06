@@ -1,22 +1,21 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdir, mkdtemp, rm, truncate, writeFile } from "node:fs/promises";
-import { createServer, request } from "node:http";
+import { mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from "node:fs/promises";
+import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import test, { type TestContext } from "node:test";
+import test from "node:test";
 import { createApp } from "../apps/server/src/app.ts";
 import { Auth } from "../apps/server/src/auth.ts";
 import { BrowserService } from "../apps/server/src/browser.ts";
-import type { Config } from "../apps/server/src/config.ts";
-import { createStore } from "../apps/server/src/db.ts";
 import { Files } from "../apps/server/src/files.ts";
 import { capturePdfDownload, readDownloadFailures } from "../apps/worker/src/downloads.ts";
 import { isPublicIp, validatePublicUrl } from "../apps/worker/src/network.ts";
 import { startEgressProxy } from "../apps/worker/src/proxy.ts";
 import { createWorkerServer } from "../apps/worker/src/server.ts";
 import type { BrowserSession } from "../packages/domain/src/index.ts";
+import { browserFixture } from "./helpers/browser.ts";
 
 const sessionId = "00000000-0000-4000-8000-000000000001";
 const savedSession: BrowserSession = {
@@ -26,47 +25,6 @@ const savedSession: BrowserSession = {
   status: "active",
   updatedAt: "2026-09-15T00:00:00.000Z",
 };
-
-async function browserFixture(
-  t: TestContext,
-  handle: (path: string, body: Record<string, unknown>) => { status?: number; data: unknown },
-) {
-  const server = createServer(async (request, response) => {
-    const chunks = [];
-    for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {};
-    const result = handle(request.url ?? "", body);
-    response.writeHead(result.status ?? 200, { "content-type": "application/json" });
-    response.end(JSON.stringify(result.data));
-  });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const address = server.address();
-  assert(address && typeof address !== "string");
-  const directory = await mkdtemp(join(tmpdir(), "openmuse-browser-service-"));
-  const db = await createStore();
-  const config: Config = {
-    mode: "sample",
-    port: 8787,
-    host: "127.0.0.1",
-    publicUrl: "http://localhost:8787",
-    dataDir: directory,
-    agentBackend: "sample",
-    googleRedirectUri: "http://localhost:8787/api/google/callback",
-    allowedOrigins: [],
-    workerUrl: `http://127.0.0.1:${address.port}`,
-    workerToken: "test-worker-token-at-least-32-characters",
-  };
-  const auth = new Auth(db, config, "test-signing-key");
-  const service = new BrowserService(db, config, auth, new Files(db, config, auth));
-  t.after(async () => {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    await db.close();
-    await rm(directory, { recursive: true, force: true });
-  });
-  return { db, service, config };
-}
 
 test("browser API reopens an owned profile at the edited address and renews console access", async (t) => {
   const calls: { path: string; body: Record<string, unknown> }[] = [];
@@ -200,6 +158,127 @@ test("browser observations reuse an owned profile and reject unowned reads", asy
   assert.equal(fresh.text, read.text);
 });
 
+test("cancelled task-style browser observations stop before a follow-up read", async (t) => {
+  const controller = new AbortController();
+  const calls: string[] = [];
+  const { db, service } = await browserFixture(t, (path, body) => {
+    calls.push(path);
+    controller.abort();
+    return { data: { ...savedSession, id: body.id, url: body.url } };
+  });
+  await assert.rejects(service.observe("owner", savedSession.url, undefined, controller.signal), {
+    name: "AbortError",
+  });
+  assert.deepEqual(calls, ["/sessions"]);
+  const [saved] = await db.list<BrowserSession>("owner", "browsers");
+  assert.equal(saved?.status, "idle", "cancellation must not persist a browser failure");
+});
+
+test("chat browser reads reuse a persisted owned profile across turns and service restarts", async (t) => {
+  const calls: { path: string; body: Record<string, unknown> }[] = [];
+  let currentUrl = savedSession.url;
+  const { db, service, config } = await browserFixture(t, (path, body) => {
+    calls.push({ path, body });
+    if (path.endsWith("/read"))
+      return {
+        data: { url: currentUrl, title: "Read page", text: "x".repeat(30_001), truncated: false },
+      };
+    currentUrl = String(body.url);
+    return { data: { ...savedSession, id: body.id, url: currentUrl } };
+  });
+  const first = await service.observeForThread("owner", "chat-thread", "https://example.org/first");
+  assert.equal(first.text.length, 30_000);
+  assert.equal(first.truncated, true);
+  const auth = new Auth(db, config, "test-signing-key");
+  const restarted = new BrowserService(db, config, auth, new Files(db, config, auth));
+  for (const status of ["active", "closed", "error", "idle"] as const) {
+    await db.put("owner", "browsers", { ...(await service.get("owner", first.sessionId)), status });
+    const next = await restarted.observeForThread(
+      "owner",
+      "chat-thread",
+      `https://example.org/${status}`,
+    );
+    assert.equal(next.sessionId, first.sessionId);
+    assert.equal(next.url, `https://example.org/${status}`);
+  }
+  assert.equal((await db.list("owner", "browsers")).length, 1);
+  assert.equal(calls.filter((call) => call.path === "/sessions").length, 5);
+  const otherOwner = await restarted.observeForThread("stranger", "chat-thread", savedSession.url);
+  assert.notEqual(otherOwner.sessionId, first.sessionId);
+  await assert.rejects(restarted.get("stranger", first.sessionId), { status: 404 });
+});
+
+test("chat browser retries failed navigation using the reserved profile", async (t) => {
+  const ids: unknown[] = [];
+  let failing = true;
+  const { db, service } = await browserFixture(t, (path, body) => {
+    if (path.endsWith("/read"))
+      return {
+        data: {
+          url: savedSession.url,
+          title: "Read page",
+          text: "Actual contents",
+          truncated: true,
+        },
+      };
+    ids.push(body.id);
+    return failing
+      ? { status: 502, data: { error: { message: "Page unavailable" } } }
+      : { data: { ...savedSession, id: body.id } };
+  });
+  await assert.rejects(
+    service.observeForThread("owner", "chat-thread", savedSession.url),
+    /Page unavailable/,
+  );
+  assert.equal((await db.list<BrowserSession>("owner", "browsers"))[0]?.status, "error");
+  failing = false;
+  const result = await service.observeForThread("owner", "chat-thread", savedSession.url);
+  assert.deepEqual(ids, [result.sessionId, result.sessionId]);
+  assert.equal(result.text, "Actual contents");
+  assert.equal(result.truncated, true);
+});
+
+test("concurrent chat reads keep each navigation paired with its page read", async (t) => {
+  let currentUrl = savedSession.url;
+  const { db, service } = await browserFixture(t, (path, body) => {
+    if (path.endsWith("/read"))
+      return { data: { url: currentUrl, title: currentUrl, text: currentUrl, truncated: false } };
+    currentUrl = String(body.url);
+    return { data: { ...savedSession, id: body.id, url: currentUrl } };
+  });
+  const urls = ["https://example.org/one", "https://example.org/two"];
+  const results = await Promise.all(
+    urls.map((url) => service.observeForThread("owner", "chat-thread", url)),
+  );
+  assert.deepEqual(
+    results.map((result) => result.text),
+    urls,
+  );
+  assert.equal(results[0].sessionId, results[1].sessionId);
+  assert.equal((await db.list("owner", "browsers")).length, 1);
+});
+
+test("cancelled chat browser requests do not start navigation or a follow-up read", async (t) => {
+  const controller = new AbortController();
+  const calls: string[] = [];
+  const { db, service } = await browserFixture(t, (path, body) => {
+    calls.push(path);
+    controller.abort();
+    return { data: { ...savedSession, id: body.id } };
+  });
+  await assert.rejects(
+    service.observeForThread("owner", "chat-thread", savedSession.url, controller.signal),
+    { name: "AbortError" },
+  );
+  assert.deepEqual(calls, ["/sessions"]);
+  await assert.rejects(
+    service.observeForThread("owner", "other-thread", savedSession.url, controller.signal),
+    { name: "AbortError" },
+  );
+  assert.deepEqual(calls, ["/sessions"]);
+  assert.equal((await db.list("owner", "browsers")).length, 1);
+});
+
 test("browser read fails on missing page text instead of inventing observation content", async (t) => {
   const { db, service } = await browserFixture(t, () => ({
     data: { url: savedSession.url, title: savedSession.title },
@@ -259,6 +338,150 @@ test("worker persists unsupported, oversized and interrupted download outcomes",
     assert(failures.every((failure) => failure.message && failure.createdAt));
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("worker recovery cleans unpublished downloads and retains their interruption failures", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "openmuse-download-recovery-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const folder = join(directory, "downloads");
+  const outcomes = join(directory, "download-outcomes");
+  await mkdir(folder);
+  await mkdir(outcomes);
+  const failure = {
+    id: "00000000-0000-4000-8000-000000000006",
+    name: "unfinished.pdf",
+    code: "DOWNLOAD_INTERRUPTED",
+    message: "The download was interrupted.",
+    createdAt: "2026-09-15T00:00:00.000Z",
+  };
+  const pdf = join(folder, `${failure.id}.pdf`);
+  const metadataTemp = join(folder, `${failure.id}.json.tmp`);
+  const bytes = Buffer.from("%PDF-1.7\npartial download");
+  await writeFile(pdf, bytes);
+  await writeFile(metadataTemp, '{"id":');
+  await writeFile(
+    join(outcomes, `${failure.id}.json`),
+    JSON.stringify({ ...failure, status: "pending" }),
+  );
+
+  assert.deepEqual(await readDownloadFailures(directory), []);
+  assert.deepEqual(await readFile(pdf), bytes, "ordinary reads must not clean active downloads");
+  assert.deepEqual(await readDownloadFailures(directory, true), [failure]);
+  await assert.rejects(readFile(pdf), { code: "ENOENT" });
+  await assert.rejects(readFile(metadataTemp), { code: "ENOENT" });
+  assert.deepEqual(await readDownloadFailures(directory, true), [failure]);
+});
+
+test("worker recovery retries incomplete cleanup before recording failure", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "openmuse-download-recovery-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const folder = join(directory, "downloads");
+  const outcomes = join(directory, "download-outcomes");
+  await mkdir(folder);
+  await mkdir(outcomes);
+  const failure = {
+    id: "00000000-0000-4000-8000-000000000009",
+    name: "unfinished.pdf",
+    code: "DOWNLOAD_INTERRUPTED",
+    message: "The download was interrupted.",
+    createdAt: "2026-09-15T00:00:00.000Z",
+  };
+  const journal = join(outcomes, `${failure.id}.json`);
+  await writeFile(journal, JSON.stringify({ ...failure, status: "pending" }));
+  const pdf = join(folder, `${failure.id}.pdf`);
+  await writeFile(pdf, "%PDF-1.7\npartial download");
+  const metadataTemp = join(folder, `${failure.id}.json.tmp`);
+  // A directory at the file path forces cleanup to fail without permission mocks.
+  await mkdir(metadataTemp);
+
+  await assert.rejects(readDownloadFailures(directory, true));
+  assert.deepEqual(JSON.parse(await readFile(journal, "utf8")), { ...failure, status: "pending" });
+  await assert.rejects(readFile(pdf), { code: "ENOENT" });
+  await rm(metadataTemp, { recursive: true });
+  assert.deepEqual(await readDownloadFailures(directory, true), [failure]);
+  assert.deepEqual(await readDownloadFailures(directory, true), [failure]);
+  assert.equal(JSON.parse(await readFile(journal, "utf8")).status, "failed");
+});
+
+test("worker recovery preserves downloads when metadata cannot be inspected", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "openmuse-download-recovery-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const folder = join(directory, "downloads");
+  const outcomes = join(directory, "download-outcomes");
+  await mkdir(folder);
+  await mkdir(outcomes);
+  const id = "00000000-0000-4000-8000-000000000007";
+  const outcome = {
+    id,
+    name: "unreadable.pdf",
+    status: "pending",
+    code: "DOWNLOAD_INTERRUPTED",
+    message: "The download was interrupted.",
+    createdAt: "2026-09-15T00:00:00.000Z",
+  };
+  const pdf = join(folder, `${id}.pdf`);
+  const metadata = join(folder, `${id}.json`);
+  const bytes = Buffer.from("%PDF-1.7\npreserve me");
+  await writeFile(pdf, bytes);
+  await writeFile(`${metadata}.tmp`, '{"id":');
+  const journal = join(outcomes, `${id}.json`);
+  await writeFile(journal, JSON.stringify(outcome));
+  // A symlink loop raises a real filesystem error even when tests run as root.
+  await symlink(`${id}.json`, metadata);
+
+  await assert.rejects(readDownloadFailures(directory, true), { code: "ELOOP" });
+  assert.deepEqual(await readFile(pdf), bytes);
+  assert.equal(await readFile(`${metadata}.tmp`, "utf8"), '{"id":');
+  assert.deepEqual(JSON.parse(await readFile(journal, "utf8")), outcome);
+});
+
+test("worker recovery reconciles published downloads and transfers without files", async (t) => {
+  for (const published of [false, true]) {
+    await t.test(
+      published ? "published PDF is retained" : "missing files are tolerated",
+      async (t) => {
+        const directory = await mkdtemp(join(tmpdir(), "openmuse-download-recovery-"));
+        t.after(() => rm(directory, { recursive: true, force: true }));
+        const folder = join(directory, "downloads");
+        const outcomes = join(directory, "download-outcomes");
+        await mkdir(folder);
+        await mkdir(outcomes);
+        const failure = {
+          id: "00000000-0000-4000-8000-000000000008",
+          name: "report.pdf",
+          code: "DOWNLOAD_INTERRUPTED",
+          message: "The download was interrupted.",
+          createdAt: "2026-09-15T00:00:00.000Z",
+        };
+        const journal = join(outcomes, `${failure.id}.json`);
+        await writeFile(journal, JSON.stringify({ ...failure, status: "pending" }));
+        const bytes = Buffer.from("%PDF-1.7\npublished download");
+        const pdf = join(folder, `${failure.id}.pdf`);
+        const metadata = join(folder, `${failure.id}.json`);
+        const saved = {
+          id: failure.id,
+          name: failure.name,
+          size: bytes.length,
+          mimeType: "application/pdf",
+        };
+        if (published) {
+          await writeFile(pdf, bytes);
+          await writeFile(metadata, JSON.stringify(saved));
+        }
+
+        const expected = published ? [] : [failure];
+        assert.deepEqual(await readDownloadFailures(directory, true), expected);
+        assert.deepEqual(await readDownloadFailures(directory, true), expected);
+        if (published) {
+          assert.deepEqual(await readFile(pdf), bytes);
+          assert.deepEqual(JSON.parse(await readFile(metadata, "utf8")), saved);
+          await assert.rejects(readFile(journal), { code: "ENOENT" });
+        } else {
+          assert.equal(JSON.parse(await readFile(journal, "utf8")).status, "failed");
+        }
+      },
+    );
   }
 });
 
@@ -339,6 +562,8 @@ test("worker protects all controls, validates before launch, and health reveals 
   const outcomeFolder = join(dataDir, savedId, "download-outcomes");
   await mkdir(downloadFolder, { recursive: true });
   await mkdir(outcomeFolder, { recursive: true });
+  await writeFile(join(downloadFolder, `${pendingId}.pdf`), "%PDF-1.7\npartial download");
+  await writeFile(join(downloadFolder, `${pendingId}.json.tmp`), '{"id":');
   await writeFile(
     join(outcomeFolder, `${pendingId}.json`),
     JSON.stringify({
@@ -410,6 +635,10 @@ test("worker protects all controls, validates before launch, and health reveals 
     ).json();
     assert.equal(outcomes.downloads.length, 1);
     assert.equal(outcomes.failures[0]?.code, "DOWNLOAD_INTERRUPTED");
+    await assert.rejects(readFile(join(downloadFolder, `${pendingId}.pdf`)), { code: "ENOENT" });
+    await assert.rejects(readFile(join(downloadFolder, `${pendingId}.json.tmp`)), {
+      code: "ENOENT",
+    });
     const oversized = await fetch(`${base}/sessions/${savedId}/downloads/${downloadId}`, {
       headers,
     });
@@ -465,5 +694,49 @@ test("egress proxy blocks HTTP and CONNECT traffic to local network destinations
     }
   } finally {
     await proxy.close();
+  }
+});
+
+test("the browser counts as connected only while its worker answers", async (t) => {
+  let up = true;
+  let clock = 0;
+  const { db, config } = await browserFixture(t, (path) =>
+    up && path === "/health" ? { data: { status: "ok" } } : { status: 503, data: {} },
+  );
+  const auth = new Auth(db, config, "test-signing-key");
+  const service = new BrowserService(db, config, auth, new Files(db, config, auth), () => clock);
+  assert.equal(await service.reachable(), true);
+  up = false;
+  assert.equal(await service.reachable(), true, "a recent answer is reused briefly");
+  clock += 15_000;
+  assert.equal(await service.reachable(), false);
+  const unconfigured = new BrowserService(
+    db,
+    { ...config, workerUrl: undefined },
+    auth,
+    new Files(db, config, auth),
+  );
+  assert.equal(await unconfigured.reachable(), false);
+});
+
+test("the workspace reports the browser offline while its worker's health check fails", async (t) => {
+  for (const up of [true, false]) {
+    const { db, config } = await browserFixture(t, (path) =>
+      up && path === "/health" ? { data: { status: "ok" } } : { status: 503, data: {} },
+    );
+    const { app, auth, agent } = await createApp(db, config);
+    t.after(() => agent.stop());
+    const { token } = await auth.session();
+    const response = await app.request("/api/workspace", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(response.status, 200);
+    const { connections } = (await response.json()) as {
+      connections: { id: string; status: string }[];
+    };
+    assert.equal(
+      connections.find((connection) => connection.id === "browser")?.status,
+      up ? "connected" : "unavailable",
+    );
   }
 });

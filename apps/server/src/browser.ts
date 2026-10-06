@@ -28,14 +28,39 @@ const failureSchema = z.object({
   message: z.string(),
   createdAt: z.string(),
 });
+type ChatBrowser = { id: string; sessionId: string };
+
+const BROWSER_SESSION_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function assertSessionId(id: string): void {
+  if (!BROWSER_SESSION_ID.test(id)) throw new AppError("Browser session not found", 404);
+}
+
 export class BrowserService {
   private readonly queues = new Map<string, Promise<unknown>>();
+  private health?: { checkedAt: number; reachable: Promise<boolean> };
   constructor(
     private readonly db: Store,
     private readonly config: Config,
     private readonly auth: Auth,
     private readonly files: Files,
+    private readonly now: () => number = Date.now,
   ) {}
+  /** Whether the configured worker answers its health check, cached briefly for snapshots. */
+  reachable(): Promise<boolean> {
+    if (!this.config.workerUrl || !this.config.workerToken) return Promise.resolve(false);
+    const now = this.now();
+    if (this.health && now - this.health.checkedAt < 15_000) return this.health.reachable;
+    const reachable = fetch(`${this.config.workerUrl}/health`, {
+      signal: AbortSignal.timeout(2000),
+    }).then(
+      (response) => response.ok,
+      () => false,
+    );
+    this.health = { checkedAt: now, reachable };
+    return reachable;
+  }
   private async serial<T>(id: string, operation: () => Promise<T>): Promise<T> {
     const next = (this.queues.get(id) ?? Promise.resolve()).catch(() => {}).then(operation);
     this.queues.set(id, next);
@@ -45,7 +70,8 @@ export class BrowserService {
       if (this.queues.get(id) === next) this.queues.delete(id);
     }
   }
-  private async request(path: string, body?: unknown) {
+  private async request(path: string, body?: unknown, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     if (!this.config.workerUrl || !this.config.workerToken)
       throw new AppError("Browser worker is not configured. Start it using the setup guide.", 503);
     let response: Response;
@@ -57,9 +83,12 @@ export class BrowserService {
           "Content-Type": "application/json",
         },
         body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(45000),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(45000)])
+          : AbortSignal.timeout(45000),
       });
     } catch {
+      signal?.throwIfAborted();
       throw new AppError(
         "Browser worker is unavailable. Check that its container is running.",
         503,
@@ -77,6 +106,7 @@ export class BrowserService {
     return response;
   }
   async get(owner: string, id: string) {
+    assertSessionId(id);
     const value = await this.db.get<BrowserSession>(owner, "browsers", id);
     if (!value) throw new AppError("Browser session not found", 404);
     return value;
@@ -95,7 +125,7 @@ export class BrowserService {
     await this.db.put(owner, "browsers", session);
     return this.decorate(owner, session);
   }
-  async create(owner: string, url: string) {
+  async create(owner: string, url: string, signal?: AbortSignal) {
     const id = randomUUID();
     // Record ownership before calling the worker, including when its response is lost.
     await this.db.put(owner, "browsers", {
@@ -105,15 +135,16 @@ export class BrowserService {
       status: "idle",
       updatedAt: new Date().toISOString(),
     });
-    return this.reopen(owner, id, url);
+    return this.reopen(owner, id, url, signal);
   }
-  private async openOwned(owner: string, id: string, url?: string) {
+  private async openOwned(owner: string, id: string, url?: string, signal?: AbortSignal) {
     const value = await this.get(owner, id);
     const target = url ?? value.url;
     try {
-      const response = await this.request("/sessions", { id, url: target });
+      const response = await this.request("/sessions", { id, url: target }, signal);
       return await this.save(owner, await response.json(), id);
     } catch (error) {
+      signal?.throwIfAborted();
       await this.save(
         owner,
         { ...value, url: target, status: "error", updatedAt: new Date().toISOString() },
@@ -122,15 +153,19 @@ export class BrowserService {
       throw error;
     }
   }
-  reopen(owner: string, id: string, url?: string) {
-    return this.serial(id, () => this.openOwned(owner, id, url));
+  reopen(owner: string, id: string, url?: string, signal?: AbortSignal) {
+    return this.serial(id, () => this.openOwned(owner, id, url, signal));
   }
   navigate(owner: string, id: string, url: string) {
     return this.reopen(owner, id, url);
   }
-  private async readOwned(owner: string, id: string) {
+  private async readOwned(owner: string, id: string, signal?: AbortSignal) {
     const session = await this.get(owner, id);
-    const result = readSchema.parse(await (await this.request(`/sessions/${id}/read`)).json());
+    const result = readSchema.parse(
+      await (
+        await this.request(`/sessions/${encodeURIComponent(id)}/read`, undefined, signal)
+      ).json(),
+    );
     await this.save(
       owner,
       {
@@ -147,34 +182,79 @@ export class BrowserService {
   read(owner: string, id: string) {
     return this.serial(id, () => this.readOwned(owner, id));
   }
-  async observe(owner: string, url: string, existingId?: string) {
-    const id = existingId ?? (await this.create(owner, url)).id;
+  async observe(owner: string, url: string, existingId?: string, signal?: AbortSignal) {
+    const id = existingId ?? (await this.create(owner, url, signal)).id;
     return this.serial(id, async () => {
-      if (existingId) await this.openOwned(owner, id, url);
-      return { sessionId: id, ...(await this.readOwned(owner, id)) };
+      signal?.throwIfAborted();
+      if (existingId) await this.openOwned(owner, id, url, signal);
+      signal?.throwIfAborted();
+      return { sessionId: id, ...(await this.readOwned(owner, id, signal)) };
+    });
+  }
+  async observeForThread(owner: string, threadId: string, url: string, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    // Persist the association before contacting the worker so failed/lost responses
+    // and later chat turns keep using the same profile instead of exhausting its limit.
+    const association =
+      (await this.db.get<ChatBrowser>(owner, "chat-browsers", threadId)) ??
+      (await this.db.insertIfAbsent(owner, "chat-browsers", {
+        id: threadId,
+        sessionId: randomUUID(),
+      })) ??
+      (await this.db.get<ChatBrowser>(owner, "chat-browsers", threadId));
+    if (!association) throw new AppError("Could not reserve the chat browser session", 500);
+    const id = association.sessionId;
+    await this.db.insertIfAbsent(owner, "browsers", {
+      id,
+      url,
+      title: "New browser session",
+      status: "idle",
+      updatedAt: new Date().toISOString(),
+    });
+    return this.serial(id, async () => {
+      signal?.throwIfAborted();
+      await this.openOwned(owner, id, url, signal);
+      signal?.throwIfAborted();
+      const page = await this.readOwned(owner, id, signal);
+      signal?.throwIfAborted();
+      return {
+        sessionId: id,
+        ...page,
+        text: page.text.slice(0, 30_000),
+        truncated: page.truncated || page.text.length > 30_000,
+      };
     });
   }
   async close(owner: string, id: string) {
     return this.serial(id, async () => {
       await this.get(owner, id);
-      return this.save(owner, await (await this.request(`/sessions/${id}/close`, {})).json(), id);
+      return this.save(
+        owner,
+        await (await this.request(`/sessions/${encodeURIComponent(id)}/close`, {})).json(),
+        id,
+      );
     });
   }
   async preview(owner: string, id: string) {
     await this.get(owner, id);
-    return this.request(`/sessions/${id}/screenshot`);
+    return this.request(`/sessions/${encodeURIComponent(id)}/screenshot`);
   }
   async input(owner: string, id: string, value: unknown) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new AppError("A JSON object is required for browser input", 422);
     return this.serial(id, async () => {
       await this.get(owner, id);
       return this.save(
         owner,
-        await (await this.request(`/sessions/${id}/input`, value)).json(),
+        await (await this.request(`/sessions/${encodeURIComponent(id)}/input`, value)).json(),
         id,
       );
     });
   }
   async imports(owner: string, id: string) {
+    return this.serial(id, () => this.importsOwned(owner, id));
+  }
+  private async importsOwned(owner: string, id: string) {
     await this.get(owner, id);
     const { downloads, failures } = z
       .object({
@@ -183,7 +263,7 @@ export class BrowserService {
         ),
         failures: z.array(failureSchema),
       })
-      .parse(await (await this.request(`/sessions/${id}/downloads`)).json());
+      .parse(await (await this.request(`/sessions/${encodeURIComponent(id)}/downloads`)).json());
     const saved = [];
     for (const download of downloads) {
       const existing = await this.db.get<{ fileId: string }>(
@@ -196,7 +276,7 @@ export class BrowserService {
         continue;
       }
       const response = await this.request(
-        `/sessions/${id}/downloads/${encodeURIComponent(download.id)}`,
+        `/sessions/${encodeURIComponent(id)}/downloads/${encodeURIComponent(download.id)}`,
       );
       const file = await this.files.import(
         owner,

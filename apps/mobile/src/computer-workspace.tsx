@@ -4,6 +4,7 @@ import {
   FileText,
   Folder,
   FolderPlus,
+  Monitor,
   Play,
   Power,
   RefreshCw,
@@ -20,13 +21,20 @@ import type {
   ComputerSnapshot,
 } from "../../../packages/domain/src/computer";
 import { useComputerDraft } from "./computer-drafts";
+import { DesktopStream } from "./desktop-stream";
 import { Button, Card, colors, Empty, ErrorNotice, Field, LinkRow, s, timeLabel } from "./ui";
 import { useWorkspace } from "./workspace";
 
 const mono = Platform.OS === "ios" ? "Menlo" : "monospace";
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-export function LinuxWorkspace({ tab }: { tab: "Terminal" | "Files" }) {
+export function LinuxWorkspace({
+  tab,
+  onSnapshot,
+}: {
+  tab: "Terminal" | "Files" | "Desktop";
+  onSnapshot?: (snapshot: ComputerSnapshot) => void;
+}) {
   const { api } = useWorkspace();
   const [snapshot, setSnapshot] = useState<ComputerSnapshot>();
   const [error, setError] = useState("");
@@ -61,13 +69,33 @@ export function LinuxWorkspace({ tab }: { tab: "Terminal" | "Files" }) {
       if (AppState.currentState !== "active") return;
       void refresh();
     };
-    poll();
-    const interval = setInterval(poll, 5000);
+    void refresh();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") poll();
+    });
+    const watching = tab === "Desktop" && Platform.OS === "web" && snapshot?.status === "running";
+    const active =
+      executing || busy || snapshot?.commands.some((item) => item.status === "running");
+    const interval = watching || active ? setInterval(poll, 5000) : undefined;
     return () => {
-      version.current++;
       clearInterval(interval);
+      subscription.remove();
     };
-  }, [refresh]);
+  }, [
+    refresh,
+    tab,
+    executing,
+    busy,
+    snapshot?.status,
+    snapshot?.commands.some((item) => item.status === "running"),
+  ]);
+
+  useEffect(
+    () => () => {
+      version.current++;
+    },
+    [refresh],
+  );
 
   async function control(action: "start" | "stop") {
     if (busy) return;
@@ -117,6 +145,9 @@ export function LinuxWorkspace({ tab }: { tab: "Terminal" | "Files" }) {
       void refresh();
     }
   }
+  useEffect(() => {
+    if (snapshot) onSnapshot?.(snapshot);
+  }, [snapshot, onSnapshot]);
   const running = snapshot?.status === "running";
   const commandRunning = executing || snapshot?.commands.some((item) => item.status === "running");
   return (
@@ -140,7 +171,7 @@ export function LinuxWorkspace({ tab }: { tab: "Terminal" | "Files" }) {
           </View>
           {!snapshot && !error && <ActivityIndicator color={colors.blueDark} />}
         </View>
-        {snapshot?.message && <Text style={s.small}>{snapshot.message}</Text>}
+        {!!snapshot?.message && <Text style={s.small}>{snapshot.message}</Text>}
         {snapshot?.enabled && (
           <View style={[s.row, { gap: 8, flexWrap: "wrap" }]}>
             {running ? (
@@ -228,7 +259,9 @@ export function LinuxWorkspace({ tab }: { tab: "Terminal" | "Files" }) {
                   Run command
                 </Button>
                 <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 18 }}>
-                  Runs on your computer. Network access is off. Use Browser for the web.
+                  {snapshot.network === "enabled"
+                    ? "Runs on your computer with internet access. Start GUI apps with >/dev/null 2>&1 & to open them on the Desktop tab."
+                    : "Runs on your computer. Network access is off. Use Browser for the web."}
                 </Text>
               </View>
             ) : (
@@ -267,8 +300,34 @@ export function LinuxWorkspace({ tab }: { tab: "Terminal" | "Files" }) {
           <View style={{ display: tab === "Files" ? "flex" : "none" }}>
             <ComputerFiles running={!!running} active={tab === "Files"} />
           </View>
+          {snapshot.provider === "e2b-desktop" && tab === "Desktop" && (
+            <ComputerDesktop running={!!running} />
+          )}
         </>
       )}
+    </View>
+  );
+}
+
+// Live view of the computer's desktop, shared with the chat's desktop card.
+function ComputerDesktop({ running }: { running: boolean }) {
+  if (!running)
+    return (
+      <Empty
+        icon={Monitor}
+        title="Desktop is off"
+        detail="Start the computer to see and control its desktop."
+      />
+    );
+  return (
+    <View style={{ gap: 12 }}>
+      <DesktopStream running />
+      <Text style={s.small}>
+        You and your agent share this desktop. Stopping the computer closes its apps; files in
+        /workspace are kept. Opening the desktop keeps the computer awake for 30 minutes; keep this
+        tab open or come back to the app to extend it. The link controls the desktop, so do not
+        share it.
+      </Text>
     </View>
   );
 }
