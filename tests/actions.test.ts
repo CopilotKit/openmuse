@@ -285,3 +285,40 @@ test("an expired stale review cannot overwrite a concurrently executing action",
   await approval;
   assert.equal(saved?.status, "executing");
 });
+
+test("a task cancelled between claim and execution never reaches the provider", async (t) => {
+  let calls = 0;
+  const service = new ActionService(db, {
+    execute: async () => {
+      calls++;
+      return "sent";
+    },
+    connected: async () => true,
+  });
+  const proposal = await service.propose("cancel-race", email, undefined, "task-1");
+  await db.put("cancel-race", "tasks", { id: "task-1", status: "running" });
+  const originalClaim = db.claim.bind(db);
+  let intercept = true;
+  t.mock.method(db, "claim", async (...args: Parameters<Store["claim"]>) => {
+    const result = await originalClaim(...args);
+    if (intercept && args[0] === "cancel-race") {
+      intercept = false;
+      // Inject the race: the task is cancelled after the claim commits, before execute runs.
+      await db.compareAndSwap(
+        "cancel-race",
+        "tasks",
+        "task-1",
+        { status: "running" },
+        { status: "cancelled" },
+      );
+    }
+    return result;
+  });
+  await assert.rejects(
+    service.decide("cancel-race", proposal.id, proposal.hash, "approve"),
+    /resume the task/i,
+  );
+  assert.equal(calls, 0);
+  const saved = await db.get<ActionProposal>("cancel-race", "actions", proposal.id);
+  assert.equal(saved?.status, "awaiting_review");
+});

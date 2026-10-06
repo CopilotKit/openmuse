@@ -3,6 +3,8 @@ import { z } from "zod";
 /** CSV amounts use positive expenses and negative income. No currency conversion is inferred. */
 export function analyzeSpending(csv: string) {
   if (csv.length > 500000) throw new Error("Import at most 500 KB of transaction CSV");
+  // Excel and many bank exports start a UTF-8 CSV with a byte order mark. It is not part of the first header.
+  if (csv.charCodeAt(0) === 0xfeff) csv = csv.slice(1);
   const rows: string[][] = [];
   let row: string[] = [],
     cell = "",
@@ -14,7 +16,19 @@ export function analyzeSpending(csv: string) {
         cell += '"';
         i++;
       } else if (!quoted && cell.length) throw new Error("Invalid quoted CSV field");
-      else quoted = !quoted;
+      else {
+        quoted = !quoted;
+        if (!quoted) {
+          const next = csv[i + 1];
+          if (
+            next !== undefined &&
+            next !== "," &&
+            next !== "\n" &&
+            !(next === "\r" && (csv[i + 2] === "\n" || csv[i + 2] === undefined))
+          )
+            throw new Error("Invalid quoted CSV field");
+        }
+      }
     } else if (!quoted && (c === "," || c === "\n" || c === undefined)) {
       row.push(cell.replace(/\r$/, ""));
       cell = "";
@@ -28,6 +42,12 @@ export function analyzeSpending(csv: string) {
   const header = rows.shift()?.map((v) => v.trim().toLowerCase());
   if (!header || !["date", "description", "amount", "category"].every((v) => header.includes(v)))
     throw new Error("CSV needs date,description,amount,category columns");
+  if (
+    ["date", "description", "amount", "category"].some(
+      (name) => header.indexOf(name) !== header.lastIndexOf(name),
+    )
+  )
+    throw new Error("CSV has a duplicate required column");
   if (!rows.length || rows.length > 5000)
     throw new Error("Import between 1 and 5,000 transactions");
   const transactions = rows.map((r, index) => {
