@@ -4,6 +4,7 @@ import {
   assertApiDeploymentConfig,
   browserWorkerUrl,
   type Config,
+  readConfig,
   shadowedEnvKeys,
 } from "../apps/server/src/config.ts";
 
@@ -52,6 +53,25 @@ test("every API mode accepts a non-empty Intelligence key", () => {
   }
 });
 
+test("web search is enabled by default with an explicit opt-out", (t) => {
+  const previous = { ...process.env };
+  t.after(() => {
+    process.env = previous;
+  });
+  process.env.WORKSPACE_MODE = "sample";
+  process.env.AGENT_BACKEND = "model";
+  process.env.HOST = "127.0.0.1";
+  process.env.CPK_INTELLIGENCE_API_KEY = "test-project-key-never-sent";
+  delete process.env.WEB_SEARCH_ENABLED;
+  assert.equal(readConfig().webSearchEnabled, true);
+  for (const value of ["true", "", "1", "TRUE"]) {
+    process.env.WEB_SEARCH_ENABLED = value;
+    assert.equal(readConfig().webSearchEnabled, true);
+  }
+  process.env.WEB_SEARCH_ENABLED = "false";
+  assert.equal(readConfig().webSearchEnabled, false);
+});
+
 test("Jev mode is off by default and validates explicit modes", async () => {
   const { readConfig } = await import("../apps/server/src/config.ts");
   const old = {
@@ -93,4 +113,41 @@ test("environment variables that override a different .env value are reported by
   const env = { OPENAI_API_KEY: "sk-proj-system", MODEL: "openai/gpt-5", EMPTY: "set" };
   assert.deepEqual(shadowedEnvKeys(file, env), ["OPENAI_API_KEY", "EMPTY"]);
   assert.deepEqual(shadowedEnvKeys(file, {}), []);
+});
+
+test("computer provider defaults to Docker and e2b-desktop requires a server-side key", async () => {
+  const { readConfig } = await import("../apps/server/src/config.ts");
+  const keys = [
+    "COMPUTER_PROVIDER",
+    "COMPUTER_ENABLED",
+    "E2B_API_KEY",
+    "COMPUTER_E2B_TEMPLATE",
+    "COMPUTER_DEPLOYMENT_ID",
+    "CPK_INTELLIGENCE_API_KEY",
+  ];
+  const old = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  try {
+    process.env.CPK_INTELLIGENCE_API_KEY = "test-project-key-never-sent";
+    for (const key of keys.slice(0, 5)) delete process.env[key];
+    assert.equal(readConfig().computerProvider, "docker");
+    process.env.COMPUTER_PROVIDER = "k8s";
+    assert.throws(() => readConfig(), /COMPUTER_PROVIDER/);
+    process.env.COMPUTER_PROVIDER = "e2b-desktop";
+    process.env.COMPUTER_ENABLED = "true";
+    process.env.E2B_API_KEY = " ";
+    assert.throws(() => readConfig(), /E2B_API_KEY/);
+    process.env.E2B_API_KEY = "fixture-key";
+    // A team-wide sandbox namespace needs an explicit, unique deployment id.
+    assert.throws(() => readConfig(), /COMPUTER_DEPLOYMENT_ID/);
+    process.env.COMPUTER_DEPLOYMENT_ID = "fixture-deployment";
+    const config = readConfig();
+    assert.equal(config.computerProvider, "e2b-desktop");
+    assert.equal(config.computerE2bTemplate, "desktop");
+    assert.equal(config.e2bApiKey, "fixture-key");
+  } finally {
+    for (const [key, value] of Object.entries(old)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });
