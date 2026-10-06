@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1191,5 +1192,50 @@ test("commands and files reuse the verified inspection instead of finding twice"
     await operation();
     assert.equal(f.calls.lists - lists, 1);
     assert.equal(f.calls.infos - infos, 1);
+  }
+});
+
+test("desktop command cannot bypass an interrupted receipt after lease validation", async () => {
+  const f = fake({ boxes: [{}] });
+  const { computer, owner } = service(f);
+  const cmdId = createHash("sha256").update("computer-command:desktop-dead-row-case").digest("hex");
+  const originalGet = db.get.bind(db);
+  let intercepted = false;
+  db.get = (async (o: string, kind: string, id: string) => {
+    if (!intercepted && kind === "computer-state" && id === "lease") {
+      const lease = await originalGet<{ token: string }>(o, kind, id);
+      const row = await originalGet(o, "computer-desktop-commands", cmdId);
+      if (lease && row) {
+        intercepted = true;
+        await db.compareAndSwap(
+          o,
+          "computer-desktop-commands",
+          cmdId,
+          { status: "running" },
+          {
+            status: "interrupted",
+            completedAt: new Date().toISOString(),
+            stderr:
+              "Execution was interrupted. Its outcome is unknown; inspect files before running it again.",
+          },
+        );
+      }
+    }
+    return originalGet(o, kind, id);
+  }) as Store["get"];
+  try {
+    const receipt = await computer.execute(
+      owner,
+      { command: "touch /workspace/should-not-run" },
+      { idempotencyKey: "desktop-dead-row-case" },
+    );
+    assert.equal(receipt.status, "interrupted");
+    assert.equal(f.calls.run.length, 0, "desktop command must not be dispatched");
+    assert.equal(
+      (await db.get<ComputerCommand>(owner, "computer-desktop-commands", cmdId))?.status,
+      "interrupted",
+    );
+  } finally {
+    db.get = originalGet;
   }
 });

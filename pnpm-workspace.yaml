@@ -15,7 +15,7 @@ minimumReleaseAgeExclude:
   - '@tanstack/openai-base@0.10.16'
 
 overrides:
-  'image-size': '2.0.3'
+  'image-size': '2.0.4'
 
 patchedDependencies:
   metro@0.83.3: patches/metro@0.83.3.patch

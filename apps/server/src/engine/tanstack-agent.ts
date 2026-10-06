@@ -15,7 +15,7 @@ import {
 } from "@tanstack/ai";
 import { type AnthropicChatModel, anthropicText } from "@tanstack/ai-anthropic";
 import { type GeminiTextModel, geminiText } from "@tanstack/ai-gemini";
-import { type OpenAIChatModel, openaiText } from "@tanstack/ai-openai";
+import { type OpenAIChatModel, openaiChatCompletions, openaiText } from "@tanstack/ai-openai";
 import { map, mergeMap, type Observable } from "rxjs";
 import { z } from "zod";
 import { MODEL_MAX_RETRIES } from "../config.ts";
@@ -31,6 +31,13 @@ function adapter(spec: string) {
   const id = model.trim();
   switch (provider.toLowerCase()) {
     case "openai":
+      // OpenAI-compatible endpoints that do not implement the Responses API
+      // tool loop (e.g. DeepSeek) can opt into the Chat Completions wire format.
+      if (process.env.OPENAI_CHAT_COMPLETIONS === "true")
+        return openaiChatCompletions(id as OpenAIChatModel, {
+          baseURL: process.env.OPENAI_BASE_URL,
+          maxRetries: MODEL_MAX_RETRIES,
+        });
       return openaiText(id as OpenAIChatModel, {
         baseURL: process.env.OPENAI_BASE_URL,
         maxRetries: MODEL_MAX_RETRIES,
@@ -109,6 +116,8 @@ export function tanstackAgent(options: {
   maxSteps: number;
   tools: ToolDefinition[];
   prompt: string;
+  /** Checked between model turns, after the current turn's tools have settled. */
+  shouldContinue?: () => boolean;
   /** Said when the step limit, not the model, ends a run; otherwise the reply just stops. */
   stepLimitNote?: string;
 }) {
@@ -142,7 +151,8 @@ export function tanstackAgent(options: {
             }).server((args) => (tool.execute as (args: unknown) => Promise<unknown>)(args)),
           ),
         ],
-        agentLoopStrategy: maxIterations(options.maxSteps),
+        agentLoopStrategy: (state) =>
+          maxIterations(options.maxSteps)(state) && (options.shouldContinue?.() ?? true),
         abortController,
       });
     },

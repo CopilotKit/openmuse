@@ -10,6 +10,7 @@ import {
 import { ArrowDown, ArrowUp, FileText, RotateCcw, Square, X } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -27,7 +28,13 @@ import { BackgroundUpdates } from "./background-updates";
 import { BrowserRunContext, BrowserToolCard } from "./browser-tool-card";
 import { BrowserThreadCard } from "./computer";
 import { ConversationQueue, type QueuedMessage } from "./conversation-queue";
-import { runConversationTurn } from "./conversation-run";
+import {
+  ConversationTurnError,
+  replayedRunError,
+  runConversationTurn,
+  showsRunError,
+  threadLocked,
+} from "./conversation-run";
 import { DesktopToolCard } from "./desktop-tool-card";
 import { confirmedJevSelection, displayJevUserMessage, latestJevPanelId } from "./jev-actions";
 import { JevInteractionContext, JevToolCard } from "./jev-tool-card";
@@ -221,6 +228,8 @@ export function ChatScreen({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
+  // Replayed messages show before connectAgent returns; new turns wait until it does.
+  const [syncing, setSyncing] = useState(false);
   const [picking, setPicking] = useState(false);
   const [attachments, setAttachments] = useState<string[]>([]);
   const list = useRef<ScrollView>(null);
@@ -235,11 +244,32 @@ export function ChatScreen({
   const [saveError, setSaveError] = useState("");
   const [historyError, setHistoryError] = useState("");
   const [historyAttempt, setHistoryAttempt] = useState(0);
+  // Loads still replaying history. A count, so an old load finishing does not end a newer one.
+  const replaying = useRef(0);
+  // Set while a queued message is being sent, so a lock refusal holds it instead of failing.
+  const queuedTurn = useRef(false);
+  const [keyboardPadding, setKeyboardPadding] = useState(0);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const onShow = (e: { endCoordinates: { height: number } }) => {
+      const bottomNavHeight = 74;
+      setKeyboardPadding(Math.max(0, e.endCoordinates.height - bottomNavHeight));
+    };
+    const onHide = () => setKeyboardPadding(0);
+    const showSub = Keyboard.addListener("keyboardDidShow", onShow);
+    const hideSub = Keyboard.addListener("keyboardDidHide", onHide);
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
   useEffect(() => {
     if (!isReady) return;
     let active = true;
     setHistoryError("");
     setLoaded(false);
+    setSyncing(false);
     const replay = agent.subscribe({
       onMessagesChanged: ({ messages }) => {
         if (active && richThreads && messages.length) setLoaded(true);
@@ -248,12 +278,24 @@ export function ChatScreen({
     async function hydrate() {
       try {
         if (richThreads) {
-          if (selection.existing)
-            await runConversationTurn(
-              agentId,
-              () => copilotkit.connectAgent({ agent }),
-              (onError) => copilotkit.subscribe({ onError }),
-            );
+          if (selection.existing) {
+            // Replaying history re-emits past RUN_ERROR events; only connection failures block loading.
+            // connectAgent returns once the thread is idle, so it also waits for a reply still
+            // running from before a reload. Sending earlier fails with a thread lock.
+            replaying.current += 1;
+            setSyncing(true);
+            try {
+              await runConversationTurn(
+                agentId,
+                () => copilotkit.connectAgent({ agent }),
+                (onError) => copilotkit.subscribe({ onError }),
+                [replayedRunError],
+              );
+            } finally {
+              replaying.current -= 1;
+              if (active) setSyncing(false);
+            }
+          }
         } else {
           const { messages } = await api.request<{ messages: Message[] }>("/api/conversation");
           if (active) agent.setMessages(messages);
@@ -279,11 +321,13 @@ export function ChatScreen({
     if (!richThreads) await api.request("/api/conversation", { messages: agent.messages }, "PUT");
     setSaveError("");
   }, [agent, api, richThreads]);
+  /** Runs one turn; "held" means a queued message was refused by a lock and put back on hold. */
   const run = useCallback(
-    async (message?: QueuedMessage) => {
-      if (runLock.current || agent.isRunning || !isReady || !loaded)
+    async (message?: QueuedMessage): Promise<"held" | undefined> => {
+      if (runLock.current || agent.isRunning || !isReady || !loaded || syncing)
         throw new Error("The conversation is not ready yet.");
       runLock.current = true;
+      queuedTurn.current = Boolean(message);
       setBusy(true);
       setError("");
       if (message) agent.addMessage({ id: message.id, role: "user", content: message.text });
@@ -294,7 +338,18 @@ export function ChatScreen({
           (onError) => copilotkit.subscribe({ onError }),
         );
         await Promise.all([refresh(), refreshAgent()]);
+      } catch (e) {
+        if (message && e instanceof ConversationTurnError && e.code === threadLocked) {
+          // The server refused the turn before running it (another reply holds the thread),
+          // so keep the message unsent and on hold instead of reporting a failed turn.
+          agent.setMessages(agent.messages.filter((m) => m.id !== message.id));
+          queue.restore(message);
+          queue.pause();
+          return "held";
+        }
+        throw e;
       } finally {
+        queuedTurn.current = false;
         try {
           await saveHistory();
         } catch (e) {
@@ -308,26 +363,39 @@ export function ChatScreen({
         }
       }
     },
-    [agent, agentId, copilotkit, isReady, loaded, refresh, refreshAgent, saveHistory, queue],
+    [
+      agent,
+      agentId,
+      copilotkit,
+      isReady,
+      loaded,
+      syncing,
+      refresh,
+      refreshAgent,
+      saveHistory,
+      queue,
+    ],
   );
   const runQueued = useCallback(
     async (message: QueuedMessage) => {
+      let held = false;
       try {
-        await run(message);
-        choiceCompletions.current.get(message.id)?.resolve();
+        held = (await run(message)) === "held";
+        if (!held) choiceCompletions.current.get(message.id)?.resolve();
       } catch (error) {
         choiceCompletions.current.get(message.id)?.reject(error);
         throw error;
       } finally {
-        choiceCompletions.current.delete(message.id);
+        // A held message is sent again later; its choice settles then.
+        if (!held) choiceCompletions.current.delete(message.id);
       }
     },
     [run],
   );
   const flush = useCallback(() => {
-    if (!loaded || !isReady || runLock.current || agent.isRunning) return;
+    if (!loaded || syncing || !isReady || runLock.current || agent.isRunning) return;
     void queue.flush(runQueued).catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, [agent, isReady, loaded, queue, runQueued]);
+  }, [agent, isReady, loaded, syncing, queue, runQueued]);
   const enqueue = useCallback(
     (text: string) => {
       queue.enqueue({ id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, text });
@@ -370,6 +438,8 @@ export function ChatScreen({
     const subscription = copilotkit.subscribe({
       onError: (event) => {
         if (event.context?.agentId && event.context.agentId !== agentId) return;
+        const during = { replaying: replaying.current > 0, queuedTurn: queuedTurn.current };
+        if (!showsRunError(event, during)) return;
         const failure = event.error instanceof Error ? event.error : new Error(String(event.error));
         setError(failure.message);
       },
@@ -671,7 +741,7 @@ export function ChatScreen({
           <Button
             style={{ alignSelf: "flex-start" }}
             icon={RotateCcw}
-            disabled={busy || agent.isRunning || !loaded || !isReady}
+            disabled={busy || agent.isRunning || !loaded || syncing || !isReady}
             onPress={() => {
               void run()
                 .then(() => {
@@ -698,7 +768,10 @@ export function ChatScreen({
           Latest messages
         </Button>
       )}
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={keyboardPadding > 0 ? { paddingBottom: keyboardPadding } : undefined}
+      >
         <ErrorNotice error={saveError} />
         {!!saveError && (
           <Button

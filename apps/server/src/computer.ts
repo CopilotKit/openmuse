@@ -459,13 +459,30 @@ export class ComputerService {
           active.token !== lease.token ||
           active.stopping ||
           active.expiresAt <= Date.now()
-        )
-          return this.db.put(owner, this.receipts, {
+        ) {
+          const stopped: ComputerCommand = {
             ...command,
             status: "interrupted",
             stderr: "Stopped before execution",
             completedAt: new Date().toISOString(),
-          });
+          };
+          const preserved = await this.db.compareAndSwap<ComputerCommand>(
+            owner,
+            this.receipts,
+            id,
+            { status: "running" },
+            {
+              status: "interrupted",
+              stderr: stopped.stderr,
+              completedAt: stopped.completedAt,
+            },
+          );
+          return (
+            preserved ?? (await this.db.get<ComputerCommand>(owner, this.receipts, id)) ?? stopped
+          );
+        }
+        const receipt = await this.db.get<ComputerCommand>(owner, this.receipts, id);
+        if (receipt && receipt.status !== "running") return receipt;
         let result: DockerResult;
         try {
           result = await session.exec(args.command, cwd, options.signal);

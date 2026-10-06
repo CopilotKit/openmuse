@@ -3,6 +3,7 @@ import { type DefaultTreeAdapterMap, parseFragment } from "parse5";
 import { z } from "zod";
 import {
   type CalendarEvent,
+  calendarRangeSchema,
   type EmailDraft,
   type EventDraft,
   emailDraftSchema,
@@ -145,8 +146,9 @@ function headers(part?: GmailPart): Map<string, string> {
   return new Map((part?.headers ?? []).map(({ name, value }) => [name.toLowerCase(), value]));
 }
 function decodeHeader(value: string): string {
+  // RFC 2047: ignore linear whitespace, including folding, between encoded words.
   return value
-    .replace(/(\?=)[ \t]+(?==\?)/g, "$1")
+    .replace(/(\?=)(?:[ \t]|\r\n[ \t])+(?==\?)/g, "$1")
     .replace(
       /=\?([^?]+)\?([bq])\?([^?]*)\?=/gi,
       (original, charset: string, encoding: string, text: string) => {
@@ -162,7 +164,7 @@ function decodeHeader(value: string): string {
                     ),
                   "latin1",
                 );
-          return new TextDecoder(charset).decode(bytes);
+          return new TextDecoder(charset.split("*")[0]).decode(bytes);
         } catch {
           return original;
         }
@@ -191,7 +193,13 @@ function decodeSnippet(value: string): string {
   );
 }
 function addresses(value: string): string[] {
-  return value.match(/[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+/g) ?? [];
+  // A quoted display name may itself contain an e-mail-looking string; only
+  // addresses outside display names count.
+  return (
+    value
+      .replace(/"(?:[^"\\]|\\.)*"\s*(?=<)/g, " ")
+      .match(/[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+/g) ?? []
+  );
 }
 /** Extract text from a parsed HTML tree. Nothing is rendered or fetched. */
 function htmlToPlainText(html: string): string {
@@ -296,12 +304,16 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
   const attachments: string[] = [];
   const visit = (part: GmailPart, depth: number) => {
     if (depth > 30) throw new Error("Gmail message MIME nesting exceeds the limit");
+    // Attachments carry their own content (or an attached message); never merge
+    // their parts into the parent text. A remote body has no filename: it is
+    // hydrated above and still counts as message text.
+    const attached = Boolean(part.filename) || part.mimeType === "message/rfc822";
     if (part.filename && part.body?.attachmentId)
       attachments.push(
         `${message.id}:${part.body.attachmentId}:${encodeURIComponent(wellFormed(part.filename))}`,
       );
     if (
-      !part.filename &&
+      !attached &&
       (part.mimeType === "text/plain" || part.mimeType === "text/html") &&
       part.body?.data
     ) {
@@ -313,14 +325,15 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
       if (part.mimeType === "text/plain") plain.push(text);
       else html.push(htmlToPlainText(text));
     }
-    for (const child of part.parts ?? []) visit(child, depth + 1);
+    if (!attached) for (const child of part.parts ?? []) visit(child, depth + 1);
   };
   if (message.payload) visit(message.payload, 0);
   const from = decodeHeader(metadata.get("from") ?? "");
   const address = addresses(from)[0] ?? from;
-  const sender = from.includes("<")
+  const displayName = from.includes("<")
     ? from.slice(0, from.indexOf("<")).trim().replace(/^"|"$/g, "")
-    : address;
+    : "";
+  const sender = displayName || address;
   const time = message.internalDate
     ? Number(message.internalDate)
     : Date.parse(metadata.get("date") ?? "");
@@ -500,7 +513,8 @@ export class GoogleClient {
                 id: z.string().min(1),
                 summary: z.string().default("(Untitled calendar)"),
                 summaryOverride: z.string().optional(),
-                timeZone: z.string(),
+                // Google marks the calendar time zone as optional.
+                timeZone: z.string().default("UTC"),
                 accessRole: z.string(),
               }),
             )
@@ -552,7 +566,8 @@ export class GoogleClient {
     const timeZone =
       current.start.timeZone ??
       z
-        .object({ timeZone: z.string().min(1) })
+        // Google marks the calendar time zone as optional.
+        .object({ timeZone: z.string().min(1).default("UTC") })
         .parse(
           await this.request(`${CALENDAR}/users/me/calendarList/${encodeURIComponent(calendarId)}`),
         ).timeZone;
@@ -644,6 +659,11 @@ export class GoogleClient {
 
   /** At most 100 occurrences in a bounded window, beginning at local midnight by default. */
   async listEvents(options: ListEventsOptions = {}): Promise<CalendarEvent[]> {
+    return (await this.listEventsPage(options)).events;
+  }
+
+  /** Retain the provider's completeness marker without fetching additional pages. */
+  async listEventsPage(options: ListEventsOptions = {}) {
     const calendarId = options.calendarId ?? "primary";
     const path = calendarPath(calendarId);
     const midnight = new Date();
@@ -656,9 +676,7 @@ export class GoogleClient {
       options.timeMax ?? new Date(Date.parse(timeMin) + 31 * 24 * 60 * 60 * 1000).toISOString();
     if (!timestamp.safeParse(timeMax).success)
       throw new Error("Invalid calendar timeMax: use a date-time with an explicit offset");
-    const duration = Date.parse(timeMax) - Date.parse(timeMin);
-    if (duration <= 0 || duration > 366 * 24 * 60 * 60 * 1000)
-      throw new Error("Calendar range must end after it starts and span at most 366 days");
+    calendarRangeSchema.parse({ timeMin, timeMax });
     const params = new URLSearchParams({
       maxResults: "100",
       singleEvents: "true",
@@ -667,9 +685,16 @@ export class GoogleClient {
       timeMax,
     });
     const result = z
-      .object({ items: z.array(z.unknown()).default([]), timeZone: z.string().default("UTC") })
+      .object({
+        items: z.array(z.unknown()).default([]),
+        timeZone: z.string().default("UTC"),
+        nextPageToken: z.string().min(1).optional(),
+      })
       .parse(await this.request(`${path}?${params}`));
-    return result.items.slice(0, 100).map((item) => mapEvent(item, calendarId, result.timeZone));
+    return {
+      events: result.items.slice(0, 100).map((item) => mapEvent(item, calendarId, result.timeZone)),
+      truncated: Boolean(result.nextPageToken) || result.items.length > 100,
+    };
   }
 
   async getAttachment(messageId: string, attachmentId: string): Promise<Uint8Array> {
