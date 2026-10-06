@@ -477,7 +477,9 @@ export class ComputerService {
               completedAt: stopped.completedAt,
             },
           );
-          return preserved ?? (await this.db.get<ComputerCommand>(owner, this.receipts, id)) ?? stopped;
+          return (
+            preserved ?? (await this.db.get<ComputerCommand>(owner, this.receipts, id)) ?? stopped
+          );
         }
         const receipt = await this.db.get<ComputerCommand>(owner, this.receipts, id);
         if (receipt && receipt.status !== "running") return receipt;
