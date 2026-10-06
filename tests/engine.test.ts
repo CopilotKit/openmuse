@@ -168,6 +168,37 @@ test("pending reviews do not starve queued work", async () => {
     await db.close();
   }
 });
+test("a long-running task does not starve queued work", async () => {
+  const db = await createStore();
+  let finish: () => void = () => {};
+  const finished = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  let started: () => void = () => {};
+  const running = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const worker = new TaskWorker(db, async (_owner, current) => {
+    if (current.id === "long") {
+      started();
+      await finished;
+    }
+    return { status: "succeeded" };
+  });
+  await db.put("owner", "tasks", task("long"));
+  const first = worker.tick();
+  try {
+    await running;
+    await db.put("owner", "tasks", task("ready"));
+    await worker.tick();
+    assert.equal((await db.get<AgentTask>("owner", "tasks", "ready"))?.status, "succeeded");
+    assert.equal((await db.get<AgentTask>("owner", "tasks", "long"))?.status, "running");
+  } finally {
+    finish();
+    await first;
+    await db.close();
+  }
+});
 test("run history keeps the time the run started", async () => {
   const db = await createStore();
   try {
