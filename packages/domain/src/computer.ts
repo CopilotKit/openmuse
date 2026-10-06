@@ -1,6 +1,8 @@
 export interface ComputerCommand {
   id: string;
   command: string;
+  /** Full input binding for keyed desktop actions; command is only a short display label. */
+  actionHash?: string;
   cwd: string;
   status: "running" | "succeeded" | "failed" | "timed_out" | "interrupted";
   exitCode?: number;
@@ -12,10 +14,11 @@ export interface ComputerCommand {
 }
 export interface ComputerSnapshot {
   enabled: boolean;
-  provider: "docker";
+  provider: "docker" | "e2b-desktop";
   status: "unconfigured" | "stopped" | "running" | "error";
   workspacePath: "/workspace";
-  network: "disabled";
+  /** Docker runs with networking off; the E2B desktop needs internet for its GUI browser. */
+  network: "disabled" | "enabled";
   message?: string;
   commands: ComputerCommand[];
 }

@@ -23,8 +23,9 @@ if (existsSync(".env")) {
           : "Unset them to use the .env values."),
     );
 }
-process.env.DO_NOT_TRACK ??= "1";
-process.env.COPILOTKIT_TELEMETRY_DISABLED ??= "true";
+// Capture the full setup/activation funnel while preserving explicit SDK opt-outs
+// and any deployment-specific sampling rate. Config loads before runtime imports.
+process.env.COPILOTKIT_TELEMETRY_SAMPLE_RATE ??= "1";
 
 export interface Config {
   mode: "sample" | "live";
@@ -49,11 +50,17 @@ export interface Config {
   workerUrl?: string;
   workerToken?: string;
   taskWorkerEnabled?: boolean;
+  webSearchEnabled?: boolean;
   computerEnabled?: boolean;
   computerImage?: string;
   computerDeploymentId?: string;
+  computerProvider?: ComputerProvider;
+  computerE2bTemplate?: string;
+  e2bApiKey?: string;
   allowedOrigins: string[];
 }
+
+export type ComputerProvider = "docker" | "e2b-desktop";
 
 /** Pinned so live rankings do not shift when TypeSafe moves the `jev-latest` alias. */
 export const defaultJevModel = "jev-1.13.0";
@@ -109,6 +116,20 @@ export function readConfig(): Config {
   const typesafeApiKey = process.env.TYPESAFE_API_KEY?.trim();
   if (jevMode === "live" && !typesafeApiKey)
     throw new Error("JEV_MODE=live requires a nonblank TYPESAFE_API_KEY");
+  const computerProvider = process.env.COMPUTER_PROVIDER?.trim() || "docker";
+  if (computerProvider !== "docker" && computerProvider !== "e2b-desktop")
+    throw new Error("COMPUTER_PROVIDER must be docker or e2b-desktop");
+  const e2bApiKey = process.env.E2B_API_KEY?.trim();
+  if (process.env.COMPUTER_ENABLED === "true" && computerProvider === "e2b-desktop") {
+    if (!e2bApiKey)
+      throw new Error("COMPUTER_PROVIDER=e2b-desktop requires a nonblank E2B_API_KEY");
+    // Sandboxes are matched by metadata across the whole E2B team, and every default
+    // install would otherwise derive the same deployment label from localhost:8787.
+    if (!process.env.COMPUTER_DEPLOYMENT_ID?.trim())
+      throw new Error(
+        "COMPUTER_PROVIDER=e2b-desktop requires a unique COMPUTER_DEPLOYMENT_ID, e.g. from `openssl rand -hex 12`",
+      );
+  }
   const port = Number(process.env.PORT ?? 8787);
   const publicUrl = process.env.PUBLIC_API_URL ?? `http://localhost:${port}`;
   const config: Config = {
@@ -134,9 +155,13 @@ export function readConfig(): Config {
     workerUrl: browserWorkerUrl(process.env.BROWSER_WORKER_URL),
     workerToken: process.env.WORKER_TOKEN,
     taskWorkerEnabled: process.env.TASK_WORKER_ENABLED !== "false",
+    webSearchEnabled: process.env.WEB_SEARCH_ENABLED !== "false",
     computerEnabled: process.env.COMPUTER_ENABLED === "true",
     computerImage: process.env.COMPUTER_IMAGE ?? "openmuse-computer:local",
     computerDeploymentId: process.env.COMPUTER_DEPLOYMENT_ID,
+    computerProvider,
+    computerE2bTemplate: process.env.COMPUTER_E2B_TEMPLATE?.trim() || "desktop",
+    e2bApiKey,
     allowedOrigins: (
       process.env.ALLOWED_ORIGINS ?? "http://localhost:8081,http://127.0.0.1:8081"
     ).split(","),
