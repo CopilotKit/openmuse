@@ -182,11 +182,14 @@ export class AgentService {
   }
   async createTask(owner: string, raw: unknown, idempotencyKey?: string, held = false) {
     const input = createTaskSchema.parse(raw);
-    if (input.goalId && !(await this.db.get(owner, "goals", input.goalId)))
-      throw new AppError("Goal not found", 404);
     const id = idempotencyKey ? hash(`task:${idempotencyKey}`) : randomUUID();
     const existing = await this.db.get<AgentTask>(owner, "tasks", id);
     if (existing) return existing;
+    if (input.milestoneId && !input.goalId) throw new AppError("A milestone requires a goal", 422);
+    const goal = input.goalId ? await this.db.get<Goal>(owner, "goals", input.goalId) : null;
+    if (input.goalId && !goal) throw new AppError("Goal not found", 404);
+    if (input.milestoneId && !goal?.milestones.some((m) => m.id === input.milestoneId))
+      throw new AppError("Milestone not found in this goal", 404);
     if (
       (await this.db.list<AgentTask>(owner, "tasks")).filter((t) => !terminal.has(t.status))
         .length >= 100
@@ -212,7 +215,8 @@ export class AgentService {
       prompt: input.prompt,
       kind: input.kind,
       goalId: input.goalId,
-      status: held ? "paused" : "queued",
+      milestoneId: input.milestoneId,
+      status: held || goal?.status === "paused" ? "paused" : "queued",
       plan: titles.map((title, i) => ({ id: String(i), title, status: "pending" })),
       evidence: [],
       input: input.input,
@@ -352,13 +356,17 @@ export class AgentService {
     id: string,
     patch: { status?: Goal["status"]; milestones?: Goal["milestones"] },
   ) {
-    const goal = await this.db.get<Goal>(owner, "goals", id);
-    if (!goal) throw new AppError("Goal not found", 404);
-    const saved = await this.db.put(owner, "goals", { ...goal, ...patch });
+    const saved = await this.db.compareAndSwap<Goal>(owner, "goals", id, {}, patch);
+    if (!saved) throw new AppError("Goal not found", 404);
     if (patch.status === "paused")
       for (const task of await this.db.list<AgentTask>(owner, "tasks"))
         if (task.goalId === id && !terminal.has(task.status) && task.status !== "paused")
           await this.control(owner, task.id, "pause");
+    return saved;
+  }
+  async setMilestoneDone(owner: string, goalId: string, milestoneId: string, done: boolean) {
+    const saved = await this.db.setMilestoneDone<Goal>(owner, goalId, milestoneId, done);
+    if (!saved) throw new AppError("Goal or milestone not found", 404);
     return saved;
   }
   async createMonitor(owner: string, raw: unknown, idempotencyKey?: string) {
@@ -437,14 +445,16 @@ export class AgentService {
       throw new AppError("Create a new watch to restart this stopped monitor", 409);
     if (action === "pause" || action === "stop") {
       const status = action === "pause" ? "paused" : "stopped";
-      const saved = await this.db.put(owner, "monitors", {
-        ...monitor,
-        status,
-        nextCheckAt: date(),
-      });
+      const saved = await this.db.compareAndSwap<Monitor>(
+        owner,
+        "monitors",
+        id,
+        {},
+        { status, nextCheckAt: date() },
+      );
       const task = await this.getTask(owner, monitor.taskId);
       await this.control(owner, task.id, action === "pause" ? "pause" : "cancel");
-      return saved;
+      return saved ?? monitor;
     }
     let monitorStatus = monitor.status;
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -656,11 +666,16 @@ export class AgentService {
       if (idea?.status !== "accepted") return idea;
     }
     if (idea.taskId && (await this.db.get(owner, "tasks", idea.taskId))) return idea;
-    const goal = await this.createGoal(
-      owner,
-      { title: idea.title, description: idea.reason },
-      hash(`idea-goal:${id}`),
-    );
+    const goalId =
+      typeof idea.input.goalId === "string"
+        ? idea.input.goalId
+        : (
+            await this.createGoal(
+              owner,
+              { title: idea.title, description: idea.reason },
+              hash(`idea-goal:${id}`),
+            )
+          ).id;
     const task = await this.createTask(
       owner,
       {
@@ -668,7 +683,7 @@ export class AgentService {
         prompt: idea.prompt,
         kind: idea.kind,
         input: idea.input,
-        goalId: goal.id,
+        goalId,
       },
       `idea:${id}`,
     );
@@ -873,7 +888,7 @@ export class AgentService {
         task.id,
         `task-done:${task.id}`,
       );
-      if (task.goalId) {
+      if (task.goalId && !task.milestoneId) {
         for (let attempt = 0; attempt < 8; attempt++) {
           const goal = await this.db.get<Goal>(owner, "goals", task.goalId);
           if (!goal || goal.milestones.some((m) => m.id === task.id)) break;
@@ -986,7 +1001,7 @@ export class AgentService {
     let filledId = typeof task.state.filledId === "string" ? task.state.filledId : undefined;
     if (!filledId) {
       await ctx.guard();
-      const filled = await this.files.fill(owner, source.fileId, fields);
+      const filled = await this.files.fill(owner, source.fileId, fields, `document:${task.id}`);
       filledId = filled.id;
       task = await ctx.checkpoint({
         state: { ...task.state, source, filledId },
@@ -1062,11 +1077,11 @@ export class AgentService {
           : this.matchesPrice(text, Number(monitor.value));
     const previouslyMatched = Boolean(task.state.matched);
     const shouldNotify = matched && (monitor.condition === "change" || !previouslyMatched);
-    // A condition becoming true again is a new event, even with identical page text.
-    // Commit its sequence with the outcome so publication retries still deduplicate.
-    const alertSequence =
-      Number(task.state.alertSequence ?? 0) +
-      (shouldNotify && monitor.condition !== "change" ? 1 : 0);
+    // A notification-worthy observation is a new event, even when the page text is
+    // identical to an earlier one (a change back to a seen state, or a condition that
+    // cleared and reappeared). Commit its sequence with the outcome so publication
+    // retries still deduplicate on the same saved notice key.
+    const alertSequence = Number(task.state.alertSequence ?? 0) + (shouldNotify ? 1 : 0);
     const nextCheckAt = new Date(Date.now() + monitor.intervalMinutes * 60000).toISOString();
     await ctx.guard();
     // Worker lease is checked before each publication; monitor control also invalidates that lease.
@@ -1112,10 +1127,7 @@ export class AgentService {
           ? {
               title: monitor.title,
               body: `Condition met at ${observation.url}: ${text.slice(0, 240)}`,
-              key:
-                monitor.condition === "change"
-                  ? `monitor:${monitor.id}:${currentHash}`
-                  : `monitor:${monitor.id}:${alertSequence}:${currentHash}`,
+              key: `monitor:${monitor.id}:${alertSequence}:${currentHash}`,
             }
           : null,
       },
