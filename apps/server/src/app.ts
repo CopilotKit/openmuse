@@ -24,6 +24,7 @@ import { AgentService } from "./engine/service.ts";
 import { AppError } from "./errors.ts";
 import { Files } from "./files.ts";
 import { GoogleAuth } from "./google-auth.ts";
+import { rateLimit } from "./rate-limit.ts";
 import { WorkspaceService } from "./workspace.ts";
 
 export async function createApp(
@@ -74,6 +75,7 @@ export async function createApp(
       onError: (c) => c.json({ error: "Request is too large; PDFs must be 10 MB or smaller" }, 413),
     }),
   );
+  app.use("/api/*", rateLimit(Boolean(config.trustProxy)));
   app.onError((error, c) => {
     if (error instanceof z.ZodError)
       return c.json({ error: error.issues.map((i) => i.message).join("; ") }, 422);

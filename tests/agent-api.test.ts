@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, before, test } from "node:test";
+import { after, before, beforeEach, test } from "node:test";
 import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import { createApp } from "../apps/server/src/app.ts";
 import type { Config } from "../apps/server/src/config.ts";
@@ -54,6 +54,12 @@ before(async () => {
   });
   assert.equal(session.status, 200);
   token = (await session.json()).token;
+});
+beforeEach(async () => {
+  // Keep persisted fixtures and the session, but give each independent test its
+  // own app middleware state, including the per-connection request budget.
+  await server.agent.stop();
+  server = await createApp(db, config);
 });
 after(async () => {
   await server?.agent?.stop();

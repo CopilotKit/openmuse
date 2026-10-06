@@ -454,14 +454,16 @@ export class AgentService {
       throw new AppError("Create a new watch to restart this stopped monitor", 409);
     if (action === "pause" || action === "stop") {
       const status = action === "pause" ? "paused" : "stopped";
-      const saved = await this.db.put(owner, "monitors", {
-        ...monitor,
-        status,
-        nextCheckAt: date(),
-      });
+      const saved = await this.db.compareAndSwap<Monitor>(
+        owner,
+        "monitors",
+        id,
+        {},
+        { status, nextCheckAt: date() },
+      );
       const task = await this.getTask(owner, monitor.taskId);
       await this.control(owner, task.id, action === "pause" ? "pause" : "cancel");
-      return saved;
+      return saved ?? monitor;
     }
     let monitorStatus = monitor.status;
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -1180,7 +1182,7 @@ export class AgentService {
     };
   }
   private matchesPrice(text: string, threshold: number) {
-    const matches = [...text.matchAll(/(?:\$|USD\s*)(\d+(?:,\d{3})*(?:\.\d{1,2})?)/g)];
+    const matches = [...text.matchAll(/(?:\$|USD)\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)/g)];
     return matches.some((m) => Number(m[1].replace(/,/g, "")) < threshold);
   }
 }

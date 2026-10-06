@@ -703,3 +703,41 @@ test("a second observe from a stale snapshot loses its monitor commit instead of
   // The loser's commit was rejected: exactly one increment landed.
   assert.equal((await db.get<Monitor>(owner, "monitors", monitor.id))?.checks, 2);
 });
+
+test("pausing a watch preserves a concurrent observe() commit", async () => {
+  const monitor = await createMonitor("Pause during observe");
+  // Simulate an observe() committing between the pause request's read and its
+  // write: the pause must move only the control fields, never clobber the commit.
+  const stale = (await db.get<Monitor>(owner, "monitors", monitor.id)) as Monitor;
+  await db.compareAndSwap(
+    owner,
+    "monitors",
+    monitor.id,
+    {},
+    {
+      checks: 41,
+      lastCheckedAt: new Date().toISOString(),
+      lastHash: "deadbeef",
+      lastValue: "committed value",
+    },
+  );
+  const originalGet: Store["get"] = db.get.bind(db);
+  let served = false;
+  db.get = (async (o: string, kind: string, key: string) => {
+    if (!served && kind === "monitors" && key === monitor.id) {
+      served = true;
+      return stale;
+    }
+    return originalGet(o, kind, key);
+  }) as Store["get"];
+  try {
+    await read<Monitor>(`/monitors/${monitor.id}/control`, { action: "pause" });
+  } finally {
+    db.get = originalGet;
+  }
+  const after = (await db.get<Monitor>(owner, "monitors", monitor.id)) as Monitor;
+  assert.equal(after.status, "paused");
+  assert.equal(after.checks, 41);
+  assert.equal(after.lastHash, "deadbeef");
+  assert.equal(after.lastValue, "committed value");
+});

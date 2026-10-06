@@ -146,8 +146,9 @@ function headers(part?: GmailPart): Map<string, string> {
   return new Map((part?.headers ?? []).map(({ name, value }) => [name.toLowerCase(), value]));
 }
 function decodeHeader(value: string): string {
+  // RFC 2047: ignore linear whitespace, including folding, between encoded words.
   return value
-    .replace(/(\?=)[ \t]+(?==\?)/g, "$1")
+    .replace(/(\?=)(?:[ \t]|\r\n[ \t])+(?==\?)/g, "$1")
     .replace(
       /=\?([^?]+)\?([bq])\?([^?]*)\?=/gi,
       (original, charset: string, encoding: string, text: string) => {
@@ -501,7 +502,8 @@ export class GoogleClient {
                 id: z.string().min(1),
                 summary: z.string().default("(Untitled calendar)"),
                 summaryOverride: z.string().optional(),
-                timeZone: z.string(),
+                // Google marks the calendar time zone as optional.
+                timeZone: z.string().default("UTC"),
                 accessRole: z.string(),
               }),
             )
@@ -553,7 +555,8 @@ export class GoogleClient {
     const timeZone =
       current.start.timeZone ??
       z
-        .object({ timeZone: z.string().min(1) })
+        // Google marks the calendar time zone as optional.
+        .object({ timeZone: z.string().min(1).default("UTC") })
         .parse(
           await this.request(`${CALENDAR}/users/me/calendarList/${encodeURIComponent(calendarId)}`),
         ).timeZone;
