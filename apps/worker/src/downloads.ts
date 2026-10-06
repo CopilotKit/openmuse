@@ -36,10 +36,19 @@ export async function readDownloadFailures(directory: string, recoverInterrupted
     const path = join(folder, name);
     const outcome = JSON.parse(await readFile(path, "utf8")) as Outcome;
     if (outcome.status === "pending" && recoverInterrupted) {
-      if (await stat(join(directory, "downloads", `${outcome.id}.json`)).catch(() => null)) {
+      const metadata = await stat(join(directory, "downloads", `${outcome.id}.json`)).catch(
+        (error: unknown) => {
+          if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+          throw error;
+        },
+      );
+      if (metadata) {
         await rm(path, { force: true });
         continue;
       }
+      // Clear unpublished files first so an incomplete cleanup can be retried.
+      await rm(join(directory, "downloads", `${outcome.id}.pdf`), { force: true });
+      await rm(join(directory, "downloads", `${outcome.id}.json.tmp`), { force: true });
       outcome.status = "failed";
       await persist(path, outcome);
     }

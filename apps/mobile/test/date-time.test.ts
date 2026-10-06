@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isCompleteInstant, localDateTime, zonedInstant } from "../src/date-time.ts";
+import {
+  isCompleteInstant,
+  localDateTime,
+  startOfZonedDay,
+  zonedInstant,
+} from "../src/date-time.ts";
 
 test("calendar time is rendered and entered in the selected named zone", () => {
   assert.deepEqual(localDateTime("2026-09-15T17:30:00Z", "America/Los_Angeles"), {
@@ -25,6 +30,14 @@ test("a daylight-saving gap cannot become a different appointment time", () => {
     zonedInstant("2026-03-08", "03:30", "America/Los_Angeles"),
     "2026-03-08T10:30:00.000Z",
   );
+});
+
+test("a day boundary clamps to the first existing local time instead of failing", () => {
+  // America/Santiago springs forward 00:00→01:00 on 2026-09-06.
+  assert.equal(startOfZonedDay("2026-09-06", "America/Santiago"), "2026-09-06T04:00:00.000Z");
+  // Ordinary days still start exactly at midnight (Santiago is UTC-3 after the transition).
+  assert.equal(startOfZonedDay("2026-09-07", "America/Santiago"), "2026-09-07T03:00:00.000Z");
+  assert.equal(startOfZonedDay("2026-09-15", "UTC"), "2026-09-15T00:00:00.000Z");
 });
 
 test("partial native date edits never normalize from Date.parse", () => {

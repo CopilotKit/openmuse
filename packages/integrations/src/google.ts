@@ -3,6 +3,7 @@ import { type DefaultTreeAdapterMap, parseFragment } from "parse5";
 import { z } from "zod";
 import {
   type CalendarEvent,
+  calendarRangeSchema,
   type EmailDraft,
   type EventDraft,
   emailDraftSchema,
@@ -270,6 +271,25 @@ function htmlToPlainText(html: string): string {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
+/** UTF-8 when the declared charset is not one TextDecoder knows (`unknown-8bit`, `utf-7`). */
+function decoderFor(charset: string): TextDecoder {
+  try {
+    return new TextDecoder(charset);
+  } catch {
+    return new TextDecoder();
+  }
+}
+/**
+ * Replace unpaired surrogates with U+FFFD so encodeURIComponent cannot throw "URI
+ * malformed" on a sender-supplied name. (String.prototype.toWellFormed, but the
+ * project targets ES2023.)
+ */
+const wellFormed = (value: string): string =>
+  value.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    "\uFFFD",
+  );
+
 function mapMessage(message: z.infer<typeof messageSchema>): Mail {
   const metadata = headers(message.payload);
   const plain: string[] = [];
@@ -279,7 +299,7 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
     if (depth > 30) throw new Error("Gmail message MIME nesting exceeds the limit");
     if (part.filename && part.body?.attachmentId)
       attachments.push(
-        `${message.id}:${part.body.attachmentId}:${encodeURIComponent(part.filename)}`,
+        `${message.id}:${part.body.attachmentId}:${encodeURIComponent(wellFormed(part.filename))}`,
       );
     if (
       !part.filename &&
@@ -290,7 +310,7 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
         headers(part)
           .get("content-type")
           ?.match(/charset=["']?([^;"'\s]+)/i)?.[1] ?? "utf-8";
-      const text = new TextDecoder(charset).decode(decodeBase64url(part.body.data, 1024 * 1024));
+      const text = decoderFor(charset).decode(decodeBase64url(part.body.data, 1024 * 1024));
       if (part.mimeType === "text/plain") plain.push(text);
       else html.push(htmlToPlainText(text));
     }
@@ -625,6 +645,11 @@ export class GoogleClient {
 
   /** At most 100 occurrences in a bounded window, beginning at local midnight by default. */
   async listEvents(options: ListEventsOptions = {}): Promise<CalendarEvent[]> {
+    return (await this.listEventsPage(options)).events;
+  }
+
+  /** Retain the provider's completeness marker without fetching additional pages. */
+  async listEventsPage(options: ListEventsOptions = {}) {
     const calendarId = options.calendarId ?? "primary";
     const path = calendarPath(calendarId);
     const midnight = new Date();
@@ -637,9 +662,7 @@ export class GoogleClient {
       options.timeMax ?? new Date(Date.parse(timeMin) + 31 * 24 * 60 * 60 * 1000).toISOString();
     if (!timestamp.safeParse(timeMax).success)
       throw new Error("Invalid calendar timeMax: use a date-time with an explicit offset");
-    const duration = Date.parse(timeMax) - Date.parse(timeMin);
-    if (duration <= 0 || duration > 366 * 24 * 60 * 60 * 1000)
-      throw new Error("Calendar range must end after it starts and span at most 366 days");
+    calendarRangeSchema.parse({ timeMin, timeMax });
     const params = new URLSearchParams({
       maxResults: "100",
       singleEvents: "true",
@@ -648,9 +671,16 @@ export class GoogleClient {
       timeMax,
     });
     const result = z
-      .object({ items: z.array(z.unknown()).default([]), timeZone: z.string().default("UTC") })
+      .object({
+        items: z.array(z.unknown()).default([]),
+        timeZone: z.string().default("UTC"),
+        nextPageToken: z.string().min(1).optional(),
+      })
       .parse(await this.request(`${path}?${params}`));
-    return result.items.slice(0, 100).map((item) => mapEvent(item, calendarId, result.timeZone));
+    return {
+      events: result.items.slice(0, 100).map((item) => mapEvent(item, calendarId, result.timeZone)),
+      truncated: Boolean(result.nextPageToken) || result.items.length > 100,
+    };
   }
 
   async getAttachment(messageId: string, attachmentId: string): Promise<Uint8Array> {
@@ -737,7 +767,7 @@ export class GoogleClient {
       const parts = [
         textPart,
         ...attachments.map((attachment) => {
-          const name = encodeURIComponent(attachment.name).replace(
+          const name = encodeURIComponent(wellFormed(attachment.name)).replace(
             /['()*]/g,
             (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
           );

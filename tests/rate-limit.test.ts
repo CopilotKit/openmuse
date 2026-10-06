@@ -7,7 +7,11 @@ import { Hono } from "hono";
 import { createApp } from "../apps/server/src/app.ts";
 import type { Config } from "../apps/server/src/config.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
-import { createRateLimitStore, rateLimit, resolveClientKey } from "../apps/server/src/rate-limit.ts";
+import {
+  createRateLimitStore,
+  rateLimit,
+  resolveClientKey,
+} from "../apps/server/src/rate-limit.ts";
 
 test("resolveClientKey ignores forwarding headers unless trustProxy is enabled", () => {
   const untrustedA = resolveClientKey({
@@ -79,17 +83,6 @@ after(async () => {
   await db.close();
   await rm(directory, { recursive: true, force: true });
 });
-
-async function login() {
-  const response = await app.request("/api/session", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: "{}",
-  });
-  assert.equal(response.status, 200);
-  const { token } = await response.json();
-  return token as string;
-}
 
 test("session token rotation does not create new pre-auth buckets", async () => {
   let lastStatus = 200;

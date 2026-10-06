@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { createApp } from "../apps/server/src/app.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
+import { LostLeaseError } from "../apps/server/src/engine/worker.ts";
 import type { AgentNotification, AgentTask, Monitor } from "../packages/domain/src/agent.ts";
 
 let db: Store, server: Awaited<ReturnType<typeof createApp>>, directory: string, token: string;
@@ -134,6 +135,60 @@ test("a page change stays alertable when the task outcome is lost after the base
   assert.equal(found.length, 1, "the No tables -> One table change should notify exactly once");
   assert.match(found[0].body, /One table at 7 pm/);
 });
+
+for (const scenario of [
+  {
+    condition: "change",
+    value: "",
+    pages: ["Sold out", "Available now", "Sold out", "Available now"],
+    expectedAlerts: 3,
+  },
+  {
+    condition: "contains",
+    value: "available now",
+    pages: ["Sold out", "Available now", "Sold out", "Available now"],
+    expectedAlerts: 2,
+  },
+  {
+    condition: "price_below",
+    value: "50",
+    pages: ["Price: $80", "Price: $40", "Price: $80", "Price: $40"],
+    expectedAlerts: 2,
+  },
+]) {
+  test(`${scenario.condition} alerts on recurring changes while deduplicating outcome replay`, async () => {
+    const monitor = await read<Monitor>(
+      "/monitors",
+      {
+        title: `Recurring ${scenario.condition}`,
+        url: "sample://availability",
+        condition: scenario.condition,
+        value: scenario.value,
+        intervalMinutes: 1,
+      },
+      201,
+    );
+    const alerts = async () =>
+      (await read<AgentNotification[]>("/notifications")).filter(
+        (item) => item.taskId === monitor.taskId,
+      );
+    for (const text of scenario.pages) {
+      await read("/sample-page", { text });
+      await read(`/monitors/${monitor.id}/control`, { action: "check" });
+      await server.agent.worker.tick();
+      // A restart can publish the same saved notice again; that is not a new alert.
+      await maintain();
+      await maintain();
+    }
+    assert.equal((await alerts()).length, scenario.expectedAlerts);
+    for (let i = 0; i < 2; i++) {
+      await read(`/monitors/${monitor.id}/control`, { action: "check" });
+      await server.agent.worker.tick();
+    }
+    assert.equal((await alerts()).length, scenario.expectedAlerts, "unchanged pages stay quiet");
+    await read(`/monitors/${monitor.id}/control`, { action: "stop" });
+  });
+}
 
 test("resuming a monitor fails without activating it when the task transition does not commit", async () => {
   await read("/sample-page", { text: "No tables available" });
@@ -610,4 +665,79 @@ test("a check keeps the baseline from a run that finishes during the request", a
   const task = await db.get<AgentTask>(owner, "tasks", monitor.taskId);
   assert.equal(task?.status, "queued");
   assert.equal(task?.state.lastHash, afterRun);
+});
+
+test("a second observe from a stale snapshot loses its monitor commit instead of clobbering it", async () => {
+  await read("/sample-page", { text: "No tables available" });
+  const monitor = await createMonitor("Stale observe");
+  await server.agent.worker.tick();
+  const base = await db.get<Monitor>(owner, "monitors", monitor.id);
+  assert.equal(base?.checks, 1);
+
+  // Two workers read the same monitor snapshot (lease overlap), then both run
+  // observe() to completion. Freeze the monitor read at the pre-run snapshot.
+  const originalGet = db.get.bind(db);
+  db.get = (async (o: string, kind: string, id: string) => {
+    if (kind === "monitors" && id === monitor.id) return base;
+    return originalGet(o, kind, id);
+  }) as Store["get"];
+  const task = await originalGet<AgentTask>(owner, "tasks", monitor.taskId);
+  assert.ok(task);
+  const context = {
+    signal: new AbortController().signal,
+    guard: async () => {},
+    checkpoint: async (_patch: Partial<AgentTask>) => task,
+    event: async () => {},
+  };
+  const observe = (
+    server.agent as unknown as {
+      observe(owner: string, task: AgentTask, ctx: typeof context): Promise<Partial<AgentTask>>;
+    }
+  ).observe.bind(server.agent);
+  try {
+    await observe(owner, task, context);
+    await assert.rejects(observe(owner, task, context), LostLeaseError);
+  } finally {
+    db.get = originalGet;
+  }
+  // The loser's commit was rejected: exactly one increment landed.
+  assert.equal((await db.get<Monitor>(owner, "monitors", monitor.id))?.checks, 2);
+});
+
+test("pausing a watch preserves a concurrent observe() commit", async () => {
+  const monitor = await createMonitor("Pause during observe");
+  // Simulate an observe() committing between the pause request's read and its
+  // write: the pause must move only the control fields, never clobber the commit.
+  const stale = (await db.get<Monitor>(owner, "monitors", monitor.id)) as Monitor;
+  await db.compareAndSwap(
+    owner,
+    "monitors",
+    monitor.id,
+    {},
+    {
+      checks: 41,
+      lastCheckedAt: new Date().toISOString(),
+      lastHash: "deadbeef",
+      lastValue: "committed value",
+    },
+  );
+  const originalGet: Store["get"] = db.get.bind(db);
+  let served = false;
+  db.get = (async (o: string, kind: string, key: string) => {
+    if (!served && kind === "monitors" && key === monitor.id) {
+      served = true;
+      return stale;
+    }
+    return originalGet(o, kind, key);
+  }) as Store["get"];
+  try {
+    await read<Monitor>(`/monitors/${monitor.id}/control`, { action: "pause" });
+  } finally {
+    db.get = originalGet;
+  }
+  const after = (await db.get<Monitor>(owner, "monitors", monitor.id)) as Monitor;
+  assert.equal(after.status, "paused");
+  assert.equal(after.checks, 41);
+  assert.equal(after.lastHash, "deadbeef");
+  assert.equal(after.lastValue, "committed value");
 });
