@@ -150,6 +150,77 @@ export async function modelFixture(
   assert.ok(address && typeof address !== "string");
   const previousBase = process.env.OPENAI_BASE_URL;
   const previousKey = process.env.OPENAI_API_KEY;
+  const previousChatCompletions = process.env.OPENAI_CHAT_COMPLETIONS;
+  process.env.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
+  process.env.OPENAI_API_KEY = "local-test-fixture";
+  // This fixture serves the Responses protocol; a developer .env flag must
+  // not switch the adapter under test to the Chat Completions wire format.
+  delete process.env.OPENAI_CHAT_COMPLETIONS;
+  t.after(async () => {
+    if (previousBase === undefined) delete process.env.OPENAI_BASE_URL;
+    else process.env.OPENAI_BASE_URL = previousBase;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+    if (previousChatCompletions === undefined) delete process.env.OPENAI_CHAT_COMPLETIONS;
+    else process.env.OPENAI_CHAT_COMPLETIONS = previousChatCompletions;
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  return { requests };
+}
+
+// The same fixture protocol served in the OpenAI Chat Completions wire format
+// (`/v1/chat/completions` SSE), for the optional gateway adapter path.
+export async function chatCompletionsFixture(
+  t: TestContext,
+  reply: (index: number) => ModelCall | undefined | Promise<ModelCall | undefined>,
+) {
+  const requests: { path: string; body: string }[] = [];
+  const server = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    const index = requests.length;
+    requests.push({ path: request.url ?? "", body });
+    const call = await reply(index);
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    const chunk = (delta: object, finish: string | null) =>
+      response.write(
+        `data: ${JSON.stringify({
+          id: `chatcmpl-${index}`,
+          object: "chat.completion.chunk",
+          created: 1000,
+          model: "fixture",
+          choices: [{ index: 0, delta, finish_reason: finish }],
+        })}\n\n`,
+      );
+    chunk({ role: "assistant" }, null);
+    if (call) {
+      chunk({ content: "I'll check first." }, null);
+      chunk(
+        {
+          tool_calls: [
+            {
+              index: 0,
+              id: `call-${index}`,
+              type: "function",
+              function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+            },
+          ],
+        },
+        "tool_calls",
+      );
+    } else {
+      chunk({ content: "Current state: empty." }, null);
+    }
+    chunk({}, "stop");
+    response.end("data: [DONE]\n\n");
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const previousBase = process.env.OPENAI_BASE_URL;
+  const previousKey = process.env.OPENAI_API_KEY;
   process.env.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
   process.env.OPENAI_API_KEY = "local-test-fixture";
   t.after(async () => {

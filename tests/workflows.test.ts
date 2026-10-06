@@ -5,11 +5,19 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { createApp } from "../apps/server/src/app.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
-import type { AgentNotification, AgentTask, Idea, Monitor } from "../packages/domain/src/agent.ts";
-import type { ActionProposal } from "../packages/domain/src/index.ts";
+import type {
+  AgentNotification,
+  AgentTask,
+  Goal,
+  Idea,
+  Monitor,
+} from "../packages/domain/src/agent.ts";
+import type { ActionProposal, Artifact } from "../packages/domain/src/index.ts";
+import { createSamplePdf } from "../packages/integrations/src/pdf.ts";
 
 let db: Store, server: Awaited<ReturnType<typeof createApp>>, directory: string;
 const owner = "workflow-user";
+const reconcile = () => (server.agent as unknown as { maintain(): Promise<void> }).maintain();
 before(async () => {
   directory = await mkdtemp(join(tmpdir(), "openmuse-workflows-"));
   db = await createStore({ dataDir: join(directory, "db") });
@@ -98,6 +106,100 @@ test("document job runs without a client, waits for review, and resumes from its
   );
 });
 
+test("document retry reuses the filled PDF after its task checkpoint is lost", async (t) => {
+  const replayOwner = "interrupted-document";
+  await server.workspace.ensureSample(replayOwner, server.actions);
+  const workspace = await server.workspace.snapshot(replayOwner);
+  const mail = workspace.mail.find((message) => message.attachments.length);
+  assert.ok(mail);
+  const task = await server.agent.createTask(replayOwner, {
+    prompt: "Fill the sample form",
+    kind: "document",
+    input: { messageId: mail.id, fields: { participant_name: "Sample Student" } },
+  });
+  const compareAndSwap = db.compareAndSwap.bind(db);
+  let interrupted = false;
+  t.mock.method(db, "compareAndSwap", async (...args: Parameters<Store["compareAndSwap"]>) => {
+    const [recordOwner, kind, id, , patch] = args;
+    if (
+      recordOwner === replayOwner &&
+      kind === "tasks" &&
+      id === task.id &&
+      (patch.state as AgentTask["state"] | undefined)?.filledId &&
+      !interrupted
+    ) {
+      interrupted = true;
+      return null;
+    }
+    return compareAndSwap(...args);
+  });
+  await server.agent.worker.tick();
+  assert.ok(interrupted);
+  const retry = await server.agent.getTask(replayOwner, task.id);
+  assert.equal(retry.status, "queued");
+  assert.equal(retry.state.filledId, undefined);
+  const outputs = (await db.list<Artifact>(replayOwner, "files")).filter((file) => file.parentId);
+  assert.equal(outputs.length, 1);
+
+  await server.agent.worker.tick();
+  const resumed = await server.agent.getTask(replayOwner, task.id);
+  assert.equal(resumed.status, "waiting_approval", resumed.error ?? resumed.question);
+  assert.equal(resumed.state.filledId, outputs[0].id);
+  assert.equal(
+    (await db.list<Artifact>(replayOwner, "files")).filter((file) => file.parentId).length,
+    1,
+  );
+});
+
+test("attachment import recovers after losing its mapping and isolates reconnections", async (t) => {
+  const attachmentOwner = "attachment-recovery";
+  await server.workspace.ensureSample(attachmentOwner, server.actions);
+  const workspace = await server.workspace.snapshot(attachmentOwner);
+  const mail = workspace.mail[0];
+  const reference = `${mail.id}:sample-attachment:sample.pdf`;
+  await db.put(attachmentOwner, "mail", {
+    ...mail,
+    attachments: [reference],
+    connectionId: "sample-google",
+  });
+  const google = server.workspace.google(attachmentOwner);
+  const bytes = await createSamplePdf();
+  t.mock.method(google, "getAttachment", async () => bytes);
+  t.mock.method(server.workspace, "google", () => google);
+  const put = db.put.bind(db);
+  let interrupted = false;
+  t.mock.method(db, "put", async (...args: Parameters<Store["put"]>) => {
+    if (args[0] === attachmentOwner && args[1] === "imports" && !interrupted) {
+      interrupted = true;
+      throw new Error("mapping unavailable");
+    }
+    return put(...args);
+  });
+  const before = await server.files.list(attachmentOwner);
+  await assert.rejects(
+    server.workspace.importAttachment(attachmentOwner, reference),
+    /mapping unavailable/,
+  );
+  const published = (await server.files.list(attachmentOwner)).find(
+    (file) => !before.some((old) => old.id === file.id),
+  );
+  assert.ok(published);
+  const recovered = await server.workspace.importAttachment(attachmentOwner, reference);
+  assert.equal(recovered.id, published.id);
+  assert.equal((await server.files.list(attachmentOwner)).length, before.length + 1);
+
+  await db.put(attachmentOwner, "settings", { id: "google", connectionId: "new-connection" });
+  await db.put(attachmentOwner, "mail", {
+    ...mail,
+    attachments: [reference],
+    connectionId: "new-connection",
+  });
+  assert.notEqual(
+    (await server.workspace.importAttachment(attachmentOwner, reference)).id,
+    recovered.id,
+  );
+});
+
 test("ideas ignore sent replies while retaining unfinished incoming requests", async () => {
   const ideaOwner = "sent-reply-ideas";
   await server.workspace.ensureSample(ideaOwner, server.actions);
@@ -122,6 +224,60 @@ test("ideas ignore sent replies while retaining unfinished incoming requests", a
   assert.ok(sent);
   assert.ok(ideas.some((idea) => idea.input.messageId === incoming.id));
   assert.ok(!ideas.some((idea) => idea.input.messageId === sent.id));
+});
+
+test("accepting a goal idea keeps the task attached to the original goal", async () => {
+  const ideaOwner = "goal-plan-ideas";
+  const goal = await server.agent.createGoal(ideaOwner, {
+    title: "Plan a walking routine",
+    description: "Walk three times each week",
+    category: "Health",
+  });
+  const ideas = await server.agent.refreshIdeas(ideaOwner);
+  const idea = ideas.find((candidate) => candidate.input.goalId === goal.id);
+  assert.ok(idea);
+
+  const accepted = await server.agent.decideIdea(ideaOwner, idea.id, "accept");
+  assert.ok(accepted?.taskId);
+  const task = await server.agent.getTask(ideaOwner, accepted.taskId);
+  assert.equal(task.goalId, goal.id);
+  assert.deepEqual(await db.list<Goal>(ideaOwner, "goals"), [goal]);
+
+  const retried = await server.agent.decideIdea(ideaOwner, idea.id, "accept");
+  assert.equal(retried?.taskId, task.id);
+  assert.equal((await db.list<AgentTask>(ideaOwner, "tasks")).length, 1);
+  assert.deepEqual(await db.list<Goal>(ideaOwner, "goals"), [goal]);
+
+  await server.agent.updateGoal(ideaOwner, goal.id, { status: "paused" });
+  assert.equal((await server.agent.getTask(ideaOwner, task.id)).status, "paused");
+});
+
+test("accepting an idea without a goal still creates one goal and task", async () => {
+  const ideaOwner = "standalone-ideas";
+  const idea: Idea = {
+    id: "standalone-plan",
+    title: "Plan a weekend walk",
+    reason: "Make time to get outdoors",
+    prompt: "Plan a weekend walk",
+    kind: "plan",
+    input: {},
+    evidence: [],
+    status: "new",
+    createdAt: new Date().toISOString(),
+  };
+  await db.put(ideaOwner, "ideas", idea);
+  const accepted = await server.agent.decideIdea(ideaOwner, idea.id, "accept");
+  assert.ok(accepted?.taskId);
+  await server.agent.decideIdea(ideaOwner, idea.id, "accept");
+
+  const goals = await db.list<Goal>(ideaOwner, "goals");
+  assert.equal(goals.length, 1);
+  assert.equal(goals[0].title, idea.title);
+  assert.equal(goals[0].description, idea.reason);
+  const tasks = await db.list<AgentTask>(ideaOwner, "tasks");
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].id, accepted.taskId);
+  assert.equal(tasks[0].goalId, goals[0].id);
 });
 
 test("cancelling a task denies its pending action", async () => {
@@ -217,6 +373,148 @@ test("dismissal racing acceptance never creates work for a dismissed idea", asyn
     else assert.ok(saved?.taskId && tasks.some((t) => t.id === saved.taskId));
   }
 });
+
+test("milestone-linked outcomes preserve manual progress and legacy goal tasks still append once", async () => {
+  const goal = await server.agent.createGoal(owner, {
+    title: "Budget",
+    milestones: ["Review spending", "Save"],
+  });
+  const input = {
+    prompt: "Review spending",
+    kind: "finance",
+    goalId: goal.id,
+    milestoneId: goal.milestones[0].id,
+    input: { csv: "date,description,amount,category\n2026-09-01,Groceries,54.20,Food" },
+  };
+  const task = await server.agent.createTask(owner, input, "linked-finance");
+  const reordered = [
+    { ...goal.milestones[1], done: true },
+    { ...goal.milestones[0], title: "Review September" },
+  ];
+  await server.agent.updateGoal(owner, goal.id, { milestones: reordered });
+  await server.agent.worker.tick();
+  const detail = await server.agent.detail(owner, task.id);
+  assert.equal(detail.task.status, "succeeded");
+  assert.equal(detail.task.milestoneId, goal.milestones[0].id);
+  assert.ok(detail.artifacts.length);
+  assert.deepEqual((await db.get<Goal>(owner, "goals", goal.id))?.milestones, reordered);
+  await server.agent.setMilestoneDone(owner, goal.id, goal.milestones[0].id, true);
+  // Startup maintenance replays durable outcomes after process interruptions.
+  await reconcile();
+  const completed = reordered.map((m) => ({ ...m, done: true }));
+  assert.deepEqual((await db.get<Goal>(owner, "goals", goal.id))?.milestones, completed);
+  await server.agent.updateGoal(owner, goal.id, { milestones: [completed[0]] });
+  await reconcile();
+  assert.deepEqual((await db.get<Goal>(owner, "goals", goal.id))?.milestones, [completed[0]]);
+  assert.ok((await server.agent.detail(owner, task.id)).artifacts.length);
+  const legacy = await server.agent.createTask(
+    owner,
+    { ...input, milestoneId: undefined },
+    "legacy-finance",
+  );
+  await server.agent.worker.tick();
+  await reconcile();
+  await reconcile();
+  const milestones = (await db.get<Goal>(owner, "goals", goal.id))?.milestones;
+  assert.equal(milestones?.length, 2);
+  assert.equal(milestones?.filter((m) => m.id === legacy.id && m.done).length, 1);
+});
+
+test("failed, cancelled and review-blocked tasks do not complete milestones", async () => {
+  const goal = await server.agent.createGoal(owner, {
+    title: "Documents",
+    milestones: ["Return form"],
+  });
+  const link = { goalId: goal.id, milestoneId: goal.milestones[0].id };
+  const failed = await server.agent.createTask(owner, {
+    ...link,
+    prompt: "Analyze invalid CSV",
+    kind: "finance",
+    input: { csv: "invalid" },
+  });
+  await server.agent.worker.tick();
+  assert.equal((await server.agent.getTask(owner, failed.id)).status, "failed");
+  const cancelled = await server.agent.createTask(owner, { ...link, prompt: "Cancelled" });
+  await server.agent.control(owner, cancelled.id, "cancel");
+  const mail = (await server.workspace.snapshot(owner)).mail.find((m) => m.attachments.length);
+  assert.ok(mail);
+  const document = await server.agent.createTask(owner, {
+    ...link,
+    prompt: "Return form",
+    kind: "document",
+    input: { messageId: mail.id },
+  });
+  await server.agent.worker.tick();
+  assert.equal((await server.agent.getTask(owner, document.id)).status, "waiting_input");
+  assert.deepEqual((await db.get<Goal>(owner, "goals", goal.id))?.milestones, goal.milestones);
+  await server.agent.answer(owner, document.id, "Fictional test values", {
+    participant_name: "Test Student",
+    guardian_name: "Test Guardian",
+    permission_granted: true,
+  });
+  await server.agent.worker.tick();
+  const waiting = await server.agent.getTask(owner, document.id);
+  assert.equal(waiting.status, "waiting_approval");
+  assert.deepEqual((await db.get<Goal>(owner, "goals", goal.id))?.milestones, goal.milestones);
+  await server.agent.updateGoal(owner, goal.id, { status: "paused" });
+  assert.ok(waiting.actionId);
+  const action = await db.get<ActionProposal>(owner, "actions", waiting.actionId);
+  assert.ok(action);
+  await assert.rejects(
+    server.actions.decide(owner, action.id, action.hash, "approve"),
+    /Resume the task/,
+  );
+  await server.agent.control(owner, document.id, "cancel");
+  await reconcile();
+  assert.deepEqual((await db.get<Goal>(owner, "goals", goal.id))?.milestones, goal.milestones);
+});
+
+test("linked task results and manual completion survive a database restart", async () => {
+  const root = await mkdtemp(join(tmpdir(), "openmuse-milestone-restart-"));
+  const config = { ...server.agent.config, dataDir: root };
+  let store = await createStore({ dataDir: join(root, "db") });
+  let app = await createApp(store, config);
+  try {
+    const goal = await app.agent.createGoal(owner, {
+      title: "Budget",
+      milestones: ["Review spending"],
+    });
+    const task = await app.agent.createTask(
+      owner,
+      {
+        prompt: "Review spending",
+        kind: "finance",
+        goalId: goal.id,
+        milestoneId: goal.milestones[0].id,
+        input: { csv: "date,description,amount,category\n2026-09-01,Groceries,54.20,Food" },
+      },
+      "restart-delegation",
+    );
+    await app.agent.worker.tick();
+    assert.equal((await app.agent.getTask(owner, task.id)).status, "succeeded");
+    await app.agent.stop();
+    await store.close();
+    store = await createStore({ dataDir: join(root, "db") });
+    app = await createApp(store, config);
+    app.agent.start();
+    await app.agent.stop();
+    assert.deepEqual((await store.get<Goal>(owner, "goals", goal.id))?.milestones, goal.milestones);
+    const restored = await app.agent.detail(owner, task.id);
+    assert.equal(restored.task.milestoneId, goal.milestones[0].id);
+    assert.ok(restored.artifacts.length);
+    await app.agent.setMilestoneDone(owner, goal.id, goal.milestones[0].id, true);
+    app.agent.start();
+    await app.agent.stop();
+    assert.deepEqual((await store.get<Goal>(owner, "goals", goal.id))?.milestones, [
+      { ...goal.milestones[0], done: true },
+    ]);
+  } finally {
+    await app.agent.stop();
+    await store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("accepting an idea opens the task already handling its email instead of starting another", async () => {
   const ideaOwner = "idea-in-progress";
   await server.workspace.ensureSample(ideaOwner, server.actions);

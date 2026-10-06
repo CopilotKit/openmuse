@@ -296,7 +296,9 @@ test("sample monitor saves its baseline and deduplicates notifications for repea
     await server.agent.worker.tick();
   }
   const found = await notifications();
-  assert.equal(found.length, 2);
+  // Identical repeats stay quiet; the final flip back to a previously seen
+  // page is a new change event and alerts again.
+  assert.equal(found.length, 3);
   assert.ok(found.every((item) => !item.read));
   const readNotification = await read<AgentNotification>(`/notifications/${found[0].id}/read`, {});
   assert.equal(readNotification.read, true);
@@ -352,4 +354,98 @@ test("live mode rejects sample sources and hides the fixture mutation endpoint",
   } finally {
     await live.agent.stop();
   }
+});
+
+test("milestone delegation validates membership and deduplicates only the same request", async () => {
+  const goal = await read<Goal>(
+    "/goals",
+    { title: "Budget", milestones: ["Review spending", "Save"] },
+    201,
+  );
+  const other = await read<Goal>(
+    "/goals",
+    { title: "Other", milestones: ["Review spending"] },
+    201,
+  );
+  const privateGoal = await server.agent.createGoal("other-user", {
+    title: "Private",
+    milestones: ["Review spending"],
+  });
+  const input = {
+    prompt: "Review spending",
+    goalId: goal.id,
+    milestoneId: goal.milestones[0].id,
+    requestId: "budget-request",
+  };
+  for (const [bad, status] of [
+    [{ ...input, goalId: undefined }, 422],
+    [{ ...input, goalId: privateGoal.id, milestoneId: privateGoal.milestones[0].id }, 404],
+    [{ ...input, milestoneId: other.milestones[0].id }, 404],
+    [{ ...input, milestoneId: "missing" }, 404],
+  ] as const)
+    assert.equal((await request("/tasks", bad)).status, status);
+  const [first, replay] = await Promise.all([
+    read<AgentTask>("/tasks", input, 201),
+    read<AgentTask>("/tasks", input, 201),
+  ]);
+  assert.equal(first.id, replay.id);
+  assert.equal(first.milestoneId, input.milestoneId);
+  const later = await read<AgentTask>("/tasks", { ...input, requestId: "budget-later" }, 201);
+  assert.notEqual(first.id, later.id);
+  await read(`/goals/${goal.id}`, { status: "paused" });
+  assert.equal((await read<{ task: AgentTask }>(`/tasks/${first.id}`)).task.status, "paused");
+  const paused = await read<AgentTask>("/tasks", { ...input, requestId: "budget-paused" }, 201);
+  assert.equal(paused.status, "paused");
+  // A replay still recovers the original task after the milestone has been removed.
+  await read(`/goals/${goal.id}`, { milestones: [] });
+  assert.equal((await read<AgentTask>("/tasks", input, 201)).id, first.id);
+  assert.equal((await request("/tasks", { ...input, requestId: "budget-deleted" })).status, 404);
+  assert.equal(
+    (await read<{ task: AgentTask }>(`/tasks/${first.id}`)).task.milestoneId,
+    input.milestoneId,
+  );
+});
+
+test("manual milestone completion preserves current titles, ordering and concurrent progress", async () => {
+  const goal = await read<Goal>(
+    "/goals",
+    { title: "Travel", milestones: ["Dates", "Tickets"] },
+    201,
+  );
+  const [dates, tickets] = goal.milestones;
+  const renamed = { ...dates, title: "Confirm dates" };
+  await read(`/goals/${goal.id}`, {
+    milestones: [tickets, renamed, { id: "new", title: "Pack", done: true }],
+  });
+  await Promise.all([
+    read(`/goals/${goal.id}/milestones/${dates.id}`, { done: true }),
+    read(`/goals/${goal.id}/milestones/${tickets.id}`, { done: true }),
+    read(`/goals/${goal.id}`, { status: "paused" }),
+  ]);
+  const saved = (await read<AgentWorkspace>("")).goals.find((item) => item.id === goal.id);
+  assert.deepEqual(saved?.milestones, [
+    { ...tickets, done: true },
+    { ...renamed, done: true },
+    { id: "new", title: "Pack", done: true },
+  ]);
+  assert.equal(saved?.status, "paused");
+  await read(`/goals/${goal.id}/milestones/${dates.id}`, { done: false });
+  assert.equal(
+    (await request(`/goals/${goal.id}/milestones/${dates.id}`, { done: "yes" })).status,
+    422,
+  );
+  await read(`/goals/${goal.id}`, { milestones: [tickets] });
+  assert.equal(
+    (await request(`/goals/${goal.id}/milestones/${dates.id}`, { done: true })).status,
+    404,
+  );
+  const hidden = await server.agent.createGoal("other-user", {
+    title: "Private",
+    milestones: ["Private step"],
+  });
+  assert.equal(
+    (await request(`/goals/${hidden.id}/milestones/${hidden.milestones[0].id}`, { done: true }))
+      .status,
+    404,
+  );
 });

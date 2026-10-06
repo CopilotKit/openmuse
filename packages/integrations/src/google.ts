@@ -3,6 +3,7 @@ import { type DefaultTreeAdapterMap, parseFragment } from "parse5";
 import { z } from "zod";
 import {
   type CalendarEvent,
+  calendarRangeSchema,
   type EmailDraft,
   type EventDraft,
   emailDraftSchema,
@@ -646,6 +647,11 @@ export class GoogleClient {
 
   /** At most 100 occurrences in a bounded window, beginning at local midnight by default. */
   async listEvents(options: ListEventsOptions = {}): Promise<CalendarEvent[]> {
+    return (await this.listEventsPage(options)).events;
+  }
+
+  /** Retain the provider's completeness marker without fetching additional pages. */
+  async listEventsPage(options: ListEventsOptions = {}) {
     const calendarId = options.calendarId ?? "primary";
     const path = calendarPath(calendarId);
     const midnight = new Date();
@@ -658,9 +664,7 @@ export class GoogleClient {
       options.timeMax ?? new Date(Date.parse(timeMin) + 31 * 24 * 60 * 60 * 1000).toISOString();
     if (!timestamp.safeParse(timeMax).success)
       throw new Error("Invalid calendar timeMax: use a date-time with an explicit offset");
-    const duration = Date.parse(timeMax) - Date.parse(timeMin);
-    if (duration <= 0 || duration > 366 * 24 * 60 * 60 * 1000)
-      throw new Error("Calendar range must end after it starts and span at most 366 days");
+    calendarRangeSchema.parse({ timeMin, timeMax });
     const params = new URLSearchParams({
       maxResults: "100",
       singleEvents: "true",
@@ -669,9 +673,16 @@ export class GoogleClient {
       timeMax,
     });
     const result = z
-      .object({ items: z.array(z.unknown()).default([]), timeZone: z.string().default("UTC") })
+      .object({
+        items: z.array(z.unknown()).default([]),
+        timeZone: z.string().default("UTC"),
+        nextPageToken: z.string().min(1).optional(),
+      })
       .parse(await this.request(`${path}?${params}`));
-    return result.items.slice(0, 100).map((item) => mapEvent(item, calendarId, result.timeZone));
+    return {
+      events: result.items.slice(0, 100).map((item) => mapEvent(item, calendarId, result.timeZone)),
+      truncated: Boolean(result.nextPageToken) || result.items.length > 100,
+    };
   }
 
   async getAttachment(messageId: string, attachmentId: string): Promise<Uint8Array> {

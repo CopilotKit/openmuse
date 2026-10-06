@@ -6,6 +6,7 @@ import type {
   AgentMemory,
   AgentNotification,
 } from "../../../../packages/domain/src/agent.ts";
+import { createTaskSchema } from "../../../../packages/domain/src/agent.ts";
 import { AppError } from "../errors.ts";
 import type { AgentService } from "./service.ts";
 
@@ -28,9 +29,12 @@ const goalPatchSchema = z.object({
 export function agentRoutes(service: AgentService): Hono<{ Variables: { owner: string } }> {
   const app = new Hono<{ Variables: { owner: string } }>();
   app.get("/", async (c) => c.json(await service.snapshot(c.get("owner"))));
-  app.post("/tasks", async (c) =>
-    c.json(await service.createTask(c.get("owner"), await c.req.json()), 201),
-  );
+  app.post("/tasks", async (c) => {
+    const { requestId, ...input } = createTaskSchema
+      .extend({ requestId: z.string().min(1).max(200).optional() })
+      .parse(await c.req.json());
+    return c.json(await service.createTask(c.get("owner"), input, requestId), 201);
+  });
   app.get("/tasks/:id", async (c) =>
     c.json(await service.detail(c.get("owner"), c.req.param("id"))),
   );
@@ -59,6 +63,17 @@ export function agentRoutes(service: AgentService): Hono<{ Variables: { owner: s
   app.post("/goals/:id", async (c) => {
     const body = goalPatchSchema.parse(await c.req.json());
     return c.json(await service.updateGoal(c.get("owner"), c.req.param("id"), body));
+  });
+  app.post("/goals/:id/milestones/:milestoneId", async (c) => {
+    const { done } = z.object({ done: z.boolean() }).parse(await c.req.json());
+    return c.json(
+      await service.setMilestoneDone(
+        c.get("owner"),
+        c.req.param("id"),
+        c.req.param("milestoneId"),
+        done,
+      ),
+    );
   });
   app.post("/monitors", async (c) =>
     c.json(await service.createMonitor(c.get("owner"), await c.req.json()), 201),
