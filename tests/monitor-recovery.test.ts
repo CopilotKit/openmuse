@@ -138,6 +138,12 @@ test("a page change stays alertable when the task outcome is lost after the base
 
 for (const scenario of [
   {
+    condition: "change",
+    value: "",
+    pages: ["Sold out", "Available now", "Sold out", "Available now"],
+    expectedAlerts: 3,
+  },
+  {
     condition: "contains",
     value: "available now",
     pages: ["Sold out", "Available now", "Sold out", "Available now"],

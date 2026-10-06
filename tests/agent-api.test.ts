@@ -296,7 +296,9 @@ test("sample monitor saves its baseline and deduplicates notifications for repea
     await server.agent.worker.tick();
   }
   const found = await notifications();
-  assert.equal(found.length, 2);
+  // Identical repeats stay quiet; the final flip back to a previously seen
+  // page is a new change event and alerts again.
+  assert.equal(found.length, 3);
   assert.ok(found.every((item) => !item.read));
   const readNotification = await read<AgentNotification>(`/notifications/${found[0].id}/read`, {});
   assert.equal(readNotification.read, true);
