@@ -10,6 +10,7 @@ import {
 import { ArrowDown, ArrowUp, FileText, RotateCcw, Square, X } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -27,10 +28,12 @@ import { BackgroundUpdates } from "./background-updates";
 import { BrowserRunContext, BrowserToolCard } from "./browser-tool-card";
 import { BrowserThreadCard } from "./computer";
 import { ConversationQueue, type QueuedMessage } from "./conversation-queue";
-import { runConversationTurn } from "./conversation-run";
+import { replayedRunError, runConversationTurn } from "./conversation-run";
+import { DesktopToolCard } from "./desktop-tool-card";
 import { confirmedJevSelection, displayJevUserMessage, latestJevPanelId } from "./jev-actions";
 import { JevInteractionContext, JevToolCard } from "./jev-tool-card";
 import { MailToolCard } from "./mail-tool-card";
+import { SearchToolCard } from "./search-tool-card";
 import { FileThreadCard, TaskThreadCard } from "./thread-artifacts";
 import { type Selection, useMuseThread } from "./threads";
 import { Button, Card, CheckRow, colors, ErrorNotice, s } from "./ui";
@@ -66,11 +69,27 @@ export function WorkspaceTools() {
     ),
   });
   useRenderTool({
+    name: "search_web",
+    description: "Show public web search progress and sources",
+    parameters: displayParameters,
+    render: ({ result, status }) => (
+      <SearchToolCard result={result} loading={status !== "complete"} />
+    ),
+  });
+  useRenderTool({
     name: "browse_web",
     description: "Follow the agent as it reads a webpage",
     parameters: displayParameters,
     render: ({ args, result, status }) => (
       <BrowserToolCard url={args.url} result={result} loading={status !== "complete"} />
+    ),
+  });
+  useRenderTool({
+    name: "use_desktop",
+    description: "Show the agent working on the computer's desktop",
+    parameters: displayParameters,
+    render: ({ toolCallId, result, status }) => (
+      <DesktopToolCard toolCallId={toolCallId} result={result} loading={status !== "complete"} />
     ),
   });
   useRenderTool({
@@ -217,6 +236,24 @@ export function ChatScreen({
   const [saveError, setSaveError] = useState("");
   const [historyError, setHistoryError] = useState("");
   const [historyAttempt, setHistoryAttempt] = useState(0);
+  // Loads still replaying history. A count, so an old load finishing does not end a newer one.
+  const replaying = useRef(0);
+  const [keyboardPadding, setKeyboardPadding] = useState(0);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const onShow = (e: { endCoordinates: { height: number } }) => {
+      const bottomNavHeight = 74;
+      setKeyboardPadding(Math.max(0, e.endCoordinates.height - bottomNavHeight));
+    };
+    const onHide = () => setKeyboardPadding(0);
+    const showSub = Keyboard.addListener("keyboardDidShow", onShow);
+    const hideSub = Keyboard.addListener("keyboardDidHide", onHide);
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
   useEffect(() => {
     if (!isReady) return;
     let active = true;
@@ -230,12 +267,20 @@ export function ChatScreen({
     async function hydrate() {
       try {
         if (richThreads) {
-          if (selection.existing)
-            await runConversationTurn(
-              agentId,
-              () => copilotkit.connectAgent({ agent }),
-              (onError) => copilotkit.subscribe({ onError }),
-            );
+          if (selection.existing) {
+            // Replaying history re-emits past RUN_ERROR events; only connection failures block loading.
+            replaying.current += 1;
+            try {
+              await runConversationTurn(
+                agentId,
+                () => copilotkit.connectAgent({ agent }),
+                (onError) => copilotkit.subscribe({ onError }),
+                [replayedRunError],
+              );
+            } finally {
+              replaying.current -= 1;
+            }
+          }
         } else {
           const { messages } = await api.request<{ messages: Message[] }>("/api/conversation");
           if (active) agent.setMessages(messages);
@@ -352,6 +397,8 @@ export function ChatScreen({
     const subscription = copilotkit.subscribe({
       onError: (event) => {
         if (event.context?.agentId && event.context.agentId !== agentId) return;
+        // A failed turn saved in history is already over; it is not a failure of this session.
+        if (replaying.current > 0 && event.code === replayedRunError) return;
         const failure = event.error instanceof Error ? event.error : new Error(String(event.error));
         setError(failure.message);
       },
@@ -396,6 +443,10 @@ export function ChatScreen({
       ? messages[latestUserIndex].content
       : null;
   const visible = messages.filter((m) => m.role === "user" || m.role === "assistant");
+  const latestDesktop = messages
+    .flatMap((m) => ("toolCalls" in m ? m.toolCalls || [] : []))
+    .filter((call) => call.function.name === "use_desktop")
+    .at(-1)?.id;
   const replying = busy || agent.isRunning;
   return (
     <View style={{ flex: 1 }}>
@@ -558,6 +609,18 @@ export function ChatScreen({
             );
           })
         )}
+        {!!latestDesktop && (
+          <DesktopToolCard
+            live
+            toolCallId={latestDesktop}
+            result={
+              messages.find(
+                (message) => message.role === "tool" && message.toolCallId === latestDesktop,
+              )?.content
+            }
+            loading={replying}
+          />
+        )}
         {!richThreads && (
           <>
             {(w.files.some((file) => file.parentId) ||
@@ -664,7 +727,10 @@ export function ChatScreen({
           Latest messages
         </Button>
       )}
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={keyboardPadding > 0 ? { paddingBottom: keyboardPadding } : undefined}
+      >
         <ErrorNotice error={saveError} />
         {!!saveError && (
           <Button
