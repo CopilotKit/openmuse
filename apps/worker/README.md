@@ -79,7 +79,11 @@ node apps/worker/tests/run-docker.mjs
 node --experimental-strip-types --test apps/worker/tests/lifecycle.test.ts
 ```
 
-The Docker test checks authentication, public page navigation, PNG dimensions, console input, redirect blocking, a real PDF download, worker restart, and profile/localStorage persistence. Public fixtures require internet access. The test's separate Chromium process seeds localStorage in its own disposable profile; the production API exposes no JavaScript evaluation endpoint.
+The local lifecycle test serves controlled HTTP pages on loopback. Its injected HTTP transport maps a public-IP URL to those pages after the real worker and proxy destination checks; it does not need external DNS or websites. It checks exact page reads, truncation boundaries, private redirect rejection, failed profile cleanup, and profile/localStorage restoration through real Chromium.
+
+The Docker test uses the same HTTP fixture and worker API assertions as the local process-restart test. It checks authentication, exact page reads, PNG dimensions, console input, private redirects, byte-identical PDF downloads, rejected downloads, container restart, and actual localStorage recovery without reseeding. The runner builds the normal image, mounts the tests read-only, and publishes both the worker API and fixture diagnostics on random loopback host ports. Fixtures run inside the disposable container; image builds still require registry access.
+
+The fixture entrypoint is test-only and is not copied into the production image. It injects the existing browser manager and proxy transport, without adding a production evaluation endpoint or private-network allowance. These fixtures cover HTTP; the default proxy's HTTP/CONNECT private-destination rejection remains covered by the repository tests, but successful HTTPS navigation is not covered by these fixture suites.
 
 ## Local development
 
