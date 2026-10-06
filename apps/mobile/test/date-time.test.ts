@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isCompleteInstant, localDateTime, startOfZonedDay, zonedInstant } from "../src/date-time.ts";
+import {
+  isCompleteInstant,
+  localDateTime,
+  startOfZonedDay,
+  zonedInstant,
+} from "../src/date-time.ts";
 
 test("calendar time is rendered and entered in the selected named zone", () => {
   assert.deepEqual(localDateTime("2026-09-15T17:30:00Z", "America/Los_Angeles"), {
