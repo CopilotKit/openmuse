@@ -1,3 +1,4 @@
+import "./config.ts";
 import { randomUUID } from "node:crypto";
 import { MessageSchema } from "@ag-ui/core";
 import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";

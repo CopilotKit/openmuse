@@ -125,7 +125,7 @@ export class BrowserService {
     await this.db.put(owner, "browsers", session);
     return this.decorate(owner, session);
   }
-  async create(owner: string, url: string) {
+  async create(owner: string, url: string, signal?: AbortSignal) {
     const id = randomUUID();
     // Record ownership before calling the worker, including when its response is lost.
     await this.db.put(owner, "browsers", {
@@ -135,7 +135,7 @@ export class BrowserService {
       status: "idle",
       updatedAt: new Date().toISOString(),
     });
-    return this.reopen(owner, id, url);
+    return this.reopen(owner, id, url, signal);
   }
   private async openOwned(owner: string, id: string, url?: string, signal?: AbortSignal) {
     const value = await this.get(owner, id);
@@ -144,6 +144,7 @@ export class BrowserService {
       const response = await this.request("/sessions", { id, url: target }, signal);
       return await this.save(owner, await response.json(), id);
     } catch (error) {
+      signal?.throwIfAborted();
       await this.save(
         owner,
         { ...value, url: target, status: "error", updatedAt: new Date().toISOString() },
@@ -152,8 +153,8 @@ export class BrowserService {
       throw error;
     }
   }
-  reopen(owner: string, id: string, url?: string) {
-    return this.serial(id, () => this.openOwned(owner, id, url));
+  reopen(owner: string, id: string, url?: string, signal?: AbortSignal) {
+    return this.serial(id, () => this.openOwned(owner, id, url, signal));
   }
   navigate(owner: string, id: string, url: string) {
     return this.reopen(owner, id, url);
@@ -181,11 +182,13 @@ export class BrowserService {
   read(owner: string, id: string) {
     return this.serial(id, () => this.readOwned(owner, id));
   }
-  async observe(owner: string, url: string, existingId?: string) {
-    const id = existingId ?? (await this.create(owner, url)).id;
+  async observe(owner: string, url: string, existingId?: string, signal?: AbortSignal) {
+    const id = existingId ?? (await this.create(owner, url, signal)).id;
     return this.serial(id, async () => {
-      if (existingId) await this.openOwned(owner, id, url);
-      return { sessionId: id, ...(await this.readOwned(owner, id)) };
+      signal?.throwIfAborted();
+      if (existingId) await this.openOwned(owner, id, url, signal);
+      signal?.throwIfAborted();
+      return { sessionId: id, ...(await this.readOwned(owner, id, signal)) };
     });
   }
   async observeForThread(owner: string, threadId: string, url: string, signal?: AbortSignal) {
@@ -249,6 +252,9 @@ export class BrowserService {
     });
   }
   async imports(owner: string, id: string) {
+    return this.serial(id, () => this.importsOwned(owner, id));
+  }
+  private async importsOwned(owner: string, id: string) {
     await this.get(owner, id);
     const { downloads, failures } = z
       .object({

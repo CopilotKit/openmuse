@@ -23,8 +23,9 @@ if (existsSync(".env")) {
           : "Unset them to use the .env values."),
     );
 }
-process.env.DO_NOT_TRACK ??= "1";
-process.env.COPILOTKIT_TELEMETRY_DISABLED ??= "true";
+// Capture the full setup/activation funnel while preserving explicit SDK opt-outs
+// and any deployment-specific sampling rate. Config loads before runtime imports.
+process.env.COPILOTKIT_TELEMETRY_SAMPLE_RATE ??= "1";
 
 export interface Config {
   mode: "sample" | "live";

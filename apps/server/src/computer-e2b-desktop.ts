@@ -42,7 +42,7 @@ export interface DesktopInfo {
 export interface DesktopHandle {
   wait(): Promise<{ exitCode: number }>;
   kill(): Promise<boolean>;
-  sendStdin(data: string): Promise<void>;
+  sendStdin(data: string | Uint8Array): Promise<void>;
   closeStdin(): Promise<void>;
 }
 export interface DesktopRunOptions {
@@ -643,8 +643,11 @@ export class E2BDesktopComputer {
       }
       if (options.signal?.aborted) abort();
       if (options.input !== undefined && !result.interrupted) {
-        for (let i = 0; i < options.input.length; i += stdinChunk)
-          await handle.sendStdin(options.input.slice(i, i + stdinChunk));
+        // Encode once: separate string slices can split a surrogate pair, and
+        // the SDK encodes each send independently, replacing both halves.
+        const input = Buffer.from(options.input, "utf8");
+        for (let i = 0; i < input.length; i += stdinChunk)
+          await handle.sendStdin(input.subarray(i, i + stdinChunk));
         await handle.closeStdin();
       }
       result.exitCode = (await handle.wait()).exitCode;
