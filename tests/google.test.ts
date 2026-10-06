@@ -920,6 +920,64 @@ test("single-event validation is repeated at execution and read failures never d
   assert.equal(writes, 0);
 });
 
+test("mail parsing tolerates unknown charsets, RFC 2231 words, and display names with addresses", async () => {
+  const client = clientWith((request) =>
+    new URL(request.url).pathname.endsWith("/messages")
+      ? json({ messages: [{ id: "msg-charset" }] })
+      : json({
+          id: "msg-charset",
+          threadId: "thread-charset",
+          payload: {
+            mimeType: "text/plain",
+            headers: [
+              { name: "From", value: "<bare@example.com>" },
+              { name: "To", value: '"billing@other.example" <real@example.com>' },
+              { name: "Subject", value: "=?UTF-8*en?B?SGVsbG8=?=" },
+              { name: "Content-Type", value: "text/plain; charset=unknown-8bit" },
+            ],
+            body: { data: base64url("Body with unknown charset ✓") },
+          },
+        }),
+  );
+  const [mail] = await client.listMail();
+  assert.equal(mail.body, "Body with unknown charset ✓");
+  assert.equal(mail.subject, "Hello");
+  assert.equal(mail.from, "bare@example.com");
+  assert.equal(mail.sender, "bare@example.com");
+  assert.deepEqual(mail.to, ["real@example.com"]);
+});
+
+test("an attached message is not merged into the parent body", async () => {
+  const client = clientWith((request) =>
+    new URL(request.url).pathname.endsWith("/messages")
+      ? json({ messages: [{ id: "msg-forward" }] })
+      : json({
+          id: "msg-forward",
+          threadId: "thread-forward",
+          payload: {
+            mimeType: "multipart/mixed",
+            parts: [
+              { mimeType: "text/plain", body: { data: base64url("Outer body text.") } },
+              {
+                mimeType: "message/rfc822",
+                filename: "forwarded.eml",
+                body: { attachmentId: "attach2", size: 42 },
+                parts: [
+                  {
+                    mimeType: "text/plain",
+                    body: { data: base64url("INNER ATTACHED MESSAGE BODY") },
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+  );
+  const [mail] = await client.listMail();
+  assert.equal(mail.body, "Outer body text.");
+  assert.deepEqual(mail.attachments, ["msg-forward:attach2:forwarded.eml"]);
+});
+
 test("a sender's unpaired-surrogate attachment filename does not break the inbox", async () => {
   const client = clientWith((request) => {
     const url = new URL(request.url);

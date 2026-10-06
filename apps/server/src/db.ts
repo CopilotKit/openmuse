@@ -30,6 +30,28 @@ export class Store {
     );
     return result.rows.map((row) => row.data as T);
   }
+  async listByGoalId<T = Record<string, unknown>>(
+    owner: string,
+    kind: string,
+    goalId: string,
+  ): Promise<T[]> {
+    const result = await this.db.query(
+      "SELECT data FROM records WHERE owner=$1 AND kind=$2 AND data->>'goalId'=$3 ORDER BY updated_at DESC,id",
+      [owner, kind, goalId],
+    );
+    return result.rows.map((row) => row.data as T);
+  }
+  async listByStatus<T = Record<string, unknown>>(
+    owner: string,
+    kind: string,
+    status: string,
+  ): Promise<T[]> {
+    const result = await this.db.query(
+      "SELECT data FROM records WHERE owner=$1 AND kind=$2 AND data->>'status'=$3 ORDER BY updated_at DESC,id",
+      [owner, kind, status],
+    );
+    return result.rows.map((row) => row.data as T);
+  }
   async put<T extends { id: string }>(owner: string, kind: string, value: T): Promise<T> {
     await this.db.query(
       "INSERT INTO records(owner,kind,id,data) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(owner,kind,id) DO UPDATE SET data=excluded.data,updated_at=now()",

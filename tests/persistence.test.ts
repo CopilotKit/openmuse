@@ -82,3 +82,61 @@ test("workspace section reads match the selected snapshot sections", async () =>
     await store.close();
   }
 });
+
+test("listByGoalId matches list plus goalId filtering", async () => {
+  const store = await createStore();
+  try {
+    await store.put("owner", "tasks", { id: "t0", goalId: "g1" });
+    await store.put("owner", "tasks", { id: "t1", goalId: "g2" });
+    await store.put("owner", "tasks", { id: "t2", goalId: "g1" });
+    await store.put("owner", "tasks", { id: "t-none" });
+
+    const scoped = await store.listByGoalId<{ id: string; goalId?: string }>(
+      "owner",
+      "tasks",
+      "g1",
+    );
+    const expected = (await store.list<{ id: string; goalId?: string }>("owner", "tasks")).filter(
+      (item) => item.goalId === "g1",
+    );
+    assert.deepEqual(scoped, expected);
+
+    await store.put("other", "tasks", { id: "x", goalId: "g1" });
+    await store.put("owner", "goals", { id: "g", goalId: "g1" });
+    assert.equal((await store.listByGoalId("owner", "tasks", "g1")).length, 2);
+    assert.equal((await store.listByGoalId("nobody", "tasks", "g1")).length, 0);
+  } finally {
+    await store.close();
+  }
+});
+
+test("listByStatus matches list plus status filtering", async () => {
+  const store = await createStore();
+  try {
+    for (const [id, status] of [
+      ["i0", "new"],
+      ["i1", "dismissed"],
+      ["i2", "new"],
+      ["i3", "accepted"],
+    ] as const)
+      await store.put("owner", "ideas", { id, status });
+    await store.put("owner", "ideas", { id: "i-none" });
+
+    const scoped = await store.listByStatus<{ id: string; status?: string }>(
+      "owner",
+      "ideas",
+      "new",
+    );
+    const expected = (await store.list<{ id: string; status?: string }>("owner", "ideas")).filter(
+      (item) => item.status === "new",
+    );
+    assert.deepEqual(scoped, expected);
+
+    await store.put("other", "ideas", { id: "x", status: "new" });
+    await store.put("owner", "goals", { id: "g", status: "new" });
+    assert.equal((await store.listByStatus("owner", "ideas", "new")).length, 2);
+    assert.equal((await store.listByStatus("nobody", "ideas", "new")).length, 0);
+  } finally {
+    await store.close();
+  }
+});
