@@ -42,19 +42,30 @@ export function zonedInstant(date: string, time: string, timeZone: string): stri
   throw new Error("This time does not exist in the selected time zone. Choose another time.");
 }
 
+/** Earliest instant of a calendar date; a skipped midnight starts at the first existing time. */
+function zonedDayStart(date: string, timeZone: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  for (let minutes = 0; minutes < 24 * 60; minutes++) {
+    const time = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+    try {
+      return zonedInstant(date, time, timeZone);
+    } catch (error) {
+      if (error instanceof RangeError) return null;
+    }
+  }
+  return null;
+}
+
 /** Instant range for an event; all-day events cover their date in the event's own zone. */
 export function calendarInterval(
   event: Pick<CalendarEvent, "start" | "end" | "allDay" | "timeZone">,
 ): { start: number; end: number } | null {
-  try {
-    const start = event.allDay ? zonedInstant(event.start, "00:00", event.timeZone) : event.start;
-    const end = event.allDay ? zonedInstant(event.end, "00:00", event.timeZone) : event.end;
-    const from = Date.parse(start);
-    const to = Date.parse(end);
-    return Number.isFinite(from) && Number.isFinite(to) ? { start: from, end: to } : null;
-  } catch {
-    return null;
-  }
+  const start = event.allDay ? zonedDayStart(event.start, event.timeZone) : event.start;
+  const end = event.allDay ? zonedDayStart(event.end, event.timeZone) : event.end;
+  if (!start || !end) return null;
+  const from = Date.parse(start);
+  const to = Date.parse(end);
+  return Number.isFinite(from) && Number.isFinite(to) ? { start: from, end: to } : null;
 }
 
 /** Half-open overlap: events that only touch at a boundary are not a conflict. */

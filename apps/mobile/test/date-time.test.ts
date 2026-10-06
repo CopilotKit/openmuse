@@ -70,6 +70,43 @@ test("an all-day event covers its date in its own time zone, not UTC", () => {
   });
 });
 
+test("an all-day event starts at the first instant of a day whose midnight is skipped", () => {
+  const skipped = allDay("2026-03-08", "2026-03-09", "America/Havana");
+  assert.deepEqual(calendarInterval(skipped), {
+    start: Date.parse("2026-03-08T01:00:00-04:00"),
+    end: Date.parse("2026-03-09T00:00:00-04:00"),
+  });
+  assert.equal(
+    calendarOverlap(
+      skipped,
+      timed("2026-03-08T12:00:00-04:00", "2026-03-08T13:00:00-04:00", "America/Havana"),
+    ),
+    true,
+  );
+});
+
+test("an all-day event ends at the first instant of a day whose midnight is skipped", () => {
+  const skippedEnd = allDay("2026-03-07", "2026-03-08", "America/Havana");
+  assert.deepEqual(calendarInterval(skippedEnd), {
+    start: Date.parse("2026-03-07T00:00:00-05:00"),
+    end: Date.parse("2026-03-08T01:00:00-04:00"),
+  });
+  assert.equal(
+    calendarOverlap(
+      skippedEnd,
+      timed("2026-03-07T23:00:00-05:00", "2026-03-07T23:30:00-05:00", "America/Havana"),
+    ),
+    true,
+  );
+  assert.equal(
+    calendarOverlap(
+      skippedEnd,
+      timed("2026-03-08T01:00:00-04:00", "2026-03-08T02:00:00-04:00", "America/Havana"),
+    ),
+    false,
+  );
+});
+
 test("a timed evening event overlaps the all-day event on the same local day", () => {
   assert.equal(
     calendarOverlap(
