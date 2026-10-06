@@ -32,12 +32,13 @@ import {
   IdeasScreen,
 } from "./src/agent-ui";
 import { AgentWorkspaceProvider, useAgentWorkspace } from "./src/agent-workspace";
-import { API_URL, createSession, MuseApi } from "./src/api";
+import { API_URL, ApiError, createSession, MuseApi } from "./src/api";
 import { ChatScreen, WorkspaceTools } from "./src/chat";
 import { ComputerEntry } from "./src/computer";
 import { ComputerDraftProvider } from "./src/computer-drafts";
 import { Details } from "./src/details";
 import { BrowserScreen, CalendarScreen, FilesScreen, MailScreen } from "./src/screens";
+import { forgetSessionToken, rememberSessionToken, storedSessionToken } from "./src/session-token";
 import { ThreadsProvider, ThreadsSheet, useMuseThread } from "./src/threads";
 import { Button, Card, colors, ErrorNotice, Field, IconButton, Mascot, s } from "./src/ui";
 import { type Detail, useWorkspace, WorkspaceContext } from "./src/workspace";
@@ -67,7 +68,7 @@ const titles: Partial<Record<Section, { title: string; subtitle: string }>> = {
   files: { title: "Files", subtitle: "Documents, forms and filled copies." },
 };
 export default function App() {
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(storedSessionToken);
   const [accessKey, setAccessKey] = useState("");
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
@@ -76,16 +77,24 @@ export default function App() {
     setError("");
     try {
       const session = await createSession(key);
+      rememberSessionToken(session.token);
       setToken(session.token);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      // Opening without a key is how a local sample workspace starts itself. A refusal
+      // there only means this workspace needs a key, so the form asks for one quietly.
+      if (key) setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   }, []);
+  const signOut = useCallback(() => {
+    forgetSessionToken();
+    setToken("");
+    setError("");
+  }, []);
   useEffect(() => {
-    void connect();
-  }, [connect]);
+    if (!token) void connect();
+  }, [connect, token]);
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
@@ -94,7 +103,7 @@ export default function App() {
           runtimeUrl={`${API_URL}/api/copilotkit`}
           headers={{ Authorization: `Bearer ${token}` }}
         >
-          <WorkspaceApp token={token} />
+          <WorkspaceApp token={token} onSignOut={signOut} />
         </CopilotKitProvider>
       ) : (
         <SafeAreaView
@@ -141,7 +150,7 @@ export default function App() {
     </SafeAreaProvider>
   );
 }
-function WorkspaceApp({ token }: { token: string }) {
+function WorkspaceApp({ token, onSignOut }: { token: string; onSignOut: () => void }) {
   const api = useMemo(() => new MuseApi(token), [token]);
   const [workspace, setWorkspace] = useState<Workspace>();
   const [section, setSection] = useState<Section>("chat");
@@ -150,16 +159,22 @@ function WorkspaceApp({ token }: { token: string }) {
   const [error, setError] = useState("");
   const [prompt, setPrompt] = useState<{ id: number; text: string }>();
   const refresh = useCallback(async () => {
-    const snapshot = await api.request<Workspace>("/api/workspace");
-    setWorkspace(snapshot);
-    setError("");
-  }, [api]);
+    try {
+      setWorkspace(await api.request<Workspace>("/api/workspace"));
+      setError("");
+    } catch (e) {
+      // A session the server no longer accepts cannot recover by retrying. Ask for the
+      // access key again instead of leaving the workspace stuck on an error.
+      if (e instanceof ApiError && e.status === 401) onSignOut();
+      else setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [api, onSignOut]);
   useEffect(() => {
-    void refresh().catch((e) => setError(String(e)));
+    void refresh();
   }, [refresh]);
   useEffect(() => {
     const listener = AppState.addEventListener("change", (state) => {
-      if (state === "active") void refresh().catch((e) => setError(String(e)));
+      if (state === "active") void refresh();
     });
     return () => listener.remove();
   }, [refresh]);
@@ -195,9 +210,7 @@ function WorkspaceApp({ token }: { token: string }) {
         {error ? (
           <>
             <ErrorNotice error={error} />
-            <Button onPress={() => void refresh().catch((e) => setError(String(e)))}>
-              Try again
-            </Button>
+            <Button onPress={() => void refresh()}>Try again</Button>
           </>
         ) : (
           <>
