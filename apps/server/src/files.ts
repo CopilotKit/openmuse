@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { link, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import type { Artifact } from "../../../packages/domain/src/index.ts";
 import { fillPdf, inspectPdf } from "../../../packages/integrations/src/pdf.ts";
@@ -23,6 +23,21 @@ function assertFileId(id: string): void {
   if (!FILE_ID.test(id)) throw new AppError("File not found", 404);
 }
 
+// Keyed operations need the same ID on every retry, so the ID is derived from the
+// owner and operation key instead of random. It is shaped as a version 5 UUID
+// (first 128 bits of a SHA-256 hash, version and variant bits set) so it is
+// accepted anywhere a random file UUID is.
+export function deterministicFileId(owner: string, operationKey: string): string {
+  const bytes = createHash("sha256")
+    .update(JSON.stringify([owner, operationKey]))
+    .digest()
+    .subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export class Files {
   constructor(
     private readonly db: Store,
@@ -35,11 +50,36 @@ export class Files {
     bytes: Uint8Array,
     source: string,
     parentId?: string,
+    operationKey?: string,
   ): Promise<Artifact> {
+    const id = operationKey === undefined ? randomUUID() : deterministicFileId(owner, operationKey);
+    if (operationKey !== undefined) {
+      const existing = await this.db.get<Artifact>(owner, "files", id);
+      if (existing) return this.signed(owner, existing);
+    }
     if (bytes.length > 10 * 1024 * 1024) throw new AppError("PDFs must be 10 MB or smaller", 413);
-    const metadata = await inspectPdf(bytes);
+    let metadata = await inspectPdf(bytes);
     if (metadata.pageCount > 500) throw new AppError("PDFs must have 500 pages or fewer", 422);
-    const id = randomUUID();
+    const directory = join(this.config.dataDir, "files");
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const path = this.pathFor(id);
+    if (operationKey === undefined) {
+      await writeFile(path, bytes, { mode: 0o600, flag: "wx" });
+    } else {
+      const temporary = `${path}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temporary, bytes, { mode: 0o600, flag: "wx" });
+        try {
+          await link(temporary, path);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+          bytes = await readFile(path);
+          metadata = await inspectPdf(bytes);
+        }
+      } finally {
+        await rm(temporary, { force: true });
+      }
+    }
     const safeName = sanitizeFileName(name);
     const artifact: Artifact = {
       id,
@@ -53,11 +93,12 @@ export class Files {
       source,
       parentId,
     };
-    const directory = join(this.config.dataDir, "files");
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    await writeFile(join(directory, `${id}.pdf`), bytes, { mode: 0o600, flag: "wx" });
-    await this.db.put(owner, "files", artifact);
-    return this.signed(owner, artifact);
+    if (operationKey === undefined) {
+      await this.db.put(owner, "files", artifact);
+      return this.signed(owner, artifact);
+    }
+    const persisted = await this.db.insertIfAbsent(owner, "files", artifact);
+    return this.signed(owner, persisted ?? (await this.get(owner, id)));
   }
   signed(owner: string, file: Artifact): Artifact {
     return { ...file, url: this.auth.sign(owner, `/api/files/${file.id}/content`) };
@@ -82,7 +123,12 @@ export class Files {
     await this.get(owner, id);
     return readFile(this.pathFor(id));
   }
-  async fill(owner: string, id: string, values: Record<string, string | boolean>) {
+  async fill(
+    owner: string,
+    id: string,
+    values: Record<string, string | boolean>,
+    operationKey?: string,
+  ) {
     const file = await this.get(owner, id);
     const bytes = await this.bytes(owner, id);
     const output = await fillPdf(bytes, values);
@@ -92,6 +138,16 @@ export class Files {
       output,
       `Filled from ${file.name}`,
       id,
+      operationKey === undefined
+        ? undefined
+        : JSON.stringify([
+            "fill",
+            operationKey,
+            id,
+            Object.keys(values)
+              .sort()
+              .map((name) => [name, values[name]]),
+          ]),
     );
   }
 }
