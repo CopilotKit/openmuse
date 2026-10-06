@@ -698,7 +698,6 @@ test("a second observe from a stale snapshot loses its monitor commit instead of
   assert.equal((await db.get<Monitor>(owner, "monitors", monitor.id))?.checks, 2);
 });
 
-
 test("pausing a watch preserves a concurrent observe() commit", async () => {
   const monitor = await createMonitor("Pause during observe");
   // Simulate an observe() committing between the pause request's read and its
