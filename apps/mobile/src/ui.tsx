@@ -446,16 +446,7 @@ export function timeLabel(value: string, timeZone?: string) {
     ? value
     : date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone });
 }
-export function relativeDate(value: string) {
-  const diff = Date.now() - new Date(value).getTime();
-  return diff < 60_000
-    ? "Just now"
-    : diff < 3600_000
-      ? `${Math.floor(diff / 60_000)}m ago`
-      : diff < 86400_000
-        ? `${Math.floor(diff / 3600_000)}h ago`
-        : dateLabel(value);
-}
+export { relativeDate } from "./relative-date";
 
 export function resultSummary(value: string) {
   return /^Saved to (?:sample|local) sent mail(?: · .+)?$/.test(value)
