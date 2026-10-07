@@ -470,6 +470,9 @@ export class GoogleClient {
   private async mapMessage(message: z.infer<typeof messageSchema>): Promise<Mail> {
     const hydrate = async (part: GmailPart, depth: number): Promise<void> => {
       if (depth > 30) throw new Error("Gmail message MIME nesting exceeds the limit");
+      // Attached MIME trees are not part of the parent body. Leave their content
+      // lazy, just as mapMessage does when extracting the visible text.
+      if (part.filename || part.mimeType === "message/rfc822") return;
       if (
         !part.filename &&
         (part.mimeType === "text/plain" || part.mimeType === "text/html") &&
