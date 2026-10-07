@@ -14,7 +14,7 @@ import { createAuth } from "./auth.ts";
 import { BrowserService } from "./browser.ts";
 import { ComputerService, type DockerRunner } from "./computer.ts";
 import { computerRoutes } from "./computer-routes.ts";
-import { assertApiDeploymentConfig, type Config } from "./config.ts";
+import type { Config } from "./config.ts";
 import type { Store } from "./db.ts";
 import { LocalAiRelay } from "./engine/localai-relay.ts";
 import { localAiRoutes } from "./engine/localai-routes.ts";
@@ -31,7 +31,6 @@ export async function createApp(
   config: Config,
   options: { docker?: DockerRunner } = {},
 ) {
-  assertApiDeploymentConfig(config);
   const auth = await createAuth(db, config),
     files = new Files(db, config, auth),
     google = new GoogleAuth(db, config),
@@ -46,7 +45,9 @@ export async function createApp(
   const browser = new BrowserService(db, config, auth, files);
   const computer = new ComputerService(db, config, options.docker);
   const agent = new AgentService(db, config, workspace, files, actions, browser, computer);
-  const intelligence = new CopilotKitIntelligence({ apiKey: config.intelligenceApiKey });
+  const intelligence = config.intelligenceApiKey
+    ? new CopilotKitIntelligence({ apiKey: config.intelligenceApiKey })
+    : undefined;
   const runtime = makeRuntime(config, agent, auth, intelligence);
   const relay = new LocalAiRelay(config);
   const app = new Hono<{ Variables: { owner: string; device: DeviceInfo } }>();
@@ -253,6 +254,11 @@ export async function createApp(
     });
     const main = await db.get<{ threadId: string }>(owner, "conversation-settings", "main");
     if (!main) throw new AppError("Main conversation could not be loaded", 503);
+    if (!intelligence)
+      throw new AppError(
+        "Rich Threads is not configured. Set CPK_INTELLIGENCE_API_KEY to enable conversation persistence.",
+        503,
+      );
     try {
       await intelligence.getOrCreateThread({
         threadId: main.threadId,

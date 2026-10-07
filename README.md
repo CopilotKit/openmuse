@@ -61,7 +61,7 @@ The [feature inventory](docs/FEATURES.md) describes implemented capabilities and
 
 ## Quick start
 
-**Requirements:** Node 24 LTS, pnpm 11.19.0, and a CopilotKit Intelligence project key. The local sample app needs no model, Google account, or Docker.
+**Requirements:** Node 24 LTS and pnpm 11.19.0. The local sample app needs no model, Google account, Docker, or CopilotKit Intelligence project key. (`CPK_INTELLIGENCE_API_KEY` is optional — see [CopilotKit Rich Threads](#copilotkit-rich-threads).)
 
 ```sh
 git clone https://github.com/CopilotKit/OpenMuse.git openmuse
@@ -70,7 +70,7 @@ pnpm install --frozen-lockfile
 cp .env.example .env
 npx copilotkit@latest login
 npx copilotkit@latest project select
-# Set CPK_INTELLIGENCE_API_KEY in .env to the generated server-only project key.
+# Optional: set CPK_INTELLIGENCE_API_KEY in .env for conversation persistence + replay.
 pnpm dev
 ```
 
@@ -96,8 +96,8 @@ For iOS or Android, use `pnpm --dir apps/mobile ios` or `pnpm --dir apps/mobile 
 Copy the commented settings in [.env.example](.env.example) into your private `.env`:
 
 1. Set `AGENT_BACKEND=model`, `MODEL=provider/model-id`, and the matching provider key. CopilotKit supports the configured OpenAI, Anthropic or Google provider. Fictional data can still be used with a real model. Provider keys stay on the server.
-2. Create or select a CopilotKit Intelligence project with `npx copilotkit@latest login` and `npx copilotkit@latest project select`. Keep the generated `CPK_INTELLIGENCE_API_KEY` on the server.
-3. For personal mail/calendar, set `WORKSPACE_MODE=live`, the generated `CPK_INTELLIGENCE_API_KEY`, a random `OPENMUSE_ACCESS_KEY` of at least 24 characters, and `TOKEN_ENCRYPTION_KEY` containing 32 random bytes encoded as base64. Restart the API.
+2. *(Optional.)* Rich Threads (conversation persistence + replay) requires a CopilotKit Intelligence project. Create or select one with `npx copilotkit@latest login` and `npx copilotkit@latest project select`, then keep the generated `CPK_INTELLIGENCE_API_KEY` on the server. Skip this to run self-contained on the local conversation store.
+3. For personal mail/calendar, set `WORKSPACE_MODE=live`, a random `OPENMUSE_ACCESS_KEY` of at least 24 characters, and `TOKEN_ENCRYPTION_KEY` containing 32 random bytes encoded as base64. (`CPK_INTELLIGENCE_API_KEY` is optional even in live mode; set it only if you want Rich Threads.) Restart the API.
 4. Configure a Google OAuth web client with Gmail and Calendar APIs enabled. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; register `${PUBLIC_API_URL}/api/google/callback` as its redirect URI. Configure consent/test-user access in your Google project.
 5. Open **Apps → Gmail** (or **Google Calendar**), connect read access, and grant write access when needed. Every send or calendar change still requires its own stored review. Changing/disconnecting the account invalidates pending connection-bound work.
 
@@ -137,7 +137,7 @@ No hidden retry occurs after an uncertain external write. Review its provider ou
 
 ## CopilotKit Rich Threads
 
-Every deployment requires `CPK_INTELLIGENCE_API_KEY` on the API server for CopilotKit Intelligence conversation persistence and replay. Create or select a project with `npx copilotkit@latest login` and `npx copilotkit@latest project select`, set the generated server-only key, and restart the API. The native menu uses `useThreads`; rich tool results link back to saved tasks, documents, and browser sessions.
+Every deployment requires `CPK_INTELLIGENCE_API_KEY` on the API server for CopilotKit Intelligence conversation persistence and replay. Create or select a project with `npx copilotkit@latest login` and `npx copilotkit@latest project select`, set the generated server-only key, and restart the API. With no key configured, the API boots on CopilotKit's base SSE mode and chat history persists to the local `/api/conversation` store; the thread menu degrades to a single main conversation. The native menu uses `useThreads` when configured; rich tool results link back to saved tasks, documents, and browser sessions.
 
 Intelligence is a separate service and is not included in this repository's MIT license. No project key is shipped. [Configuration and validation boundaries](docs/RICH-THREADS.md).
 
@@ -147,7 +147,7 @@ Intelligence is a separate service and is not included in this repository's MIT 
 flowchart TD
   Client[Expo / React Native / Web] -->|AG-UI and authenticated API| API[Hono + CopilotKit runtime]
   API --> Tasks[Durable task worker]
-  API --> Threads[CopilotKit Intelligence required in every mode]
+  API --> Threads[CopilotKit Intelligence optional — Rich Threads]
   API --> Store[(PGlite or PostgreSQL)]
   Tasks --> Store
   Tasks --> Review[Stored action review]

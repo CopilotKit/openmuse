@@ -1,55 +1,75 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  assertApiDeploymentConfig,
-  browserWorkerUrl,
-  type Config,
-  shadowedEnvKeys,
-} from "../apps/server/src/config.ts";
+import { browserWorkerUrl, readConfig, shadowedEnvKeys } from "../apps/server/src/config.ts";
 
-const sampleConfig: Config = {
-  mode: "sample",
-  port: 8787,
-  host: "127.0.0.1",
-  publicUrl: "http://localhost:8787",
-  dataDir: ".openmuse",
-  agentBackend: "sample",
-  googleRedirectUri: "http://localhost:8787/api/google/callback",
-  allowedOrigins: ["http://localhost:8081"],
-};
+// Environment keys touched by readConfig. Each test saves, mutates, and
+// restores them so the suite stays isolated from the developer's .env / shell.
+const envKeys = [
+  "CPK_INTELLIGENCE_API_KEY",
+  "WORKSPACE_MODE",
+  "AGENT_BACKEND",
+  "COMPUTER_PROVIDER",
+  "COMPUTER_ENABLED",
+  "E2B_API_KEY",
+  "COMPUTER_E2B_TEMPLATE",
+  "COMPUTER_DEPLOYMENT_ID",
+  "OPENMUSE_ACCESS_KEY",
+  "TOKEN_ENCRYPTION_KEY",
+  "OPENAI_API_FORMAT",
+];
 
-function liveConfig(intelligenceApiKey?: string): Config {
-  return {
-    ...sampleConfig,
-    mode: "live",
-    agentBackend: "model",
-    intelligenceApiKey,
-  };
-}
-
-const missingKeyMessage =
-  "OpenMuse requires CPK_INTELLIGENCE_API_KEY. " +
-  "Run `npx copilotkit@latest login` and `npx copilotkit@latest project select`, " +
-  "then set the generated server-only key. " +
-  "See https://docs.copilotkit.ai/intelligence/connect-your-runtime";
-
-test("every API mode rejects a missing or blank Intelligence key", () => {
-  for (const mode of [sampleConfig, liveConfig()]) {
-    for (const key of [undefined, "", " \t\n"]) {
-      assert.throws(() => assertApiDeploymentConfig({ ...mode, intelligenceApiKey: key }), {
-        name: "Error",
-        message: missingKeyMessage,
-      });
+function withEnv(overrides: Record<string, string | undefined>, fn: () => void) {
+  const old = Object.fromEntries(envKeys.map((k) => [k, process.env[k]]));
+  try {
+    for (const k of envKeys) delete process.env[k];
+    for (const [k, v] of Object.entries(overrides)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    fn();
+  } finally {
+    for (const [k, v] of Object.entries(old)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
     }
   }
+}
+
+test("CPK_INTELLIGENCE_API_KEY is optional in every workspace mode (Rich Threads off)", () => {
+  // Sample mode runs self-contained without the key.
+  withEnv({ WORKSPACE_MODE: "sample", AGENT_BACKEND: "sample" }, () => {
+    const config = readConfig();
+    assert.equal(config.intelligenceApiKey, undefined);
+    assert.equal(config.mode, "sample");
+  });
+  // Live mode also starts without the key; only the access key and the
+  // encryption key gate live mode, not CopilotKit Intelligence.
+  withEnv(
+    {
+      WORKSPACE_MODE: "live",
+      AGENT_BACKEND: "model",
+      OPENMUSE_ACCESS_KEY: "0123456789abcdef0123456789abcdef",
+      TOKEN_ENCRYPTION_KEY: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+    },
+    () => {
+      const config = readConfig();
+      assert.equal(config.intelligenceApiKey, undefined);
+      assert.equal(config.mode, "live");
+    },
+  );
 });
 
-test("every API mode accepts a non-empty Intelligence key", () => {
-  for (const mode of [sampleConfig, liveConfig()]) {
-    assert.doesNotThrow(() =>
-      assertApiDeploymentConfig({ ...mode, intelligenceApiKey: "test-project-key-never-sent" }),
-    );
-  }
+test("readConfig reads a non-empty Intelligence key when one is set", () => {
+  withEnv(
+    {
+      WORKSPACE_MODE: "sample",
+      AGENT_BACKEND: "sample",
+      CPK_INTELLIGENCE_API_KEY: "  sk-project-key  ",
+    },
+    () => {
+      assert.equal(readConfig().intelligenceApiKey, "sk-project-key");
+    },
+  );
 });
 
 test("browser worker URL keeps an existing scheme and adds http to host:port", () => {
@@ -62,13 +82,14 @@ test("browser worker URL keeps an existing scheme and adds http to host:port", (
 
 test("environment variables that override a different .env value are reported by name", () => {
   const file = { OPENAI_API_KEY: "sk-or-file", MODEL: "openai/gpt-5", PORT: "8787", EMPTY: "" };
-  const env = { OPENAI_API_KEY: "sk-proj-system", MODEL: "openai/gpt-5", EMPTY: "set" };
+  const env = { OPENAI_API_KEY: "«redacted:sk-…»", MODEL: "openai/gpt-5", EMPTY: "set" };
   assert.deepEqual(shadowedEnvKeys(file, env), ["OPENAI_API_KEY", "EMPTY"]);
   assert.deepEqual(shadowedEnvKeys(file, {}), []);
 });
 
 test("computer provider defaults to Docker and e2b-desktop requires a server-side key", async () => {
-  const { readConfig } = await import("../apps/server/src/config.ts");
+  // readConfig() reads process.env on each call, so the static import above is
+  // sufficient; no per-test re-import is needed.
   const keys = [
     "COMPUTER_PROVIDER",
     "COMPUTER_ENABLED",
@@ -79,8 +100,9 @@ test("computer provider defaults to Docker and e2b-desktop requires a server-sid
   ];
   const old = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   try {
-    process.env.CPK_INTELLIGENCE_API_KEY = "test-project-key-never-sent";
-    for (const key of keys.slice(0, 5)) delete process.env[key];
+    // No Intelligence key is required to read config now; this exercises only
+    // the computer-provider validation path.
+    for (const key of keys) delete process.env[key];
     assert.equal(readConfig().computerProvider, "docker");
     process.env.COMPUTER_PROVIDER = "k8s";
     assert.throws(() => readConfig(), /COMPUTER_PROVIDER/);

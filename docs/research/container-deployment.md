@@ -65,7 +65,7 @@ All compose env vars support `${VAR:-default}` shell-style substitution:
 - `CHAT_MODEL` (default: `openai/qwen3-8b`)
 - `TASK_MODEL` (default: `openai/qwen3-32b`)
 - `OPENAI_API_FORMAT` (default: `chat-completions`)
-- `CPK_INTELLIGENCE_API_KEY` (no default — required for live mode)
+- `CPK_INTELLIGENCE_API_KEY` (optional — required only for Rich Threads persistence/replay)
 - `COMPUTER_ENABLED` (default: `false`)
 - `COMPUTER_IMAGE` (default: `openmuse-computer:local`)
 

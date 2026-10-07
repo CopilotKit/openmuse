@@ -311,7 +311,7 @@ provider choice (decision + credentials), multi-user deployment decision.
 
 | Item | Credential needed | Source |
 |---|---|---|
-| CopilotKit Intelligence | `CPK_INTELLIGENCE_API_KEY` | `npx copilotkit@latest login` → `project select` |
+| CopilotKit Intelligence (optional) | `CPK_INTELLIGENCE_API_KEY` | `npx copilotkit@latest login` → `project select` |
 | Google OAuth live | `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` + `TOKEN_ENCRYPTION_KEY` + `OPENMUSE_ACCESS_KEY` | Google Cloud Console + `openssl` |
 | Live model | `OPENAI_API_KEY` (or equivalent) + `MODEL` | Model provider account |
 | Android smoke tests | Android device/emulator | Physical device or AVD |
