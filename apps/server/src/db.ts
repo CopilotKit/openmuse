@@ -30,6 +30,28 @@ export class Store {
     );
     return result.rows.map((row) => row.data as T);
   }
+  async listByGoalId<T = Record<string, unknown>>(
+    owner: string,
+    kind: string,
+    goalId: string,
+  ): Promise<T[]> {
+    const result = await this.db.query(
+      "SELECT data FROM records WHERE owner=$1 AND kind=$2 AND data->>'goalId'=$3 ORDER BY updated_at DESC,id",
+      [owner, kind, goalId],
+    );
+    return result.rows.map((row) => row.data as T);
+  }
+  async listByStatus<T = Record<string, unknown>>(
+    owner: string,
+    kind: string,
+    status: string,
+  ): Promise<T[]> {
+    const result = await this.db.query(
+      "SELECT data FROM records WHERE owner=$1 AND kind=$2 AND data->>'status'=$3 ORDER BY updated_at DESC,id",
+      [owner, kind, status],
+    );
+    return result.rows.map((row) => row.data as T);
+  }
   async put<T extends { id: string }>(owner: string, kind: string, value: T): Promise<T> {
     await this.db.query(
       "INSERT INTO records(owner,kind,id,data) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(owner,kind,id) DO UPDATE SET data=excluded.data,updated_at=now()",
@@ -54,6 +76,22 @@ export class Store {
     const result = await this.db.query(
       "UPDATE records SET data=data || $5::jsonb,updated_at=now() WHERE owner=$1 AND kind=$2 AND id=$3 AND data @> $4::jsonb RETURNING data",
       [owner, kind, id, JSON.stringify(expected), JSON.stringify(patch)],
+    );
+    return (result.rows[0]?.data as T | undefined) ?? null;
+  }
+  // Update only the selected checkbox against the current row, preserving concurrent
+  // additions, renames, reordering and other milestones' completion state.
+  async setMilestoneDone<T>(owner: string, goalId: string, milestoneId: string, done: boolean) {
+    const result = await this.db.query(
+      `UPDATE records SET data=jsonb_set(data, '{milestones}', (
+        SELECT jsonb_agg(CASE WHEN item->>'id'=$3
+          THEN item || jsonb_build_object('done', $4::boolean) ELSE item END ORDER BY ordinal)
+        FROM jsonb_array_elements(data->'milestones') WITH ORDINALITY AS milestones(item, ordinal)
+      )), updated_at=now()
+      WHERE owner=$1 AND kind='goals' AND id=$2
+        AND EXISTS (SELECT 1 FROM jsonb_array_elements(data->'milestones') item WHERE item->>'id'=$3)
+      RETURNING data`,
+      [owner, goalId, milestoneId, done],
     );
     return (result.rows[0]?.data as T | undefined) ?? null;
   }

@@ -6,10 +6,16 @@ import {
   defineTool,
   type ToolDefinition,
 } from "@copilotkit/runtime/v2";
-import { chat, maxIterations, type SchemaInput, toolDefinition } from "@tanstack/ai";
+import {
+  chat,
+  isContentPartArray,
+  maxIterations,
+  type SchemaInput,
+  toolDefinition,
+} from "@tanstack/ai";
 import { type AnthropicChatModel, anthropicText } from "@tanstack/ai-anthropic";
 import { type GeminiTextModel, geminiText } from "@tanstack/ai-gemini";
-import { type OpenAIChatModel, openaiText } from "@tanstack/ai-openai";
+import { type OpenAIChatModel, openaiChatCompletions, openaiText } from "@tanstack/ai-openai";
 import { map, mergeMap, type Observable } from "rxjs";
 import { z } from "zod";
 import { MODEL_MAX_RETRIES } from "../config.ts";
@@ -25,6 +31,13 @@ function adapter(spec: string) {
   const id = model.trim();
   switch (provider.toLowerCase()) {
     case "openai":
+      // OpenAI-compatible endpoints that do not implement the Responses API
+      // tool loop (e.g. DeepSeek) can opt into the Chat Completions wire format.
+      if (process.env.OPENAI_CHAT_COMPLETIONS === "true")
+        return openaiChatCompletions(id as OpenAIChatModel, {
+          baseURL: process.env.OPENAI_BASE_URL,
+          maxRetries: MODEL_MAX_RETRIES,
+        });
       return openaiText(id as OpenAIChatModel, {
         baseURL: process.env.OPENAI_BASE_URL,
         maxRetries: MODEL_MAX_RETRIES,
@@ -103,6 +116,8 @@ export function tanstackAgent(options: {
   maxSteps: number;
   tools: ToolDefinition[];
   prompt: string;
+  /** Checked between model turns, after the current turn's tools have settled. */
+  shouldContinue?: () => boolean;
   /** Said when the step limit, not the model, ends a run; otherwise the reply just stops. */
   stepLimitNote?: string;
 }) {
@@ -136,19 +151,41 @@ export function tanstackAgent(options: {
             }).server((args) => (tool.execute as (args: unknown) => Promise<unknown>)(args)),
           ),
         ],
-        agentLoopStrategy: maxIterations(options.maxSteps),
+        agentLoopStrategy: (state) =>
+          maxIterations(options.maxSteps)(state) && (options.shouldContinue?.() ?? true),
         abortController,
       });
     },
   });
   const run = agent.run.bind(agent);
   agent.run = (input: RunAgentInput) => {
-    const events = splitTextAtToolCalls(run(input));
+    const events = splitTextAtToolCalls(run(input)).pipe(map(textOnlyToolResult));
     return options.stepLimitNote
       ? reportStepLimit(events, options.maxSteps, options.stepLimitNote)
       : events;
   };
   return agent;
+}
+
+/**
+ * A tool can return TanStack content parts, e.g. text plus a screenshot. Inside the run
+ * the adapters send them to the model as multimodal tool results. The AG-UI result event
+ * would carry the same parts JSON-encoded, image data included, into the stored thread,
+ * and later turns replay that history as plain text. Keep only the text parts there.
+ */
+export function textOnlyToolResult(event: BaseEvent): BaseEvent {
+  if (event.type !== EventType.TOOL_CALL_RESULT) return event;
+  const content = (event as { content?: unknown }).content;
+  if (typeof content !== "string" || !content.startsWith("[")) return event;
+  let parts: unknown;
+  try {
+    parts = JSON.parse(content);
+  } catch {
+    return event;
+  }
+  if (!isContentPartArray(parts)) return event;
+  const text = parts.flatMap((part) => (part.type === "text" ? [part.content] : []));
+  return { ...event, content: text.join("\n") } as BaseEvent;
 }
 
 /**

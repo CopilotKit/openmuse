@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, before, test } from "node:test";
+import { after, before, beforeEach, test } from "node:test";
 import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import { createApp } from "../apps/server/src/app.ts";
 import type { Config } from "../apps/server/src/config.ts";
@@ -54,6 +54,12 @@ before(async () => {
   });
   assert.equal(session.status, 200);
   token = (await session.json()).token;
+});
+beforeEach(async () => {
+  // Keep persisted fixtures and the session, but give each independent test its
+  // own app middleware state, including the per-connection request budget.
+  await server.agent.stop();
+  server = await createApp(db, config);
 });
 after(async () => {
   await server?.agent?.stop();
@@ -254,6 +260,15 @@ test("idea dismissal survives refresh and concurrent acceptance creates one goal
   await read(`/tasks/${results[0].taskId}/control`, { action: "cancel" });
 });
 
+test("notification reads do not load the full agent workspace", async (t) => {
+  t.mock.method(server.agent, "snapshot", async () => {
+    throw new Error("notifications route must not call snapshot");
+  });
+  const response = await request("/notifications");
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.ok(Array.isArray(await response.json()));
+});
+
 test("sample monitor saves its baseline and deduplicates notifications for repeated changes", async () => {
   await read("/sample-page", { text: "No tables available" });
   const monitor = await read<Monitor>(
@@ -287,7 +302,9 @@ test("sample monitor saves its baseline and deduplicates notifications for repea
     await server.agent.worker.tick();
   }
   const found = await notifications();
-  assert.equal(found.length, 2);
+  // Identical repeats stay quiet; the final flip back to a previously seen
+  // page is a new change event and alerts again.
+  assert.equal(found.length, 3);
   assert.ok(found.every((item) => !item.read));
   const readNotification = await read<AgentNotification>(`/notifications/${found[0].id}/read`, {});
   assert.equal(readNotification.read, true);
@@ -342,5 +359,232 @@ test("live mode rejects sample sources and hides the fixture mutation endpoint",
     });
   } finally {
     await live.agent.stop();
+  }
+});
+
+test("milestone delegation validates membership and deduplicates only the same request", async () => {
+  const goal = await read<Goal>(
+    "/goals",
+    { title: "Budget", milestones: ["Review spending", "Save"] },
+    201,
+  );
+  const other = await read<Goal>(
+    "/goals",
+    { title: "Other", milestones: ["Review spending"] },
+    201,
+  );
+  const privateGoal = await server.agent.createGoal("other-user", {
+    title: "Private",
+    milestones: ["Review spending"],
+  });
+  const input = {
+    prompt: "Review spending",
+    goalId: goal.id,
+    milestoneId: goal.milestones[0].id,
+    requestId: "budget-request",
+  };
+  for (const [bad, status] of [
+    [{ ...input, goalId: undefined }, 422],
+    [{ ...input, goalId: privateGoal.id, milestoneId: privateGoal.milestones[0].id }, 404],
+    [{ ...input, milestoneId: other.milestones[0].id }, 404],
+    [{ ...input, milestoneId: "missing" }, 404],
+  ] as const)
+    assert.equal((await request("/tasks", bad)).status, status);
+  const [first, replay] = await Promise.all([
+    read<AgentTask>("/tasks", input, 201),
+    read<AgentTask>("/tasks", input, 201),
+  ]);
+  assert.equal(first.id, replay.id);
+  assert.equal(first.milestoneId, input.milestoneId);
+  const later = await read<AgentTask>("/tasks", { ...input, requestId: "budget-later" }, 201);
+  assert.notEqual(first.id, later.id);
+  await read(`/goals/${goal.id}`, { status: "paused" });
+  assert.equal((await read<{ task: AgentTask }>(`/tasks/${first.id}`)).task.status, "paused");
+  const paused = await read<AgentTask>("/tasks", { ...input, requestId: "budget-paused" }, 201);
+  assert.equal(paused.status, "paused");
+  // A replay still recovers the original task after the milestone has been removed.
+  await read(`/goals/${goal.id}`, { milestones: [] });
+  assert.equal((await read<AgentTask>("/tasks", input, 201)).id, first.id);
+  assert.equal((await request("/tasks", { ...input, requestId: "budget-deleted" })).status, 404);
+  assert.equal(
+    (await read<{ task: AgentTask }>(`/tasks/${first.id}`)).task.milestoneId,
+    input.milestoneId,
+  );
+});
+
+test("manual milestone completion preserves current titles, ordering and concurrent progress", async () => {
+  const goal = await read<Goal>(
+    "/goals",
+    { title: "Travel", milestones: ["Dates", "Tickets"] },
+    201,
+  );
+  const [dates, tickets] = goal.milestones;
+  const renamed = { ...dates, title: "Confirm dates" };
+  await read(`/goals/${goal.id}`, {
+    milestones: [tickets, renamed, { id: "new", title: "Pack", done: true }],
+  });
+  await Promise.all([
+    read(`/goals/${goal.id}/milestones/${dates.id}`, { done: true }),
+    read(`/goals/${goal.id}/milestones/${tickets.id}`, { done: true }),
+    read(`/goals/${goal.id}`, { status: "paused" }),
+  ]);
+  const saved = (await read<AgentWorkspace>("")).goals.find((item) => item.id === goal.id);
+  assert.deepEqual(saved?.milestones, [
+    { ...tickets, done: true },
+    { ...renamed, done: true },
+    { id: "new", title: "Pack", done: true },
+  ]);
+  assert.equal(saved?.status, "paused");
+  await read(`/goals/${goal.id}/milestones/${dates.id}`, { done: false });
+  assert.equal(
+    (await request(`/goals/${goal.id}/milestones/${dates.id}`, { done: "yes" })).status,
+    422,
+  );
+  await read(`/goals/${goal.id}`, { milestones: [tickets] });
+  assert.equal(
+    (await request(`/goals/${goal.id}/milestones/${dates.id}`, { done: true })).status,
+    404,
+  );
+  const hidden = await server.agent.createGoal("other-user", {
+    title: "Private",
+    milestones: ["Private step"],
+  });
+  assert.equal(
+    (await request(`/goals/${hidden.id}/milestones/${hidden.milestones[0].id}`, { done: true }))
+      .status,
+    404,
+  );
+});
+
+test("a change watch alert lists the new and updated lines of the page", async () => {
+  await read("/sample-page", {
+    text: "AI jobs in Munich\nSiemens · Werkstudent AI · 2 openings\nBCG · Intern",
+  });
+  const monitor = await read<Monitor>(
+    "/monitors",
+    {
+      title: "Munich AI jobs",
+      url: "sample://availability",
+      condition: "change",
+      intervalMinutes: 1,
+    },
+    201,
+  );
+  await server.agent.worker.tick();
+  await read("/sample-page", {
+    text: "AI jobs in Munich\nSAP · Working Student AI Engineer\nSiemens · Werkstudent AI · 3 openings\nBCG · Intern",
+  });
+  await read(`/monitors/${monitor.id}/control`, { action: "check" });
+  await server.agent.worker.tick();
+  const [alert] = (await read<AgentNotification[]>("/notifications")).filter(
+    (item) => item.taskId === monitor.taskId,
+  );
+  assert.equal(
+    alert?.body,
+    "Changed at sample://availability\nNew:\n• SAP · Working Student AI Engineer\nUpdated:\n• Siemens · Werkstudent AI · 3 openings",
+  );
+  const { task } = await read<{ task: AgentTask }>(`/tasks/${monitor.taskId}`);
+  assert.equal(
+    task.result,
+    "Change found: 2 lines changed (1 new, 1 updated). A notification is ready.",
+  );
+  await read(`/monitors/${monitor.id}/control`, { action: "stop" });
+});
+
+test("a change watch stays quiet when only relative times change", async () => {
+  await read("/sample-page", { text: "Jobs\nSiemens · Werkstudent AI · 3 minutes ago" });
+  const monitor = await read<Monitor>(
+    "/monitors",
+    { title: "Quiet jobs", url: "sample://availability", condition: "change", intervalMinutes: 1 },
+    201,
+  );
+  const alerts = async () =>
+    (await read<AgentNotification[]>("/notifications")).filter(
+      (item) => item.taskId === monitor.taskId,
+    );
+  await server.agent.worker.tick();
+  for (const text of [
+    "Jobs\nSiemens · Werkstudent AI · 58 minutes ago",
+    "Jobs\nSiemens · Werkstudent AI · 1 hour ago",
+  ]) {
+    await read("/sample-page", { text });
+    await read(`/monitors/${monitor.id}/control`, { action: "check" });
+    await server.agent.worker.tick();
+  }
+  assert.equal((await alerts()).length, 0, "ticking timestamps are not news");
+  await read("/sample-page", {
+    text: "Jobs\nSAP · Working Student AI\nSiemens · Werkstudent AI · 2 hours ago",
+  });
+  await read(`/monitors/${monitor.id}/control`, { action: "check" });
+  await server.agent.worker.tick();
+  const [alert] = await alerts();
+  assert.match(alert?.body ?? "", /New:\n• SAP · Working Student AI/);
+  await read(`/monitors/${monitor.id}/control`, { action: "stop" });
+});
+
+test("a change watch alerts when only a price changes", async () => {
+  await read("/sample-page", { text: "Headphones\nPrice: $399.99\nOnly 3 left" });
+  const monitor = await read<Monitor>(
+    "/monitors",
+    { title: "Headphones", url: "sample://availability", condition: "change", intervalMinutes: 1 },
+    201,
+  );
+  await server.agent.worker.tick();
+  await read("/sample-page", { text: "Headphones\nPrice: $279.99\nOnly 3 left" });
+  await read(`/monitors/${monitor.id}/control`, { action: "check" });
+  await server.agent.worker.tick();
+  const alerts = (await read<AgentNotification[]>("/notifications")).filter(
+    (item) => item.taskId === monitor.taskId,
+  );
+  assert.equal(alerts.length, 1, "a price change is news");
+  assert.equal(alerts[0]?.body, "Changed at sample://availability\nUpdated:\n• Price: $279.99");
+  await read(`/monitors/${monitor.id}/control`, { action: "stop" });
+});
+
+test("a change watch alerts when a numbered listing is removed", async () => {
+  await read("/sample-page", { text: "Rentals\nListing 101 · 2 bed\nListing 102 · 2 bed" });
+  const monitor = await read<Monitor>(
+    "/monitors",
+    { title: "Rentals", url: "sample://availability", condition: "change", intervalMinutes: 1 },
+    201,
+  );
+  await server.agent.worker.tick();
+  await read("/sample-page", { text: "Rentals\nListing 102 · 2 bed" });
+  await read(`/monitors/${monitor.id}/control`, { action: "check" });
+  await server.agent.worker.tick();
+  const alerts = (await read<AgentNotification[]>("/notifications")).filter(
+    (item) => item.taskId === monitor.taskId,
+  );
+  assert.equal(alerts.length, 1, "a removed listing is news");
+  assert.equal(
+    alerts[0]?.body,
+    "Changed at sample://availability\nRemoved:\n• Listing 101 · 2 bed",
+  );
+  await read(`/monitors/${monitor.id}/control`, { action: "stop" });
+});
+
+test("a change watch alerts on a change past the saved lines", async () => {
+  const long = "x".repeat(300);
+  const many = Array.from({ length: 2000 }, (_, i) => `Row ${i}`).join("\n");
+  for (const [before, after] of [
+    [`Terms\n${long} version 1`, `Terms\n${long} version 2`],
+    [`${many}\nLast row: open`, `${many}\nLast row: closed`],
+  ]) {
+    await read("/sample-page", { text: before });
+    const monitor = await read<Monitor>(
+      "/monitors",
+      { title: "Long page", url: "sample://availability", condition: "change", intervalMinutes: 1 },
+      201,
+    );
+    await server.agent.worker.tick();
+    await read("/sample-page", { text: after });
+    await read(`/monitors/${monitor.id}/control`, { action: "check" });
+    await server.agent.worker.tick();
+    const alerts = (await read<AgentNotification[]>("/notifications")).filter(
+      (item) => item.taskId === monitor.taskId,
+    );
+    assert.equal(alerts.length, 1, "a change past the saved lines is still news");
+    assert.match(alerts[0]?.body ?? "", /^Condition met at sample:\/\/availability: /);
+    await read(`/monitors/${monitor.id}/control`, { action: "stop" });
   }
 });

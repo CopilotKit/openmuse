@@ -1,3 +1,4 @@
+import "./config.ts";
 import { randomUUID } from "node:crypto";
 import { MessageSchema } from "@ag-ui/core";
 import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
@@ -5,7 +6,11 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { z } from "zod";
-import { emailDraftSchema, proposalSchema } from "../../../packages/domain/src/index.ts";
+import {
+  calendarRangeSchema,
+  emailDraftSchema,
+  proposalSchema,
+} from "../../../packages/domain/src/index.ts";
 import { ActionService } from "./actions.ts";
 import { agentConfigured, makeRuntime } from "./agent.ts";
 import { createAuth } from "./auth.ts";
@@ -19,6 +24,7 @@ import { AgentService } from "./engine/service.ts";
 import { AppError } from "./errors.ts";
 import { Files } from "./files.ts";
 import { GoogleAuth } from "./google-auth.ts";
+import { rateLimit } from "./rate-limit.ts";
 import { WorkspaceService } from "./workspace.ts";
 
 export async function createApp(
@@ -69,6 +75,7 @@ export async function createApp(
       onError: (c) => c.json({ error: "Request is too large; PDFs must be 10 MB or smaller" }, 413),
     }),
   );
+  app.use("/api/*", rateLimit(Boolean(config.trustProxy)));
   app.onError((error, c) => {
     if (error instanceof z.ZodError)
       return c.json({ error: error.issues.map((i) => i.message).join("; ") }, 422);
@@ -160,13 +167,7 @@ export async function createApp(
         timeMax: z.iso.datetime({ offset: true }).optional(),
       })
       .parse(c.req.query());
-    if (
-      query.timeMin &&
-      query.timeMax &&
-      (Date.parse(query.timeMax) <= Date.parse(query.timeMin) ||
-        Date.parse(query.timeMax) - Date.parse(query.timeMin) > 366 * 86400000)
-    )
-      throw new AppError("Choose a calendar range between one moment and 366 days", 422);
+    if (query.timeMin && query.timeMax) calendarRangeSchema.parse(query);
     return c.json(await workspace.events(c.get("owner"), query));
   });
   app.get("/api/mail/threads/:id", async (c) =>
@@ -188,7 +189,9 @@ export async function createApp(
   });
   app.get("/api/drafts", async (c) => c.json(await db.list(c.get("owner"), "drafts")));
   app.post("/api/drafts", async (c) => {
-    const body = emailDraftSchema.extend({ id: z.string().optional() }).parse(await c.req.json());
+    const body = emailDraftSchema
+      .extend({ id: z.string().uuid().optional() })
+      .parse(await c.req.json());
     const existing = body.id
       ? await db.get<{ createdAt: string }>(c.get("owner"), "drafts", body.id)
       : null;

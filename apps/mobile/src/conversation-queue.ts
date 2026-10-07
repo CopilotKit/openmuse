@@ -20,6 +20,12 @@ export class ConversationQueue {
   remove(id: string) {
     this.update({ pending: this.state.pending.filter((message) => message.id !== id) });
   }
+  /** Put back, first in line, a message the server refused before running it. */
+  restore(message: QueuedMessage) {
+    this.update({
+      pending: [message, ...this.state.pending.filter((queued) => queued.id !== message.id)],
+    });
+  }
   pause() {
     this.update({ paused: true });
   }
