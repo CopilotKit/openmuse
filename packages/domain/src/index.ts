@@ -38,6 +38,15 @@ export interface CalendarEvent {
   description: string;
   attendees: string[];
 }
+export const calendarRangeSchema = z
+  .object({
+    timeMin: z.iso.datetime({ offset: true }),
+    timeMax: z.iso.datetime({ offset: true }),
+  })
+  .refine(({ timeMin, timeMax }) => {
+    const duration = Date.parse(timeMax) - Date.parse(timeMin);
+    return duration > 0 && duration <= 366 * 86400000;
+  }, "Calendar range must end after it starts and span at most 366 days");
 export interface Artifact {
   id: string;
   name: string;
@@ -94,17 +103,19 @@ export const eventDraftSchema = z
     ) {
       ctx.addIssue({ code: "custom", message: "End must be after a valid start", path: ["end"] });
     }
-    const dateOnly = /^\d{4}-\d{2}-\d{2}$/;
+    const dateOnly = z.iso.date();
     const timed = /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/;
-    if (
-      !(value.allDay ? dateOnly : timed).test(value.start) ||
-      !(value.allDay ? dateOnly : timed).test(value.end)
-    ) {
+    // Validate the calendar date separately so timed values can retain minute precision.
+    const validTimestamp = (timestamp: string) =>
+      value.allDay
+        ? dateOnly.safeParse(timestamp).success
+        : timed.test(timestamp) && dateOnly.safeParse(timestamp.slice(0, 10)).success;
+    if (!validTimestamp(value.start) || !validTimestamp(value.end)) {
       ctx.addIssue({
         code: "custom",
         message: value.allDay
-          ? "All-day events need date-only values"
-          : "Timed events need an explicit offset",
+          ? "All-day events need valid date-only values"
+          : "Timed events need valid date-times with an explicit offset",
         path: ["start"],
       });
     }
@@ -165,7 +176,7 @@ export interface ActivityEntry {
 export interface Connection {
   id: string;
   name: string;
-  status: "connected" | "disconnected" | "sample" | "unconfigured";
+  status: "connected" | "disconnected" | "sample" | "unconfigured" | "unavailable";
   account?: string;
   capabilities: string[];
 }

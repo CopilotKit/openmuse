@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import { readApiPayload } from "./api-response";
 
 export const API_URL = (
   process.env.EXPO_PUBLIC_API_URL ||
@@ -18,11 +19,7 @@ export class MuseApi {
       },
       body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
     });
-    const payload = await response.json();
-    if (!response.ok)
-      throw new Error(
-        typeof payload.error === "string" ? payload.error : `Request failed (${response.status})`,
-      );
+    const payload = await readApiPayload<T>(response);
     return payload;
   }
   url(path: string) {
@@ -38,7 +35,9 @@ export async function createSession(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ accessKey }),
   });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error || "Could not open your workspace.");
+  const payload = await readApiPayload<{ token: string; mode: "sample" | "live" }>(
+    response,
+    "Could not open your workspace.",
+  );
   return payload;
 }

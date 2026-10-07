@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { localDateTime } from "../../../packages/domain/src/date-time.ts";
 import type {
   ActionProposal,
   ActivityEntry,
@@ -69,17 +70,42 @@ export class WorkspaceService {
     owner: string,
     options: { calendarId?: string; timeMin?: string; timeMax?: string } = {},
   ) {
+    return (await this.eventsPage(owner, options))?.events ?? [];
+  }
+  /** A missing connection is distinct from a connected calendar with no events. */
+  async eventsPage(
+    owner: string,
+    options: { calendarId?: string; timeMin?: string; timeMax?: string } = {},
+  ) {
     const connection = await this.connection(owner);
-    if (!connection) return [];
-    if (this.config.mode === "live") return this.google(owner, connection.id).listEvents(options);
-    return (await this.db.list<CalendarEvent>(owner, "events"))
-      .filter(
-        (event) =>
-          event.calendarId === (options.calendarId ?? "primary") &&
+    if (!connection) return null;
+    if (this.config.mode === "live")
+      return this.google(owner, connection.id).listEventsPage(options);
+    const lastIncluded = options.timeMax
+      ? new Date(Date.parse(options.timeMax) - 1).toISOString()
+      : undefined;
+    const events = (await this.db.list<CalendarEvent>(owner, "events"))
+      .filter((event) => event.calendarId === (options.calendarId ?? "primary"))
+      .filter((event) => {
+        // All-day events cover local dates, including days whose midnight is skipped.
+        // Inspect the last included instant for the exclusive upper boundary.
+        // Numeric civil-date keys also preserve ordering across expanded ISO years.
+        if (event.allDay)
+          return (
+            (!lastIncluded ||
+              Date.parse(event.start) <=
+                Date.parse(localDateTime(lastIncluded, event.timeZone).date)) &&
+            (!options.timeMin ||
+              Date.parse(event.end) >
+                Date.parse(localDateTime(options.timeMin, event.timeZone).date))
+          );
+        return (
           (!options.timeMax || Date.parse(event.start) < Date.parse(options.timeMax)) &&
-          (!options.timeMin || Date.parse(event.end) > Date.parse(options.timeMin)),
-      )
+          (!options.timeMin || Date.parse(event.end) > Date.parse(options.timeMin))
+        );
+      })
       .sort((a, b) => a.start.localeCompare(b.start));
+    return { events, truncated: false };
   }
   private async cacheMail(owner: string, mail: Mail[], connectionId: string) {
     const imports = await this.db.list<{ id: string; artifactId: string; connectionId?: string }>(
@@ -258,27 +284,42 @@ export class WorkspaceService {
     await this.db.put(owner, "settings", { id: "google", enabled: true });
     await this.db.put(owner, "settings", { id: "seeded", value: true });
   }
-  async snapshot(owner: string, query?: string): Promise<Workspace> {
-    let mail: Mail[], events: CalendarEvent[];
+  private async sourceSections(
+    owner: string,
+    wantMail: boolean,
+    wantEvents: boolean,
+    query?: string,
+  ): Promise<{ mail: Mail[]; events: CalendarEvent[]; connected: boolean }> {
+    let mail: Mail[] = [];
+    let events: CalendarEvent[] = [];
     const connected = await this.connected(owner);
     if (this.config.mode === "live" && connected) {
       const connection = await this.connection(owner);
       if (!connection) throw new AppError("Google is disconnected", 409);
       const google = this.google(owner, connection.id);
-      [mail, events] = await Promise.all([google.listMail(query), google.listEvents()]);
-      mail = await this.cacheMail(owner, mail, connection.id);
+      const [mailResult, eventResult] = await Promise.all([
+        wantMail ? google.listMail(query) : Promise.resolve([] as Mail[]),
+        wantEvents ? google.listEvents() : Promise.resolve([] as CalendarEvent[]),
+      ]);
+      mail = mailResult;
+      events = eventResult;
+      if (wantMail) mail = await this.cacheMail(owner, mail, connection.id);
       for (const event of events) await this.db.put(owner, "events", event);
     } else if (this.config.mode === "sample" && connected) {
-      mail = await this.db.list<Mail>(owner, "mail");
-      events = await this.db.list<CalendarEvent>(owner, "events");
-      if (query)
-        mail = mail.filter((m) =>
-          `${m.sender} ${m.subject} ${m.body}`.toLowerCase().includes(query.toLowerCase()),
-        );
-    } else {
-      mail = [];
-      events = [];
+      if (wantMail) {
+        mail = await this.db.list<Mail>(owner, "mail");
+        if (query)
+          mail = mail.filter((m) =>
+            `${m.sender} ${m.subject} ${m.body}`.toLowerCase().includes(query.toLowerCase()),
+          );
+      }
+      if (wantEvents) events = await this.db.list<CalendarEvent>(owner, "events");
     }
+    return { mail, events, connected };
+  }
+
+  async snapshot(owner: string, query?: string): Promise<Workspace> {
+    const { mail, events, connected } = await this.sourceSections(owner, true, true, query);
     const tokens = this.config.mode === "live" ? await this.googleAuth.tokens(owner) : null;
     return {
       mode: this.config.mode,
@@ -323,8 +364,29 @@ export class WorkspaceService {
         provider: this.config.agentBackend === "sample" ? "sample" : "model",
         configured: agentConfigured(this.config),
         openbotConfigured: false,
-        richThreads: Boolean(this.config.intelligenceApiKey),
+        richThreads: true,
       },
+    };
+  }
+
+  async sectionSnapshot(
+    owner: string,
+    section: "mail" | "calendar" | "files" | "all",
+  ): Promise<{ mail?: Mail[]; events?: CalendarEvent[]; files?: Omit<Artifact, "url">[] }> {
+    const wantMail = section === "mail" || section === "all";
+    const wantEvents = section === "calendar" || section === "all";
+    const wantFiles = section === "files" || section === "all";
+    const { mail, events } =
+      wantMail || wantEvents
+        ? await this.sourceSections(owner, wantMail, wantEvents)
+        : { mail: [], events: [] };
+    const files = wantFiles
+      ? (await this.files.list(owner)).map(({ url: _url, ...file }) => file)
+      : undefined;
+    return {
+      mail: wantMail ? mail.sort((a, b) => b.date.localeCompare(a.date)) : undefined,
+      events: wantEvents ? events.sort((a, b) => a.start.localeCompare(b.start)) : undefined,
+      files,
     };
   }
   async prepare(owner: string, input: ProposalInput, connectionId?: string) {
@@ -438,6 +500,8 @@ export class WorkspaceService {
       decodeURIComponent(filename),
       await this.google(owner, connection.id).getAttachment(messageId, attachmentId),
       `Gmail · ${message.subject}`,
+      undefined,
+      JSON.stringify(["attachment", connection.id, reference]),
     );
     await this.db.put(owner, "imports", {
       id: reference,

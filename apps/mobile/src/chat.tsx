@@ -10,29 +10,47 @@ import {
 import { ArrowDown, ArrowUp, FileText, RotateCcw, Square, X } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   Text,
   TextInput,
+  type TextStyle,
   View,
 } from "react-native";
 import { z } from "zod";
 import { ArtifactCard } from "./agent-ui";
 import { useAgentWorkspace } from "./agent-workspace";
+import { AssistantResponse } from "./assistant-response";
 import { BackgroundUpdates } from "./background-updates";
 import { BrowserRunContext, BrowserToolCard } from "./browser-tool-card";
 import { BrowserThreadCard } from "./computer";
 import { ConversationQueue, type QueuedMessage } from "./conversation-queue";
-import { runConversationTurn } from "./conversation-run";
+import {
+  ConversationTurnError,
+  replayedRunError,
+  runConversationTurn,
+  showsRunError,
+  threadLocked,
+} from "./conversation-run";
+import { DesktopToolCard } from "./desktop-tool-card";
+import { confirmedJevSelection, displayJevUserMessage, latestJevPanelId } from "./jev-actions";
+import { JevInteractionContext, JevToolCard } from "./jev-tool-card";
 import { MailToolCard } from "./mail-tool-card";
+import { SearchToolCard } from "./search-tool-card";
 import { FileThreadCard, TaskThreadCard } from "./thread-artifacts";
 import { type Selection, useMuseThread } from "./threads";
 import { Button, Card, CheckRow, colors, ErrorNotice, s } from "./ui";
 import { useWorkspace } from "./workspace";
 
 const displayParameters = z.record(z.string(), z.unknown());
+// The composer pill shows focus with its border, so the browser's ring inside it is noise.
+// Chrome draws `outline-style: auto` at any width, so only `none` removes it; React Native's
+// types omit that value, but react-native-web passes it through.
+const noFocusRing =
+  Platform.OS === "web" ? ({ outlineStyle: "none" } as unknown as TextStyle) : undefined;
 export function WorkspaceTools() {
   const { workspace, section } = useWorkspace();
   useAgentContext({
@@ -57,12 +75,34 @@ export function WorkspaceTools() {
     ),
   });
   useRenderTool({
+    name: "search_web",
+    description: "Show public web search progress and sources",
+    parameters: displayParameters,
+    render: ({ result, status }) => (
+      <SearchToolCard result={result} loading={status !== "complete"} />
+    ),
+  });
+  useRenderTool({
     name: "browse_web",
     description: "Follow the agent as it reads a webpage",
     parameters: displayParameters,
     render: ({ args, result, status }) => (
       <BrowserToolCard url={args.url} result={result} loading={status !== "complete"} />
     ),
+  });
+  useRenderTool({
+    name: "use_desktop",
+    description: "Show the agent working on the computer's desktop",
+    parameters: displayParameters,
+    render: ({ toolCallId, result, status }) => (
+      <DesktopToolCard toolCallId={toolCallId} result={result} loading={status !== "complete"} />
+    ),
+  });
+  useRenderTool({
+    name: "present_choices",
+    description: "Show prepared choices for the conversation",
+    parameters: displayParameters,
+    render: ({ result, status }) => <JevToolCard result={result} loading={status !== "complete"} />,
   });
   useRenderTool({
     name: "delegate_task",
@@ -188,10 +228,15 @@ export function ChatScreen({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
+  // Replayed messages show before connectAgent returns; new turns wait until it does.
+  const [syncing, setSyncing] = useState(false);
   const [picking, setPicking] = useState(false);
   const [attachments, setAttachments] = useState<string[]>([]);
   const list = useRef<ScrollView>(null);
   const [queue] = useState(() => new ConversationQueue());
+  const choiceCompletions = useRef(
+    new Map<string, { resolve: () => void; reject: (error: unknown) => void }>(),
+  );
   const outbox = useSyncExternalStore(queue.subscribe, queue.getSnapshot, queue.getSnapshot);
   const followLatest = useRef(true);
   const [awayFromLatest, setAwayFromLatest] = useState(false);
@@ -199,11 +244,32 @@ export function ChatScreen({
   const [saveError, setSaveError] = useState("");
   const [historyError, setHistoryError] = useState("");
   const [historyAttempt, setHistoryAttempt] = useState(0);
+  // Loads still replaying history. A count, so an old load finishing does not end a newer one.
+  const replaying = useRef(0);
+  // Set while a queued message is being sent, so a lock refusal holds it instead of failing.
+  const queuedTurn = useRef(false);
+  const [keyboardPadding, setKeyboardPadding] = useState(0);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const onShow = (e: { endCoordinates: { height: number } }) => {
+      const bottomNavHeight = 74;
+      setKeyboardPadding(Math.max(0, e.endCoordinates.height - bottomNavHeight));
+    };
+    const onHide = () => setKeyboardPadding(0);
+    const showSub = Keyboard.addListener("keyboardDidShow", onShow);
+    const hideSub = Keyboard.addListener("keyboardDidHide", onHide);
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
   useEffect(() => {
     if (!isReady) return;
     let active = true;
     setHistoryError("");
     setLoaded(false);
+    setSyncing(false);
     const replay = agent.subscribe({
       onMessagesChanged: ({ messages }) => {
         if (active && richThreads && messages.length) setLoaded(true);
@@ -212,12 +278,24 @@ export function ChatScreen({
     async function hydrate() {
       try {
         if (richThreads) {
-          if (selection.existing)
-            await runConversationTurn(
-              agentId,
-              () => copilotkit.connectAgent({ agent }),
-              (onError) => copilotkit.subscribe({ onError }),
-            );
+          if (selection.existing) {
+            // Replaying history re-emits past RUN_ERROR events; only connection failures block loading.
+            // connectAgent returns once the thread is idle, so it also waits for a reply still
+            // running from before a reload. Sending earlier fails with a thread lock.
+            replaying.current += 1;
+            setSyncing(true);
+            try {
+              await runConversationTurn(
+                agentId,
+                () => copilotkit.connectAgent({ agent }),
+                (onError) => copilotkit.subscribe({ onError }),
+                [replayedRunError],
+              );
+            } finally {
+              replaying.current -= 1;
+              if (active) setSyncing(false);
+            }
+          }
         } else {
           const { messages } = await api.request<{ messages: Message[] }>("/api/conversation");
           if (active) agent.setMessages(messages);
@@ -243,11 +321,13 @@ export function ChatScreen({
     if (!richThreads) await api.request("/api/conversation", { messages: agent.messages }, "PUT");
     setSaveError("");
   }, [agent, api, richThreads]);
+  /** Runs one turn; "held" means a queued message was refused by a lock and put back on hold. */
   const run = useCallback(
-    async (message?: QueuedMessage) => {
-      if (runLock.current || agent.isRunning || !isReady || !loaded)
+    async (message?: QueuedMessage): Promise<"held" | undefined> => {
+      if (runLock.current || agent.isRunning || !isReady || !loaded || syncing)
         throw new Error("The conversation is not ready yet.");
       runLock.current = true;
+      queuedTurn.current = Boolean(message);
       setBusy(true);
       setError("");
       if (message) agent.addMessage({ id: message.id, role: "user", content: message.text });
@@ -258,7 +338,18 @@ export function ChatScreen({
           (onError) => copilotkit.subscribe({ onError }),
         );
         await Promise.all([refresh(), refreshAgent()]);
+      } catch (e) {
+        if (message && e instanceof ConversationTurnError && e.code === threadLocked) {
+          // The server refused the turn before running it (another reply holds the thread),
+          // so keep the message unsent and on hold instead of reporting a failed turn.
+          agent.setMessages(agent.messages.filter((m) => m.id !== message.id));
+          queue.restore(message);
+          queue.pause();
+          return "held";
+        }
+        throw e;
       } finally {
+        queuedTurn.current = false;
         try {
           await saveHistory();
         } catch (e) {
@@ -272,12 +363,39 @@ export function ChatScreen({
         }
       }
     },
-    [agent, agentId, copilotkit, isReady, loaded, refresh, refreshAgent, saveHistory, queue],
+    [
+      agent,
+      agentId,
+      copilotkit,
+      isReady,
+      loaded,
+      syncing,
+      refresh,
+      refreshAgent,
+      saveHistory,
+      queue,
+    ],
+  );
+  const runQueued = useCallback(
+    async (message: QueuedMessage) => {
+      let held = false;
+      try {
+        held = (await run(message)) === "held";
+        if (!held) choiceCompletions.current.get(message.id)?.resolve();
+      } catch (error) {
+        choiceCompletions.current.get(message.id)?.reject(error);
+        throw error;
+      } finally {
+        // A held message is sent again later; its choice settles then.
+        if (!held) choiceCompletions.current.delete(message.id);
+      }
+    },
+    [run],
   );
   const flush = useCallback(() => {
-    if (!loaded || !isReady || runLock.current || agent.isRunning) return;
-    void queue.flush(run).catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, [agent, isReady, loaded, queue, run]);
+    if (!loaded || syncing || !isReady || runLock.current || agent.isRunning) return;
+    void queue.flush(runQueued).catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }, [agent, isReady, loaded, syncing, queue, runQueued]);
   const enqueue = useCallback(
     (text: string) => {
       queue.enqueue({ id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, text });
@@ -286,6 +404,28 @@ export function ChatScreen({
       flush();
     },
     [queue, flush],
+  );
+  const sendChoice = useCallback(
+    (text: string, retry = false): Promise<void> => {
+      const snapshot = queue.getSnapshot();
+      if (!loaded || !isReady || saveError || (!retry && snapshot.paused))
+        return Promise.reject(new Error("The conversation is not ready for a choice yet."));
+      if (retry) {
+        if (runLock.current || agent.isRunning || snapshot.running || snapshot.pending.length)
+          return Promise.reject(new Error("Wait for the current response before retrying."));
+        if (snapshot.paused) queue.resume();
+      }
+      const id = `choice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const completion = new Promise<void>((resolve, reject) => {
+        choiceCompletions.current.set(id, { resolve, reject });
+      });
+      queue.enqueue({ id, text });
+      followLatest.current = true;
+      setAwayFromLatest(false);
+      flush();
+      return completion;
+    },
+    [agent.isRunning, flush, isReady, loaded, queue, saveError],
   );
   useEffect(() => {
     if (!busy && !agent.isRunning && outbox.pending.length) flush();
@@ -298,6 +438,8 @@ export function ChatScreen({
     const subscription = copilotkit.subscribe({
       onError: (event) => {
         if (event.context?.agentId && event.context.agentId !== agentId) return;
+        const during = { replaying: replaying.current > 0, queuedTurn: queuedTurn.current };
+        if (!showsRunError(event, during)) return;
         const failure = event.error instanceof Error ? event.error : new Error(String(event.error));
         setError(failure.message);
       },
@@ -332,11 +474,20 @@ export function ChatScreen({
     setPicking(false);
   }
   const messages = agent.messages || [];
+  const latestPanelId = latestJevPanelId(messages, threadId);
   const latestUserIndex = messages.reduce(
     (last, message, index) => (message.role === "user" ? index : last),
     -1,
   );
+  const latestUserText =
+    latestUserIndex >= 0 && typeof messages[latestUserIndex]?.content === "string"
+      ? messages[latestUserIndex].content
+      : null;
   const visible = messages.filter((m) => m.role === "user" || m.role === "assistant");
+  const latestDesktop = messages
+    .flatMap((m) => ("toolCalls" in m ? m.toolCalls || [] : []))
+    .filter((call) => call.function.name === "use_desktop")
+    .at(-1)?.id;
   const replying = busy || agent.isRunning;
   return (
     <View style={{ flex: 1 }}>
@@ -411,7 +562,15 @@ export function ChatScreen({
         ) : (
           visible.map((message) => {
             const user = message.role === "user";
-            const text = typeof message.content === "string" ? message.content : "";
+            const text =
+              typeof message.content === "string"
+                ? user
+                  ? displayJevUserMessage(
+                      message.content,
+                      messages.slice(0, messages.indexOf(message)),
+                    )
+                  : message.content
+                : "";
             const toolCalls = "toolCalls" in message ? message.toolCalls || [] : [];
             return (
               <View
@@ -434,31 +593,74 @@ export function ChatScreen({
                       backgroundColor: user ? colors.blue : "#EEEEF0",
                     }}
                   >
-                    <Text selectable style={[s.text, { fontSize: 16, lineHeight: 24 }]}>
-                      {text}
-                    </Text>
+                    {user ? (
+                      <Text selectable style={[s.text, { fontSize: 16, lineHeight: 24 }]}>
+                        {text}
+                      </Text>
+                    ) : (
+                      <AssistantResponse content={text} />
+                    )}
                   </View>
                 )}
-                <BrowserRunContext
+                <JevInteractionContext.Provider
                   value={{
-                    running: busy || agent.isRunning,
-                    active:
-                      (busy || agent.isRunning) && messages.indexOf(message) > latestUserIndex,
+                    threadId,
+                    busy:
+                      busy ||
+                      agent.isRunning ||
+                      !loaded ||
+                      !isReady ||
+                      !!outbox.pending.length ||
+                      outbox.paused ||
+                      !!saveError,
+                    latestPanelId,
+                    latestUserText,
+                    send: sendChoice,
+                    retry: (text) => sendChoice(text, true),
+                    canRetry:
+                      loaded &&
+                      isReady &&
+                      !busy &&
+                      !agent.isRunning &&
+                      !outbox.running &&
+                      !outbox.pending.length &&
+                      !saveError,
+                    confirmedSelection: (panelId) => confirmedJevSelection(messages, panelId),
                   }}
                 >
-                  {toolCalls.map((toolCall) => {
-                    const toolMessage = messages.find(
-                      (candidate): candidate is ToolMessage =>
-                        candidate.role === "tool" && candidate.toolCallId === toolCall.id,
-                    );
-                    return (
-                      <View key={toolCall.id}>{renderToolCall({ toolCall, toolMessage })}</View>
-                    );
-                  })}
-                </BrowserRunContext>
+                  <BrowserRunContext
+                    value={{
+                      running: busy || agent.isRunning,
+                      active:
+                        (busy || agent.isRunning) && messages.indexOf(message) > latestUserIndex,
+                    }}
+                  >
+                    {toolCalls.map((toolCall) => {
+                      const toolMessage = messages.find(
+                        (candidate): candidate is ToolMessage =>
+                          candidate.role === "tool" && candidate.toolCallId === toolCall.id,
+                      );
+                      return (
+                        <View key={toolCall.id}>{renderToolCall({ toolCall, toolMessage })}</View>
+                      );
+                    })}
+                  </BrowserRunContext>
+                </JevInteractionContext.Provider>
               </View>
             );
           })
+        )}
+        {!!latestDesktop && (
+          <DesktopToolCard
+            live
+            toolCallId={latestDesktop}
+            result={
+              messages.find(
+                (message) => message.role === "tool" && message.toolCallId === latestDesktop,
+              )?.content
+            }
+            loading={replying}
+          />
         )}
         {!richThreads && (
           <>
@@ -535,11 +737,11 @@ export function ChatScreen({
           </View>
         )}
         <ErrorNotice error={error} />
-        {error && (
+        {!!error && (
           <Button
             style={{ alignSelf: "flex-start" }}
             icon={RotateCcw}
-            disabled={busy || agent.isRunning || !loaded || !isReady}
+            disabled={busy || agent.isRunning || !loaded || syncing || !isReady}
             onPress={() => {
               void run()
                 .then(() => {
@@ -566,7 +768,10 @@ export function ChatScreen({
           Latest messages
         </Button>
       )}
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        style={keyboardPadding > 0 ? { paddingBottom: keyboardPadding } : undefined}
+      >
         <ErrorNotice error={saveError} />
         {!!saveError && (
           <Button
@@ -587,13 +792,19 @@ export function ChatScreen({
             {outbox.pending.map((message) => (
               <View key={message.id} style={[s.row, { gap: 8 }]}>
                 <Text numberOfLines={2} style={[s.muted, { flex: 1 }]}>
-                  {message.text}
+                  {displayJevUserMessage(message.text, messages)}
                 </Text>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`Remove queued message: ${message.text}`}
+                  accessibilityLabel={`Remove queued message: ${displayJevUserMessage(message.text, messages)}`}
                   hitSlop={10}
-                  onPress={() => queue.remove(message.id)}
+                  onPress={() => {
+                    queue.remove(message.id);
+                    choiceCompletions.current
+                      .get(message.id)
+                      ?.reject(new Error("Choice removed from queue."));
+                    choiceCompletions.current.delete(message.id);
+                  }}
                   style={{ padding: 8 }}
                 >
                   <X size={16} color={colors.muted} />
@@ -744,6 +955,7 @@ export function ChatScreen({
                 paddingHorizontal: 2,
                 paddingTop: 10,
                 paddingBottom: 10,
+                ...noFocusRing,
               }}
               multiline
               editable

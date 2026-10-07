@@ -3,27 +3,40 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { EventType } from "@ag-ui/core";
+import { lastValueFrom, toArray } from "rxjs";
 import { createApp } from "../apps/server/src/app.ts";
+import { Auth } from "../apps/server/src/auth.ts";
 import type { Config } from "../apps/server/src/config.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
+import { ConversationAgent } from "../apps/server/src/engine/conversation.ts";
+import type { AgentService } from "../apps/server/src/engine/service.ts";
+import { deterministicFileId, Files } from "../apps/server/src/files.ts";
 import type { ActionProposal, Artifact, Workspace } from "../packages/domain/src/index.ts";
+import { createSamplePdf } from "../packages/integrations/src/pdf.ts";
 
-let db: Store, app: Awaited<ReturnType<typeof createApp>>["app"], token: string, directory: string;
+let db: Store,
+  app: Awaited<ReturnType<typeof createApp>>["app"],
+  agent: AgentService,
+  config: Config,
+  token: string,
+  directory: string;
 const headers = () => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" });
 before(async () => {
   directory = await mkdtemp(join(tmpdir(), "openmuse-api-"));
   db = await createStore();
-  const config: Config = {
+  config = {
     mode: "sample",
     port: 8787,
     host: "127.0.0.1",
     publicUrl: "http://localhost:8787",
     dataDir: directory,
     agentBackend: "sample",
+    intelligenceApiKey: "test-project-key-never-sent",
     googleRedirectUri: "http://localhost:8787/api/google/callback",
     allowedOrigins: ["http://localhost:8081"],
   };
-  ({ app } = await createApp(db, config));
+  ({ app, agent } = await createApp(db, config));
   const response = await app.request("/api/session", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -48,6 +61,127 @@ test("API protects private data and rejects unrelated web origins", async () => 
     403,
   );
 });
+test("file operations recover a published PDF when metadata persistence fails", async (t) => {
+  const owner = "file-recovery";
+  const bytes = await createSamplePdf();
+  const insert = db.insertIfAbsent.bind(db);
+  let publishedId = "";
+  t.mock.method(db, "insertIfAbsent", async (...args: Parameters<Store["insertIfAbsent"]>) => {
+    if (args[0] === owner && args[1] === "files" && !publishedId) {
+      publishedId = args[2].id;
+      throw new Error("metadata unavailable");
+    }
+    return insert(...args);
+  });
+  await assert.rejects(
+    agent.files.import(owner, "sample.pdf", bytes, "fixture", undefined, "import-once"),
+    /metadata unavailable/,
+  );
+  assert.ok(publishedId);
+  assert.equal((await agent.files.list(owner)).length, 0);
+  const restarted = new Files(db, config, new Auth(db, config, "sample-signing-key"));
+  const recovered = await restarted.import(
+    owner,
+    "sample.pdf",
+    bytes,
+    "fixture",
+    undefined,
+    "import-once",
+  );
+  assert.equal(recovered.id, publishedId);
+  assert.deepEqual(new Uint8Array(await restarted.bytes(owner, recovered.id)), bytes);
+  assert.equal((await restarted.list(owner)).length, 1);
+});
+
+test("file operation identity isolates owners, inputs and independent requests", async () => {
+  const owner = "file-identities";
+  const bytes = await createSamplePdf();
+  const source = await agent.files.import(owner, "sample.pdf", bytes, "fixture");
+  const fields = { participant_name: "Sample Student", permission_granted: true };
+  const [first, concurrent] = await Promise.all([
+    agent.files.fill(owner, source.id, fields, "task-fill"),
+    agent.files.fill(owner, source.id, fields, "task-fill"),
+  ]);
+  assert.equal(first.id, concurrent.id);
+  assert.equal(first.createdAt, concurrent.createdAt);
+  assert.equal((await agent.files.list(owner)).filter((file) => file.parentId).length, 1);
+  const reordered = await agent.files.fill(
+    owner,
+    source.id,
+    {
+      permission_granted: true,
+      participant_name: "Sample Student",
+    },
+    "task-fill",
+  );
+  assert.equal(reordered.id, first.id);
+  assert.notEqual((await agent.files.fill(owner, source.id, fields, "another-task")).id, first.id);
+  assert.notEqual(
+    (await agent.files.fill(owner, source.id, { participant_name: "Another Student" }, "task-fill"))
+      .id,
+    first.id,
+  );
+  const manual = await agent.files.fill(owner, source.id, fields);
+  assert.notEqual((await agent.files.fill(owner, source.id, fields)).id, manual.id);
+  const otherOwner = await agent.files.import(
+    "other-file-owner",
+    "sample.pdf",
+    bytes,
+    "fixture",
+    undefined,
+    "owner-scoped",
+  );
+  assert.notEqual(
+    (await agent.files.import(owner, "sample.pdf", bytes, "fixture", undefined, "owner-scoped")).id,
+    otherOwner.id,
+  );
+});
+
+test("keyed file IDs are UUIDs that work through lookup, content reads and attachments", async () => {
+  const owner = "local-user";
+  const sample = await createSamplePdf();
+  const source = await agent.files.import(owner, "form.pdf", sample, "test");
+  const fields = { participant_name: "Sample Student", permission_granted: true };
+  const filled = await agent.files.fill(owner, source.id, fields, "task-1:fill_pdf");
+  const imported = await agent.files.import(
+    owner,
+    "a.pdf",
+    sample,
+    "test",
+    undefined,
+    "attachment:1",
+  );
+  assert.equal((await agent.files.fill(owner, source.id, fields, "task-1:fill_pdf")).id, filled.id);
+  for (const id of [filled.id, imported.id]) {
+    assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    assert.equal((await agent.files.get(owner, id)).id, id);
+    const content = await app.request(`/api/files/${id}/content`, { headers: headers() });
+    assert.equal(content.status, 200);
+    assert.equal(
+      Buffer.from(await content.arrayBuffer())
+        .subarray(0, 5)
+        .toString(),
+      "%PDF-",
+    );
+    const proposal = await app.request("/api/actions", {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({
+        kind: "email.send",
+        data: {
+          to: ["sample@example.com"],
+          subject: "Attached",
+          body: "See attached.",
+          attachmentIds: [id],
+        },
+      }),
+    });
+    assert.equal(proposal.status, 201);
+  }
+  assert.equal(deterministicFileId(owner, "x"), deterministicFileId(owner, "x"));
+  assert.notEqual(deterministicFileId(owner, "x"), deterministicFileId("other", "x"));
+});
+
 test("sample workspace serves a real PDF and filling creates a new version", async () => {
   const response = await app.request("/api/workspace", { headers: headers() });
   assert.equal(response.status, 200);
@@ -156,24 +290,25 @@ test("calendar ranges and complete sample mail threads survive navigation", asyn
   );
   assert.equal(invalid.status, 422);
 });
-test("CopilotKit runtime streams actual AG-UI events without a provider key", async () => {
+function sampleRun(threadId: string, runId: string, messageId: string, content: string) {
+  return new ConversationAgent(config, agent, "local-user").run({
+    threadId,
+    runId,
+    messages: [{ id: messageId, role: "user", content }],
+    tools: [],
+    context: [],
+    state: {},
+  });
+}
+
+test("sample agent streams actual AG-UI events without a model key", async () => {
   const info = await app.request("/api/copilotkit/info", { headers: headers() });
   assert.equal(info.status, 200);
-  const response = await app.request("/api/copilotkit/agent/default/run", {
-    method: "POST",
-    headers: headers(),
-    body: JSON.stringify({
-      threadId: "sample-test",
-      runId: "sample-run",
-      messages: [{ id: "message1", role: "user", content: "Show my calendar" }],
-      tools: [],
-      context: [],
-      state: {},
-      forwardedProps: {},
-    }),
-  });
-  assert.equal(response.status, 200);
-  const stream = await response.text();
+  const stream = JSON.stringify(
+    await lastValueFrom(
+      sampleRun("sample-test", "sample-run", "message1", "Show my calendar").pipe(toArray()),
+    ),
+  );
   assert.match(stream, /RUN_STARTED/);
   assert.match(stream, /TEXT_MESSAGE_CONTENT/);
   assert.match(stream, /RUN_FINISHED/);
@@ -181,28 +316,19 @@ test("CopilotKit runtime streams actual AG-UI events without a provider key", as
 });
 
 test("guided document delegation streams a rich tool result bound to its saved task", async () => {
-  const response = await app.request("/api/copilotkit/agent/default/run", {
-    method: "POST",
-    headers: headers(),
-    body: JSON.stringify({
-      threadId: "document-thread",
-      runId: "document-run",
-      messages: [{ id: "document-request", role: "user", content: "Complete the permission slip" }],
-      tools: [],
-      context: [],
-      state: {},
-      forwardedProps: {},
-    }),
-  });
-  assert.equal(response.status, 200);
-  const events = (await response.text())
-    .split("\n")
-    .filter((line) => line.startsWith("data: {"))
-    .map((line) => JSON.parse(line.slice(6)));
-  const start = events.find((event) => event.type === "TOOL_CALL_START");
-  const result = events.find((event) => event.type === "TOOL_CALL_RESULT");
+  const events = await lastValueFrom(
+    sampleRun(
+      "document-thread",
+      "document-run",
+      "document-request",
+      "Complete the permission slip",
+    ).pipe(toArray()),
+  );
+  const start = events.find((event) => event.type === EventType.TOOL_CALL_START);
+  const result = events.find((event) => event.type === EventType.TOOL_CALL_RESULT);
   assert.equal(start?.toolCallName, "delegate_task");
   assert.equal(result?.toolCallId, start?.toolCallId);
+  assert.ok(result && typeof result.content === "string");
   const { id } = JSON.parse(result.content);
   const task = await db.get<{ input: { messageId: string }; kind: string }>(
     "local-user",

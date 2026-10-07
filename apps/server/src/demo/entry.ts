@@ -3,10 +3,19 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { intelligenceKeyRequiredMessage, required } from "../config.ts";
 import { createStore } from "../db.ts";
 import { createDemoModel, demoModel } from "./model.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
+const intelligenceApiKey = required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage);
+const jevMode = process.env.DEMO_JEV_MODE ?? "sample";
+if (jevMode !== "sample" && jevMode !== "live")
+  throw new Error("DEMO_JEV_MODE must be sample or live");
+const typesafeApiKey =
+  jevMode === "live"
+    ? required("TYPESAFE_API_KEY", "DEMO_JEV_MODE=live requires TYPESAFE_API_KEY")
+    : undefined;
 const dataDir = join(root, "artifacts", "demo", "api");
 const runtimeDir = join(root, "artifacts", "demo", "runtime");
 const port = Number(process.env.DEMO_API_PORT ?? "8788");
@@ -68,6 +77,9 @@ const api = spawn(
       PATH: process.env.PATH,
       TZ: process.env.TZ ?? "America/Los_Angeles",
       WORKSPACE_MODE: "sample",
+      JEV_MODE: jevMode,
+      ...(typesafeApiKey ? { TYPESAFE_API_KEY: typesafeApiKey } : {}),
+      ...(jevMode === "live" && process.env.JEV_MODEL ? { JEV_MODEL: process.env.JEV_MODEL } : {}),
       AGENT_BACKEND: "model",
       MODEL: demoModel,
       OPENAI_API_KEY: "local-aimock-demo-only",
@@ -84,11 +96,12 @@ const api = spawn(
         process.env.DEMO_ALLOWED_ORIGINS ?? "http://localhost:8081,http://127.0.0.1:8081",
       DO_NOT_TRACK: "1",
       COPILOTKIT_TELEMETRY_DISABLED: "true",
+      CPK_INTELLIGENCE_API_KEY: intelligenceApiKey,
     },
   },
 );
 console.log(
-  "OpenMuse recording demo: AI Mock scripts the model; browser visits use the real worker.",
+  `OpenMuse recording demo: AI Mock scripts the agent; ${jevMode === "live" ? "Jev decisions call TypeSafe" : "Jev decisions are scripted"}; browser visits use the real worker.`,
 );
 console.log(`Demo API: ${publicUrl}; browser worker: ${workerUrl}`);
 console.log(`Isolated demo data: ${dataDir}`);

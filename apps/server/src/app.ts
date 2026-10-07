@@ -1,3 +1,4 @@
+import "./config.ts";
 import { randomUUID } from "node:crypto";
 import { MessageSchema } from "@ag-ui/core";
 import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
@@ -5,20 +6,25 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { z } from "zod";
-import { emailDraftSchema, proposalSchema } from "../../../packages/domain/src/index.ts";
+import {
+  calendarRangeSchema,
+  emailDraftSchema,
+  proposalSchema,
+} from "../../../packages/domain/src/index.ts";
 import { ActionService } from "./actions.ts";
 import { agentConfigured, makeRuntime } from "./agent.ts";
 import { createAuth } from "./auth.ts";
 import { BrowserService } from "./browser.ts";
 import { ComputerService, type DockerRunner } from "./computer.ts";
 import { computerRoutes } from "./computer-routes.ts";
-import type { Config } from "./config.ts";
+import { assertApiDeploymentConfig, type Config } from "./config.ts";
 import type { Store } from "./db.ts";
 import { agentRoutes } from "./engine/routes.ts";
 import { AgentService } from "./engine/service.ts";
 import { AppError } from "./errors.ts";
 import { Files } from "./files.ts";
 import { GoogleAuth } from "./google-auth.ts";
+import { rateLimit } from "./rate-limit.ts";
 import { WorkspaceService } from "./workspace.ts";
 
 export async function createApp(
@@ -26,6 +32,7 @@ export async function createApp(
   config: Config,
   options: { docker?: DockerRunner } = {},
 ) {
+  assertApiDeploymentConfig(config);
   const auth = await createAuth(db, config),
     files = new Files(db, config, auth),
     google = new GoogleAuth(db, config),
@@ -40,9 +47,7 @@ export async function createApp(
   const browser = new BrowserService(db, config, auth, files);
   const computer = new ComputerService(db, config, options.docker);
   const agent = new AgentService(db, config, workspace, files, actions, browser, computer);
-  const intelligence = config.intelligenceApiKey
-    ? new CopilotKitIntelligence({ apiKey: config.intelligenceApiKey })
-    : undefined;
+  const intelligence = new CopilotKitIntelligence({ apiKey: config.intelligenceApiKey });
   const runtime = makeRuntime(config, agent, auth, intelligence);
   const app = new Hono<{ Variables: { owner: string } }>();
   const origins = new Set([...config.allowedOrigins, new URL(config.publicUrl).origin]);
@@ -70,6 +75,7 @@ export async function createApp(
       onError: (c) => c.json({ error: "Request is too large; PDFs must be 10 MB or smaller" }, 413),
     }),
   );
+  app.use("/api/*", rateLimit(Boolean(config.trustProxy)));
   app.onError((error, c) => {
     if (error instanceof z.ZodError)
       return c.json({ error: error.issues.map((i) => i.message).join("; ") }, 422);
@@ -137,8 +143,17 @@ export async function createApp(
     await next();
   });
   app.get("/api/workspace", async (c) => {
-    const snapshot = await workspace.snapshot(c.get("owner"), c.req.query("q"));
+    const [snapshot, reachable] = await Promise.all([
+      workspace.snapshot(c.get("owner"), c.req.query("q")),
+      browser.reachable(),
+    ]);
     snapshot.browsers = snapshot.browsers.map((s) => browser.decorate(c.get("owner"), s));
+    // A configured worker that does not answer is offline, not ready.
+    snapshot.connections = snapshot.connections.map((connection) =>
+      connection.id === "browser" && connection.status === "connected" && !reachable
+        ? { ...connection, status: "unavailable" }
+        : connection,
+    );
     return c.json(snapshot);
   });
   app.route("/api/agent", agentRoutes(agent));
@@ -152,13 +167,7 @@ export async function createApp(
         timeMax: z.iso.datetime({ offset: true }).optional(),
       })
       .parse(c.req.query());
-    if (
-      query.timeMin &&
-      query.timeMax &&
-      (Date.parse(query.timeMax) <= Date.parse(query.timeMin) ||
-        Date.parse(query.timeMax) - Date.parse(query.timeMin) > 366 * 86400000)
-    )
-      throw new AppError("Choose a calendar range between one moment and 366 days", 422);
+    if (query.timeMin && query.timeMax) calendarRangeSchema.parse(query);
     return c.json(await workspace.events(c.get("owner"), query));
   });
   app.get("/api/mail/threads/:id", async (c) =>
@@ -180,7 +189,9 @@ export async function createApp(
   });
   app.get("/api/drafts", async (c) => c.json(await db.list(c.get("owner"), "drafts")));
   app.post("/api/drafts", async (c) => {
-    const body = emailDraftSchema.extend({ id: z.string().optional() }).parse(await c.req.json());
+    const body = emailDraftSchema
+      .extend({ id: z.string().uuid().optional() })
+      .parse(await c.req.json());
     const existing = body.id
       ? await db.get<{ createdAt: string }>(c.get("owner"), "drafts", body.id)
       : null;
@@ -203,21 +214,19 @@ export async function createApp(
     });
     const main = await db.get<{ threadId: string }>(owner, "conversation-settings", "main");
     if (!main) throw new AppError("Main conversation could not be loaded", 503);
-    if (intelligence) {
-      try {
-        await intelligence.getOrCreateThread({
-          threadId: main.threadId,
-          userId: owner,
-          agentId: "default",
-        });
-      } catch {
-        throw new AppError(
-          "Main conversation is unavailable. Check the Rich Threads connection and try again.",
-          502,
-        );
-      }
+    try {
+      await intelligence.getOrCreateThread({
+        threadId: main.threadId,
+        userId: owner,
+        agentId: "default",
+      });
+    } catch {
+      throw new AppError(
+        "Main conversation is unavailable. Check the Rich Threads connection and try again.",
+        502,
+      );
     }
-    return c.json({ threadId: main.threadId, existing: Boolean(intelligence) });
+    return c.json({ threadId: main.threadId, existing: true });
   });
   app.get("/api/conversation", async (c) =>
     c.json((await db.get(c.get("owner"), "conversations", "default")) ?? { messages: [] }),

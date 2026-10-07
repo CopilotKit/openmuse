@@ -31,16 +31,27 @@ import type { Store } from "../db.ts";
 import { AppError } from "../errors.ts";
 import type { Files } from "../files.ts";
 import { backgroundFailure } from "../log.ts";
+import { SearchService } from "../search.ts";
 import type { WorkspaceService } from "../workspace.ts";
 import { analyzeSpending } from "./finance.ts";
 import { executeModelTask } from "./model.ts";
+import {
+  countPageDiff,
+  describePageDiff,
+  diffPage,
+  pageLines,
+  withoutRelativeTimes,
+} from "./page-diff.ts";
 import { LostLeaseError, type TaskContext, TaskWorker } from "./worker.ts";
 
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
+/** A change watch's last saved page: its hash, relative-time-free fingerprint and lines. */
+type MonitorPage = { id: string; hash?: string; timelessHash?: string; lines: string[] };
 const date = () => new Date().toISOString();
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
 export class AgentService {
   readonly worker: TaskWorker;
+  readonly search: SearchService;
   private maintenance?: ReturnType<typeof setInterval>;
   private refreshing = false;
   constructor(
@@ -52,6 +63,7 @@ export class AgentService {
     readonly browser: BrowserService,
     readonly computer: ComputerService = new ComputerService(db, config),
   ) {
+    this.search = new SearchService(db);
     this.worker = new TaskWorker(db, (owner, task, context) => this.execute(owner, task, context), {
       settled: (owner, task) => this.publishOutcome(owner, task),
     });
@@ -179,11 +191,14 @@ export class AgentService {
   }
   async createTask(owner: string, raw: unknown, idempotencyKey?: string, held = false) {
     const input = createTaskSchema.parse(raw);
-    if (input.goalId && !(await this.db.get(owner, "goals", input.goalId)))
-      throw new AppError("Goal not found", 404);
     const id = idempotencyKey ? hash(`task:${idempotencyKey}`) : randomUUID();
     const existing = await this.db.get<AgentTask>(owner, "tasks", id);
     if (existing) return existing;
+    if (input.milestoneId && !input.goalId) throw new AppError("A milestone requires a goal", 422);
+    const goal = input.goalId ? await this.db.get<Goal>(owner, "goals", input.goalId) : null;
+    if (input.goalId && !goal) throw new AppError("Goal not found", 404);
+    if (input.milestoneId && !goal?.milestones.some((m) => m.id === input.milestoneId))
+      throw new AppError("Milestone not found in this goal", 404);
     if (
       (await this.db.list<AgentTask>(owner, "tasks")).filter((t) => !terminal.has(t.status))
         .length >= 100
@@ -209,7 +224,8 @@ export class AgentService {
       prompt: input.prompt,
       kind: input.kind,
       goalId: input.goalId,
-      status: held ? "paused" : "queued",
+      milestoneId: input.milestoneId,
+      status: held || goal?.status === "paused" ? "paused" : "queued",
       plan: titles.map((title, i) => ({ id: String(i), title, status: "pending" })),
       evidence: [],
       input: input.input,
@@ -237,6 +253,20 @@ export class AgentService {
     if (action === "resume" && task.status !== "paused")
       throw new AppError("Only paused tasks can be resumed", 409);
     if (action === "pause" && (terminal.has(task.status) || task.status === "paused")) return task;
+    if (task.kind === "monitor" && action === "resume") {
+      // Both UI entry points must activate the monitor before a worker can claim its task.
+      await this.controlMonitor(owner, String(task.input.monitorId), "resume");
+      const resumed = await this.getTask(owner, id);
+      await this.db.put(owner, "run-events", {
+        id: randomUUID(),
+        taskId: id,
+        kind: "status",
+        date: date(),
+        title: `Task ${resumed.status}`,
+        detail: "Changed by you",
+      });
+      return resumed;
+    }
     const status =
       action === "cancel"
         ? "cancelled"
@@ -270,9 +300,6 @@ export class AgentService {
             : action === "pause"
               ? "Paused. Resume when you're ready."
               : "",
-        ...(task.kind === "monitor" && action === "resume"
-          ? { state: { ...task.state, failures: 0, notice: null } }
-          : {}),
       },
     );
     if (!updated) throw new AppError("Task changed; refresh and try again", 409);
@@ -286,6 +313,8 @@ export class AgentService {
         {
           status: action === "cancel" ? "stopped" : action === "pause" ? "paused" : "active",
           nextCheckAt: date(),
+          // Clearing the error fences out a failure reconcile that read the task before this.
+          ...(action === "resume" || action === "retry" ? { error: null } : {}),
         },
       );
     if (action === "cancel" && task.actionId) {
@@ -347,13 +376,17 @@ export class AgentService {
     id: string,
     patch: { status?: Goal["status"]; milestones?: Goal["milestones"] },
   ) {
-    const goal = await this.db.get<Goal>(owner, "goals", id);
-    if (!goal) throw new AppError("Goal not found", 404);
-    const saved = await this.db.put(owner, "goals", { ...goal, ...patch });
+    const saved = await this.db.compareAndSwap<Goal>(owner, "goals", id, {}, patch);
+    if (!saved) throw new AppError("Goal not found", 404);
     if (patch.status === "paused")
-      for (const task of await this.db.list<AgentTask>(owner, "tasks"))
-        if (task.goalId === id && !terminal.has(task.status) && task.status !== "paused")
+      for (const task of await this.db.listByGoalId<AgentTask>(owner, "tasks", id))
+        if (!terminal.has(task.status) && task.status !== "paused")
           await this.control(owner, task.id, "pause");
+    return saved;
+  }
+  async setMilestoneDone(owner: string, goalId: string, milestoneId: string, done: boolean) {
+    const saved = await this.db.setMilestoneDone<Goal>(owner, goalId, milestoneId, done);
+    if (!saved) throw new AppError("Goal or milestone not found", 404);
     return saved;
   }
   async createMonitor(owner: string, raw: unknown, idempotencyKey?: string) {
@@ -395,10 +428,26 @@ export class AgentService {
     return monitor;
   }
   private async activateMonitor(owner: string, monitor: Monitor) {
-    if (monitor.status !== "active") return;
+    if (monitor.status !== "active") return null;
     const task = await this.getTask(owner, monitor.taskId);
-    if (task.status !== "paused" || !task.state.initializingMonitor) return;
-    await this.db.compareAndSwap(
+    if (task.status !== "paused") return null;
+    if (task.state.resumingMonitor)
+      return this.db.compareAndSwap(
+        owner,
+        "tasks",
+        task.id,
+        { status: "paused", state: { resumingMonitor: true } },
+        {
+          status: "queued",
+          nextRunAt: date(),
+          leaseId: null,
+          leaseUntil: null,
+          error: null,
+          state: { ...task.state, resumingMonitor: false, failures: 0, notice: null },
+        },
+      );
+    if (!task.state.initializingMonitor) return null;
+    return this.db.compareAndSwap(
       owner,
       "tasks",
       task.id,
@@ -414,18 +463,81 @@ export class AgentService {
     if (!monitor) throw new AppError("Monitor not found", 404);
     if (monitor.status === "stopped" && action !== "stop")
       throw new AppError("Create a new watch to restart this stopped monitor", 409);
-    const status = action === "pause" ? "paused" : action === "stop" ? "stopped" : "active";
-    const saved = await this.db.put(owner, "monitors", { ...monitor, status, nextCheckAt: date() });
-    const task = await this.getTask(owner, monitor.taskId);
-    if (action === "pause" || action === "stop")
+    if (action === "pause" || action === "stop") {
+      const status = action === "pause" ? "paused" : "stopped";
+      const saved = await this.db.compareAndSwap<Monitor>(
+        owner,
+        "monitors",
+        id,
+        {},
+        { status, nextCheckAt: date() },
+      );
+      const task = await this.getTask(owner, monitor.taskId);
       await this.control(owner, task.id, action === "pause" ? "pause" : "cancel");
-    else {
+      return saved ?? monitor;
+    }
+    let monitorStatus = monitor.status;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const task = await this.getTask(owner, monitor.taskId);
+      if (task.status === "cancelled") break;
+      if (task.status === "paused") {
+        // Mark the paused task before activating the monitor so no worker can claim it in between.
+        const marked = await this.db.compareAndSwap(
+          owner,
+          "tasks",
+          task.id,
+          { status: "paused", leaseId: task.leaseId ?? null },
+          { state: { ...task.state, resumingMonitor: true } },
+        );
+        if (!marked) break;
+        const activated = await this.db.compareAndSwap<Monitor>(
+          owner,
+          "monitors",
+          id,
+          { status: monitor.status },
+          { status: "active", nextCheckAt: date(), error: null },
+        );
+        const saved = activated ?? (await this.db.get<Monitor>(owner, "monitors", id));
+        if (saved?.status === "active" && (await this.activateMonitor(owner, saved))) return saved;
+        const unmarked = await this.db.compareAndSwap(
+          owner,
+          "tasks",
+          task.id,
+          { status: "paused", state: { resumingMonitor: true } },
+          { state: { ...task.state, resumingMonitor: false } },
+        );
+        // Another request or maintenance may have finished this resume first.
+        if (!unmarked && saved?.status === "active") {
+          const latest = await this.getTask(owner, task.id);
+          if (["queued", "running", "scheduled"].includes(latest.status)) return saved;
+        }
+        if (activated)
+          await this.db.compareAndSwap(
+            owner,
+            "monitors",
+            id,
+            { status: "active" },
+            { status: monitor.status, error: monitor.error ?? null },
+          );
+        break;
+      }
+      // Only activate the monitor we read, so a concurrent stop is never undone.
+      const saved = await this.db.compareAndSwap<Monitor>(
+        owner,
+        "monitors",
+        id,
+        { status: monitorStatus },
+        { status: "active", nextCheckAt: date() },
+      );
+      if (!saved) break;
+      monitorStatus = "active";
       this.worker.abort(task.id);
-      await this.db.compareAndSwap(
+      const queued = await this.db.compareAndSwap(
         owner,
         "tasks",
         task.id,
-        { status: task.status, leaseId: task.leaseId ?? null },
+        // updatedAt fences out a whole run finishing in between, which would move the baseline.
+        { status: task.status, leaseId: task.leaseId ?? null, updatedAt: task.updatedAt },
         {
           status: "queued",
           nextRunAt: date(),
@@ -435,8 +547,9 @@ export class AgentService {
           state: { ...task.state, failures: 0, notice: null },
         },
       );
+      if (queued) return saved;
     }
-    return saved;
+    throw new AppError("The watch changed while updating. Try again.", 409);
   }
   async refreshIdeas(owner: string) {
     const w = await this.workspace.snapshot(owner);
@@ -444,8 +557,8 @@ export class AgentService {
       w.mail.filter((mail) => /^Sent\b/i.test(mail.label)).map((mail) => mail.id),
     );
     const completedSources = new Set(
-      (await this.db.list<AgentTask>(owner, "tasks"))
-        .filter((task) => task.status === "succeeded" && typeof task.input.messageId === "string")
+      (await this.db.listByStatus<AgentTask>(owner, "tasks", "succeeded"))
+        .filter((task) => typeof task.input.messageId === "string")
         .map((task) => `${task.kind}:${task.input.messageId}`),
     );
     const obsolete = (kind: AgentTask["kind"], messageId: unknown) =>
@@ -453,8 +566,8 @@ export class AgentService {
       (sentIds.has(messageId) || completedSources.has(`${kind}:${messageId}`));
     // Retire earlier suggestions as well as preventing new duplicates. A concurrent
     // acceptance wins its own compare-and-swap and is never overwritten here.
-    for (const idea of await this.db.list<Idea>(owner, "ideas"))
-      if (idea.status === "new" && obsolete(idea.kind, idea.input.messageId))
+    for (const idea of await this.db.listByStatus<Idea>(owner, "ideas", "new"))
+      if (obsolete(idea.kind, idea.input.messageId))
         await this.db.compareAndSwap(
           owner,
           "ideas",
@@ -503,8 +616,8 @@ export class AgentService {
         createdAt: date(),
       } satisfies Idea);
     }
-    for (const goal of await this.db.list<Goal>(owner, "goals"))
-      if (goal.status === "active" && !goal.milestones.length) {
+    for (const goal of await this.db.listByStatus<Goal>(owner, "goals", "active"))
+      if (!goal.milestones.length) {
         const id = hash(`goal:${goal.id}:${goal.description}`);
         await this.db.insertIfAbsent(owner, "ideas", {
           id,
@@ -536,6 +649,28 @@ export class AgentService {
         { status: "dismissed" },
       );
     if (idea.status === "new") {
+      // A task already working on (or done with) the same email is opened instead of copied.
+      const { kind, input } = idea;
+      const handling =
+        typeof input.messageId === "string"
+          ? (await this.db.list<AgentTask>(owner, "tasks")).find(
+              (task) =>
+                task.kind === kind &&
+                task.input.messageId === input.messageId &&
+                task.status !== "failed" &&
+                task.status !== "cancelled",
+            )
+          : undefined;
+      if (handling)
+        return (
+          (await this.db.compareAndSwap<Idea>(
+            owner,
+            "ideas",
+            id,
+            { status: "new" },
+            { status: "accepted", taskId: handling.id },
+          )) ?? this.db.get<Idea>(owner, "ideas", id)
+        );
       const claimed = await this.db.compareAndSwap<Idea>(
         owner,
         "ideas",
@@ -550,11 +685,17 @@ export class AgentService {
       idea = claimed ?? (await this.db.get<Idea>(owner, "ideas", id));
       if (idea?.status !== "accepted") return idea;
     }
-    const goal = await this.createGoal(
-      owner,
-      { title: idea.title, description: idea.reason },
-      hash(`idea-goal:${id}`),
-    );
+    if (idea.taskId && (await this.db.get(owner, "tasks", idea.taskId))) return idea;
+    const goalId =
+      typeof idea.input.goalId === "string"
+        ? idea.input.goalId
+        : (
+            await this.createGoal(
+              owner,
+              { title: idea.title, description: idea.reason },
+              hash(`idea-goal:${id}`),
+            )
+          ).id;
     const task = await this.createTask(
       owner,
       {
@@ -562,7 +703,7 @@ export class AgentService {
         prompt: idea.prompt,
         kind: idea.kind,
         input: idea.input,
-        goalId: goal.id,
+        goalId,
       },
       `idea:${id}`,
     );
@@ -625,18 +766,29 @@ export class AgentService {
         409,
       );
     const proposal = await this.actions.propose(owner, input, `${task.id}:${key}`, task.id);
+    if (proposal.status === "succeeded") return proposal;
+    if (proposal.status !== "awaiting_review" && proposal.status !== "executing")
+      throw new AppError(
+        `Reviewed action ${proposal.status}: ${proposal.error ?? "No further action was taken"}`,
+        409,
+      );
     try {
       await context.checkpoint({ actionId: proposal.id });
     } catch (error) {
-      if (proposal.status === "awaiting_review")
+      const current = await this.db.get<AgentTask>(owner, "tasks", task.id);
+      if (
+        proposal.status === "awaiting_review" &&
+        (current?.status === "paused" || current?.status === "cancelled")
+      )
         await this.actions.decide(owner, proposal.id, proposal.hash, "deny");
       throw error;
     }
-    await context.event(
-      "approval",
-      proposal.title,
-      `Review prepared for ${proposal.account ?? "the connected account"}`,
-    );
+    if (proposal.status === "awaiting_review")
+      await context.event(
+        "approval",
+        proposal.title,
+        `Review prepared for ${proposal.account ?? "the connected account"}`,
+      );
     return proposal;
   }
   private async execute(
@@ -674,6 +826,8 @@ export class AgentService {
         if (error instanceof LostLeaseError || context.signal.aborted) throw error;
         await context.guard();
         const failures = Number(task.state.failures ?? 0) + 1;
+        // Each streak of failures (after a success or a resume) gets its own alerts.
+        const failureStreak = Number(task.state.failureStreak ?? 0) + (failures === 1 ? 1 : 0);
         const detail = error instanceof Error ? error.message : "Page check failed";
         const nextCheckAt = new Date(
           Date.now() + Math.min(60, 2 ** failures) * 60000,
@@ -683,11 +837,7 @@ export class AgentService {
           "monitors",
           String(task.input.monitorId),
           { status: "active" },
-          {
-            error: detail,
-            nextCheckAt,
-            ...(failures >= 5 ? { status: "paused" } : {}),
-          },
+          { error: detail, nextCheckAt },
         );
         await context.event(
           "error",
@@ -701,10 +851,12 @@ export class AgentService {
           state: {
             ...task.state,
             failures,
+            resumingMonitor: false,
+            failureStreak,
             notice: {
               title: "Watch needs attention",
               body: detail,
-              key: `watch-error:${task.id}:${failures >= 5 ? "paused" : "retry"}`,
+              key: `watch-error:${task.id}:${failureStreak}:${failures >= 5 ? "paused" : "retry"}`,
             },
           },
         };
@@ -756,7 +908,7 @@ export class AgentService {
         task.id,
         `task-done:${task.id}`,
       );
-      if (task.goalId) {
+      if (task.goalId && !task.milestoneId) {
         for (let attempt = 0; attempt < 8; attempt++) {
           const goal = await this.db.get<Goal>(owner, "goals", task.goalId);
           if (!goal || goal.milestones.some((m) => m.id === task.id)) break;
@@ -804,6 +956,15 @@ export class AgentService {
       .safeParse(task.state.notice);
     if ((task.status === "scheduled" || (task.status === "paused" && task.error)) && notice.success)
       await this.notify(owner, notice.data.title, notice.data.body, task.id, notice.data.key);
+    // A watch pauses after repeated failures only once that task outcome has committed.
+    if (task.kind === "monitor" && task.status === "paused" && task.error)
+      await this.db.compareAndSwap(
+        owner,
+        "monitors",
+        String(task.input.monitorId),
+        { status: "active", error: task.error },
+        { status: "paused" },
+      );
   }
   private async document(
     owner: string,
@@ -860,7 +1021,7 @@ export class AgentService {
     let filledId = typeof task.state.filledId === "string" ? task.state.filledId : undefined;
     if (!filledId) {
       await ctx.guard();
-      const filled = await this.files.fill(owner, source.fileId, fields);
+      const filled = await this.files.fill(owner, source.fileId, fields, `document:${task.id}`);
       filledId = filled.id;
       task = await ctx.checkpoint({
         state: { ...task.state, source, filledId },
@@ -921,11 +1082,13 @@ export class AgentService {
         owner,
         monitor.url,
         typeof task.state.sessionId === "string" ? task.state.sessionId : undefined,
+        ctx.signal,
       );
     }
     const text = observation.text.replace(/\s+/g, " ").trim();
     const currentHash = hash(text);
-    const previousHash = monitor.lastHash;
+    const previousHash =
+      typeof task.state.lastHash === "string" ? task.state.lastHash : monitor.lastHash;
     const matched =
       monitor.condition === "change"
         ? Boolean(previousHash && previousHash !== currentHash)
@@ -933,7 +1096,28 @@ export class AgentService {
           ? text.toLowerCase().includes(monitor.value.toLowerCase())
           : this.matchesPrice(text, Number(monitor.value));
     const previouslyMatched = Boolean(task.state.matched);
-    const shouldNotify = matched && (monitor.condition === "change" || !previouslyMatched);
+    // For change watches, keep the page lines and a relative-time-free fingerprint of the whole text.
+    const change = monitor.condition === "change";
+    const lines = change ? pageLines(observation.text) : [];
+    const timelessHash = change ? hash(withoutRelativeTimes(text)) : undefined;
+    const savedPage =
+      matched && change
+        ? await this.db.get<MonitorPage>(owner, "monitor-pages", monitor.id)
+        : undefined;
+    // Saved lines can run ahead of a lost task outcome; use them only for the committed baseline.
+    const baseline = savedPage?.hash === previousHash ? savedPage : undefined;
+    // Only relative times changed anywhere on the page ("3 minutes ago"): keep watching quietly.
+    const quiet = Boolean(baseline?.timelessHash && baseline.timelessHash === timelessHash);
+    const shouldNotify =
+      matched && !quiet && (monitor.condition === "change" || !previouslyMatched);
+    const diff = baseline && shouldNotify ? diffPage(baseline.lines, lines) : undefined;
+    // Empty when the change is past the saved lines; the alert then quotes the page instead.
+    const changes = diff ? describePageDiff(diff) : "";
+    // A notification-worthy observation is a new event, even when the page text is
+    // identical to an earlier one (a change back to a seen state, or a condition that
+    // cleared and reappeared). Commit its sequence with the outcome so publication
+    // retries still deduplicate on the same saved notice key.
+    const alertSequence = Number(task.state.alertSequence ?? 0) + (shouldNotify ? 1 : 0);
     const nextCheckAt = new Date(Date.now() + monitor.intervalMinutes * 60000).toISOString();
     await ctx.guard();
     // Worker lease is checked before each publication; monitor control also invalidates that lease.
@@ -941,7 +1125,7 @@ export class AgentService {
       owner,
       "monitors",
       monitor.id,
-      { status: "active" },
+      { status: "active", checks: monitor.checks },
       {
         checks: monitor.checks + 1,
         lastCheckedAt: date(),
@@ -952,6 +1136,13 @@ export class AgentService {
       },
     );
     if (!savedMonitor) throw new LostLeaseError();
+    if (change)
+      await this.db.put(owner, "monitor-pages", {
+        id: monitor.id,
+        hash: currentHash,
+        timelessHash,
+        lines,
+      });
     await ctx.event(
       "observation",
       previousHash ? "Checked for changes" : "Saved the first observation",
@@ -959,24 +1150,32 @@ export class AgentService {
     );
     if (shouldNotify) {
       await ctx.guard();
-      await ctx.event("result", "A meaningful change was found", text.slice(0, 500));
+      await ctx.event("result", "A meaningful change was found", changes || text.slice(0, 500));
     }
+    const count = diff ? countPageDiff(diff) : "";
     return {
       status: "scheduled",
       nextRunAt: nextCheckAt,
       result: shouldNotify
-        ? "Change found. A notification is ready."
+        ? count
+          ? `Change found: ${count}. A notification is ready.`
+          : "Change found. A notification is ready."
         : "Watching. I'll check again on schedule.",
       state: {
         ...task.state,
         sessionId: observation.sessionId,
+        lastHash: currentHash,
+        resumingMonitor: false,
         matched,
+        alertSequence,
         failures: 0,
         notice: shouldNotify
           ? {
               title: monitor.title,
-              body: `Condition met at ${observation.url}: ${text.slice(0, 240)}`,
-              key: `monitor:${monitor.id}:${currentHash}`,
+              body: changes
+                ? `Changed at ${observation.url}\n${changes}`
+                : `Condition met at ${observation.url}: ${text.slice(0, 240)}`,
+              key: `monitor:${monitor.id}:${alertSequence}:${currentHash}`,
             }
           : null,
       },
@@ -994,7 +1193,7 @@ export class AgentService {
     };
   }
   private matchesPrice(text: string, threshold: number) {
-    const matches = [...text.matchAll(/(?:\$|USD\s*)(\d+(?:,\d{3})*(?:\.\d{1,2})?)/g)];
+    const matches = [...text.matchAll(/(?:\$|USD)\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)/g)];
     return matches.some((m) => Number(m[1].replace(/,/g, "")) < threshold);
   }
 }

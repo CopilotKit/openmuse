@@ -302,3 +302,100 @@ test("an expired lease from a dead executor recovers as interrupted without repl
   assert.ok(!f.calls.some((call) => call.args[0] === "exec"));
   assert.equal((await service.start("owner")).status, "running");
 });
+
+test("a Stop quarantine that lands before the lease check keeps its record", async () => {
+  const f = fixture();
+  const service = new ComputerService(db, config, f.runner);
+  const cmdId = createHash("sha256").update("computer-command:quarantine-case").digest("hex");
+  const originalGet = db.get.bind(db);
+  let intercepted = false;
+  db.get = (async (o: string, kind: string, id: string) => {
+    if (!intercepted && kind === "computer-state" && id === "lease") {
+      const lease = await originalGet<{ token: string }>(o, kind, id);
+      const row = await originalGet(o, "computer-commands", cmdId);
+      if (lease && row) {
+        intercepted = true;
+        await db.compareAndSwap(
+          o,
+          kind,
+          id,
+          { token: lease.token, stopping: false },
+          {
+            stopping: true,
+            stopInFlight: true,
+            stopAttempt: "stop-attempt-1",
+            stopConfirmed: false,
+            expiresAt: Date.now() + 180000,
+          },
+        );
+        await db.compareAndSwap(
+          o,
+          "computer-commands",
+          cmdId,
+          { status: "running" },
+          {
+            status: "interrupted",
+            completedAt: new Date().toISOString(),
+            stderr: "Stopped by the user. Inspect the workspace before repeating this command.",
+          },
+        );
+      }
+    }
+    return originalGet(o, kind, id);
+  }) as Store["get"];
+  try {
+    const receipt = await service.execute(
+      "owner",
+      { command: "sleep 30" },
+      { idempotencyKey: "quarantine-case" },
+    );
+    assert.equal(receipt.status, "interrupted");
+    assert.match(receipt.stderr, /Stopped by the user/);
+    assert.ok(!f.calls.some((call) => call.args[0] === "exec"));
+  } finally {
+    db.get = originalGet;
+    await db.remove("owner", "computer-state", "lease");
+  }
+});
+
+test("a command marked dead after the lease check is never executed", async () => {
+  const f = fixture({ command: async () => ok("should never run") });
+  const service = new ComputerService(db, config, f.runner);
+  const cmdId = createHash("sha256").update("computer-command:dead-row-case").digest("hex");
+  const originalGet = db.get.bind(db);
+  let intercepted = false;
+  db.get = (async (o: string, kind: string, id: string) => {
+    if (!intercepted && kind === "computer-state" && id === "lease") {
+      const lease = await originalGet<{ token: string }>(o, kind, id);
+      const row = await originalGet(o, "computer-commands", cmdId);
+      if (lease && row) {
+        intercepted = true;
+        await db.compareAndSwap(
+          o,
+          "computer-commands",
+          cmdId,
+          { status: "running" },
+          {
+            status: "interrupted",
+            completedAt: new Date().toISOString(),
+            stderr:
+              "Execution was interrupted. Its outcome is unknown; inspect files before running it again.",
+          },
+        );
+      }
+    }
+    return originalGet(o, kind, id);
+  }) as Store["get"];
+  try {
+    const receipt = await service.execute(
+      "owner",
+      { command: "touch /tmp/should-not-run" },
+      { idempotencyKey: "dead-row-case" },
+    );
+    assert.equal(receipt.status, "interrupted");
+    assert.equal(receipt.stdout, "");
+    assert.ok(!f.calls.some((call) => call.args[0] === "exec"), "docker exec must not run");
+  } finally {
+    db.get = originalGet;
+  }
+});
