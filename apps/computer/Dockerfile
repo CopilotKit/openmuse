@@ -1,4 +1,4 @@
-FROM node:22.22.0-bookworm-slim
+FROM node:22.23.3-bookworm-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends bash python3 git coreutils \
