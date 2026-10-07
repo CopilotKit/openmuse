@@ -49,6 +49,34 @@ const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 type MonitorPage = { id: string; hash?: string; timelessHash?: string; lines: string[] };
 const date = () => new Date().toISOString();
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
+const outcomeKey = (task: AgentTask): string | undefined => {
+  if (task.status === "succeeded") return `task-done:${task.id}`;
+  if (task.status === "failed") return `task-error:${task.id}:${task.attempts}`;
+  if (task.status === "waiting_input") return `input:${task.id}:${hash(task.question ?? "")}`;
+  if (task.status === "waiting_approval") return `review:${task.actionId}`;
+  if (task.status === "cancelled") return `cancelled:${task.id}`;
+  const notice = z
+    .object({ title: z.string(), body: z.string(), key: z.string() })
+    .safeParse(task.state.notice);
+  if ((task.status === "scheduled" || (task.status === "paused" && task.error)) && notice.success)
+    return notice.data.key;
+  return undefined;
+};
+
+const outcomeMarkerExpected = (task: AgentTask): Record<string, unknown> => {
+  const expected: Record<string, unknown> = { status: task.status };
+  if (task.status === "failed") expected.attempts = task.attempts;
+  if (task.status === "waiting_input" && task.question !== undefined)
+    expected.question = task.question;
+  if (task.status === "waiting_approval" && task.actionId !== undefined)
+    expected.actionId = task.actionId;
+  const notice = z
+    .object({ title: z.string(), body: z.string(), key: z.string() })
+    .safeParse(task.state.notice);
+  if ((task.status === "scheduled" || task.status === "paused") && notice.success)
+    expected.state = { notice: notice.data };
+  return expected;
+};
 export class AgentService {
   readonly worker: TaskWorker;
   readonly search: SearchService;
@@ -87,8 +115,12 @@ export class AgentService {
     this.refreshing = true;
     try {
       // Recover publications if the process exited after committing an outcome.
-      for (const { owner, value } of await this.db.scan<AgentTask>("tasks"))
+      // A matching durable marker means this exact outcome was already published.
+      for (const { owner, value } of await this.db.scan<AgentTask>("tasks")) {
+        const key = outcomeKey(value);
+        if (key && value.state.publishedOutcome === key) continue;
         await this.publishOutcome(owner, value);
+      }
       for (const { owner, value } of await this.db.scan<Monitor>("monitors"))
         await this.activateMonitor(owner, value);
       for (const { owner, value } of await this.db.scan<Idea>("ideas"))
@@ -900,6 +932,7 @@ export class AgentService {
   }
   private async publishOutcome(owner: string, saved: AgentTask) {
     const task = await this.getTask(owner, saved.id);
+    let outcomeReconciled = true;
     if (task.status === "succeeded") {
       await this.notify(
         owner,
@@ -909,9 +942,13 @@ export class AgentService {
         `task-done:${task.id}`,
       );
       if (task.goalId && !task.milestoneId) {
+        let milestoneReconciled = false;
         for (let attempt = 0; attempt < 8; attempt++) {
           const goal = await this.db.get<Goal>(owner, "goals", task.goalId);
-          if (!goal || goal.milestones.some((m) => m.id === task.id)) break;
+          if (!goal || goal.milestones.some((m) => m.id === task.id)) {
+            milestoneReconciled = true;
+            break;
+          }
           if (
             await this.db.compareAndSwap(
               owner,
@@ -922,9 +959,12 @@ export class AgentService {
                 milestones: [...goal.milestones, { id: task.id, title: task.title, done: true }],
               },
             )
-          )
+          ) {
+            milestoneReconciled = true;
             break;
+          }
         }
+        outcomeReconciled = milestoneReconciled;
       }
     } else if (task.status === "failed") {
       await this.notify(
@@ -964,6 +1004,16 @@ export class AgentService {
         String(task.input.monitorId),
         { status: "active", error: task.error },
         { status: "paused" },
+      );
+    const key = outcomeKey(task);
+    if (key && outcomeReconciled)
+      await this.db.compareAndSetJsonPath<AgentTask>(
+        owner,
+        "tasks",
+        task.id,
+        outcomeMarkerExpected(task),
+        ["state", "publishedOutcome"],
+        key,
       );
   }
   private async document(
