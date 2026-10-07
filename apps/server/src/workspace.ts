@@ -365,6 +365,7 @@ export class WorkspaceService {
         configured: agentConfigured(this.config),
         openbotConfigured: false,
         richThreads: true,
+        threadsBackend: this.config.threadsBackend ?? "intelligence",
       },
     };
   }
