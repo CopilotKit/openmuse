@@ -623,7 +623,15 @@ export class AgentService {
           id,
           title: `Let's make a plan for ${goal.title}`,
           reason: "This goal has no milestones yet. A concrete plan will give it a next step.",
-          evidence: [{ id: goal.id, kind: "user", title: goal.title, excerpt: goal.description }],
+          evidence: [
+            {
+              id: goal.id,
+              kind: "user",
+              title: goal.title,
+              excerpt: goal.description,
+              provenance: { acquisition: "user", observedAt: date(), sourceId: goal.id },
+            },
+          ],
           prompt: `Create an actionable plan for ${goal.title}. ${goal.description}`,
           kind: "plan",
           input: { goalId: goal.id },
@@ -728,7 +736,23 @@ export class AgentService {
     await this.db.insertIfAbsent(owner, "notifications", value);
   }
   mailEvidence(mail: Mail): Evidence {
-    return { id: mail.id, kind: "mail", title: mail.subject, excerpt: mail.body.slice(0, 400) };
+    return {
+      id: randomUUID(),
+      kind: "mail",
+      title: mail.subject,
+      excerpt: mail.body.slice(0, 400),
+      provenance: { acquisition: "mail", observedAt: date(), sourceId: mail.id },
+    };
+  }
+  browserEvidence(page: { sessionId: string; url: string; title: string; text: string }): Evidence {
+    return {
+      id: randomUUID(),
+      kind: "web",
+      title: page.title,
+      url: page.url,
+      excerpt: page.text.slice(0, 500),
+      provenance: { acquisition: "browser", observedAt: date(), sourceId: page.sessionId },
+    };
   }
   async artifact(
     owner: string,
@@ -878,10 +902,11 @@ export class AgentService {
         artifactIds: [artifact.id],
         evidence: [
           {
-            id: task.id,
+            id: hash(`transactions:${task.id}:${csv}`),
             kind: "user",
             title: "Your transaction CSV",
             excerpt: `${data.count} rows; ${data.period.from} through ${data.period.to}`,
+            provenance: { acquisition: "user", observedAt: date(), sourceId: task.id },
           },
         ],
       });
@@ -1085,6 +1110,7 @@ export class AgentService {
         ctx.signal,
       );
     }
+    const observedAt = date();
     const text = observation.text.replace(/\s+/g, " ").trim();
     const currentHash = hash(text);
     const previousHash =
@@ -1128,7 +1154,7 @@ export class AgentService {
       { status: "active", checks: monitor.checks },
       {
         checks: monitor.checks + 1,
-        lastCheckedAt: date(),
+        lastCheckedAt: observedAt,
         lastHash: currentHash,
         lastValue: text.slice(0, 1000),
         nextCheckAt,
@@ -1182,11 +1208,12 @@ export class AgentService {
       error: null,
       evidence: [
         {
-          id: monitor.id,
+          id: hash(`monitor-check:${monitor.id}:${monitor.checks + 1}`),
           kind: "web",
           title: observation.title,
           url: observation.url,
           excerpt: text.slice(0, 600),
+          provenance: { acquisition: "monitor", observedAt, sourceId: monitor.id },
         },
       ],
       plan: task.plan.map((s) => ({ ...s, status: "succeeded" })),
