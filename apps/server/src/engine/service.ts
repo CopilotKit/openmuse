@@ -199,10 +199,7 @@ export class AgentService {
     if (input.goalId && !goal) throw new AppError("Goal not found", 404);
     if (input.milestoneId && !goal?.milestones.some((m) => m.id === input.milestoneId))
       throw new AppError("Milestone not found in this goal", 404);
-    if (
-      (await this.db.list<AgentTask>(owner, "tasks")).filter((t) => !terminal.has(t.status))
-        .length >= 100
-    )
+    if ((await this.db.countActiveTasks(owner, [...terminal])) >= 100)
       throw new AppError("Finish or cancel some tasks before adding more", 409);
     const titles =
       input.kind === "document"
