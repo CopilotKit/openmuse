@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { BrowserContext, Page } from "playwright";
 import {
   capturePdfDownload,
+  downloadLimitReached,
   MAX_DOWNLOAD_BYTES,
   type PdfDownload,
   readDownloadFailures,
@@ -241,14 +242,14 @@ export async function createBrowserManager(
         void dialog.dismiss();
       });
       page.on("download", (download) => {
-        // The current download is not in pending yet, so reaching 20 saved or
-        // in-flight downloads means this one exceeds the documented 20-PDF limit.
+        // The current download is already in instance.pending when this runs,
+        // so the cap admits the 20th PDF and blocks the 21st.
         const pending = downloads(id).then((saved) =>
           capturePdfDownload({
             directory: directory(id),
             tempDirectory,
             download,
-            limitReached: saved.length + instance.pending.size >= 20,
+            limitReached: downloadLimitReached(saved.length, instance.pending.size),
           }),
         );
         instance.pending.add(pending);
