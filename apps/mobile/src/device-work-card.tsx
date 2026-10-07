@@ -216,8 +216,19 @@ export function DeviceWorkCard() {
       {snapshot.phase === "claiming" && <ActivityIndicator color={colors.blueDark} />}
       {notice && <ErrorNotice error={notice} />}
       <ErrorNotice error={pairingError} />
-      {/* Not offered while unpaired: claiming is behind the pairing gate, so the
-          button's only possible outcome is an error on every press. */}
+      {loop.recovery.kind === "paused" && (
+        <View style={[s.row, { gap: 8, alignItems: "center" }]}>
+          <Text style={[s.small, { flex: 1 }]}>
+            An agent was working on "{loop.recovery.title}" before the app stopped. Resume?
+          </Text>
+          <Button small onPress={loop.cancelRecoveredRun}>
+            Cancel
+          </Button>
+          <Button small primary onPress={loop.resumeRecoveredRun}>
+            Resume
+          </Button>
+        </View>
+      )}
       {paired === true && (
         <View style={[s.row, { gap: 8 }]}>
           <Button primary={!snapshot.enabled} onPress={loop.start} disabled={snapshot.enabled}>

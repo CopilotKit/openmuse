@@ -13,7 +13,8 @@
     "plugins": [
       "expo-document-picker",
       "@config-plugins/react-native-blob-util",
-      "@config-plugins/react-native-pdf"
+      "@config-plugins/react-native-pdf",
+      "./plugins/withAgentWorkService"
     ]
   }
 }

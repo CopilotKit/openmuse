@@ -151,6 +151,76 @@ export function heartbeatInterval(
   return Math.max(Math.floor(window * timing.heartbeatFraction), timing.minHeartbeatMs);
 }
 
+/**
+ * State persisted so the process can recover after being killed.
+ *
+ * The foreground service writes this to SharedPreferences on each claim; the
+ * headless recovery task reads it when the OS restarts the process. `title`
+ * is stored so the notification can name the task without a server round-trip.
+ */
+export interface AgentWorkState {
+  taskId: string;
+  leaseId: string;
+  leaseUntil: string;
+  title: string;
+}
+
+/** What the recovery logic decides to do on process restart. */
+export type RecoveryAction = "resume" | "requeue" | "noop";
+
+/**
+ * Decide what the device should do when it may have been killed mid-task.
+ *
+ * Pure: based on the saved lease and the clock alone. The caller acts on the
+ * result:
+ *
+ * - `noop` — nothing was in flight; do nothing.
+ * - `resume` — the lease is still live; restart the heartbeat loop.
+ * - `requeue` — the lease has lapsed (or is malformed), so the server has
+ *   already requeued the task; just clear local state.
+ *
+ * A malformed timestamp reads as dead, never live — consistent with the
+ * server's own treatment of unparseable lease times in `device-work.ts`.
+ */
+export function recoverAgentState(
+  saved: AgentWorkState | null,
+  now: number,
+  leaseGraceMs = 60_000,
+): RecoveryAction {
+  if (!saved) return "noop";
+  const until = Date.parse(saved.leaseUntil);
+  if (!Number.isFinite(until)) return "requeue";
+  // Grace period accounts for UTC-timestamp jitter and the lag between the OS
+  // reading SharedPreferences and the JS headless task starting: if the lease
+  // lapsed only recently, give the heartbeat a fighting chance before
+  // conceding to "requeue".
+  return until + leaseGraceMs > now ? "resume" : "requeue";
+}
+
+/**
+ * Persistence adapter injected into the loop so tests can pass a fake.
+ *
+ * The native module (Android) implements this by writing to SharedPreferences
+ * directly — synchronous in the JS bridge. On platforms without the native
+ * module, the bridge falls back to fire-and-forget SecureStore writes, since
+ * these calls are best-effort persistence for recovery, not critical data.
+ */
+export interface AgentWorkStorage {
+  /** Persist the active task and start the foreground service. */
+  save(state: AgentWorkState): void;
+  /** Update the stored lease expiry without touching the task. */
+  updateLease(leaseUntil: string): void;
+  /** Clear saved state and stop the foreground service. */
+  clear(): void;
+}
+
+/** A no-op storage for platforms/tests that do not need process-death recovery. */
+export const noopStorage: AgentWorkStorage = {
+  save: () => {},
+  updateLease: () => {},
+  clear: () => {},
+};
+
 /** A task in hand, plus the means to abort it. */
 interface ActiveRun {
   task: ClaimedTask;
@@ -188,6 +258,7 @@ export class DeviceAgentLoop {
       clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
       now: () => Date.now(),
     },
+    private readonly storage: AgentWorkStorage = noopStorage,
   ) {}
 
   getSnapshot = (): LoopSnapshot => ({
@@ -264,6 +335,35 @@ export class DeviceAgentLoop {
     this.setPhase("idle");
   }
 
+  /**
+   * Rebuild an {@link ActiveRun} from state saved before a process kill.
+   *
+   * The original executor is gone, so this only starts the heartbeat to hold
+   * the lease until the app returns to the foreground. `finishRun()` is the
+   * only place that clears the run — it is called both from `run()` and from
+   * `beat()` when the heartbeat reports the lease is gone.
+   */
+  restoreSavedState(state: AgentWorkState): void {
+    if (this.active !== null) return;
+    const active: ActiveRun = {
+      task: { id: state.taskId, title: state.title },
+      lease: { id: state.leaseId, until: state.leaseUntil },
+      leaseUntil: state.leaseUntil,
+      title: state.title,
+      controller: new AbortController(),
+    };
+    this.active = active;
+    this.running_ = true;
+    this.setPhase("running");
+    this.storage.save({
+      taskId: state.taskId,
+      leaseId: state.leaseId,
+      leaseUntil: state.leaseUntil,
+      title: state.title,
+    });
+    void this.startHeartbeat(active);
+  }
+
   private clearPoll() {
     if (this.pollHandle === null) return;
     this.timers.clearTimeout(this.pollHandle);
@@ -306,6 +406,9 @@ export class DeviceAgentLoop {
   }
 
   private async claimAndRun() {
+    // A task is already in hand — e.g. one restored from saved state after a
+    // process kill. Don't claim a second one; wait for the current run to finish.
+    if (this.active !== null) return;
     this.setPhase("claiming");
     let claimed: ClaimResponse;
     try {
@@ -346,6 +449,12 @@ export class DeviceAgentLoop {
     };
     this.active = active;
     this.setPhase("running");
+    this.storage.save({
+      taskId: task.id,
+      leaseId: lease.id,
+      leaseUntil: lease.until,
+      title: active.title,
+    });
 
     const beat = this.startHeartbeat(active);
     let result: { outcome: WorkOutcome; result: string } | null = null;
@@ -392,8 +501,18 @@ export class DeviceAgentLoop {
   }
 
   private finishRun() {
+    if (this.active === null) return;
     this.active = null;
+    this.storage.clear();
     this.setPhase(this.isEnabled() ? "waiting" : "idle");
+    // In the normal flow, `tick()` re-arms the poll after `claimAndRun`
+    // settles. But when a restored task's lease is lost via `beat()`, there is
+    // no enclosing `tick()` — without this, the loop would be stuck idle forever.
+    // `schedulePoll` clears any handle already pending, so this is safe to call
+    // twice (the `tick()` path simply overwrites).
+    if (this.isEnabled()) {
+      this.schedulePoll(nextIdleDelay(this.idleStreak, this.timing));
+    }
   }
 
   /**
@@ -447,13 +566,17 @@ export class DeviceAgentLoop {
     if (!ok) {
       active.controller.abort();
       this.setError("This task moved to another device.");
+      this.finishRun();
       return;
     }
     // Schedule against the NEW expiry. Measuring every beat against the window
     // the claim returned would shorten the interval on each pass — the window
     // only ever shrinks — until the beats were arriving faster than the network
     // could answer them.
-    if (leaseUntil) active.leaseUntil = leaseUntil;
+    if (leaseUntil) {
+      active.leaseUntil = leaseUntil;
+      this.storage.updateLease(leaseUntil);
+    }
     schedule();
   }
 }
