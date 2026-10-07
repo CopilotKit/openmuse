@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import { ActionService } from "../apps/server/src/actions.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
@@ -118,6 +119,37 @@ test("uncertain writes retain uncertainty and cannot be retried", async () => {
   assert.equal(result.status, "outcome_unknown");
   await service.decide("uncertain-user", proposal.id, proposal.hash, "approve");
   assert.equal(calls, 1);
+});
+async function sendDraft(
+  owner: string,
+  decision: "approve" | "deny",
+  execute: () => Promise<string>,
+) {
+  const service = new ActionService(db, { execute, connected: async () => true });
+  const draft = await db.put(owner, "drafts", { ...email.data, id: randomUUID() });
+  const proposal = await service.propose(owner, { ...email, draftId: draft.id });
+  const result = await service.decide(owner, proposal.id, proposal.hash, decision);
+  return { status: result.status, draft: await db.get(owner, "drafts", draft.id) };
+}
+test("sending a saved draft removes it from drafts", async () => {
+  const sent = await sendDraft("draft-sent-user", "approve", async () => "sent");
+  assert.equal(sent.status, "succeeded");
+  assert.equal(sent.draft, null);
+});
+test("a draft stays when its email is declined, fails or has an unknown outcome", async () => {
+  const denied = await sendDraft("draft-denied-user", "deny", async () => "sent");
+  assert.equal(denied.status, "denied");
+  assert.ok(denied.draft);
+  const failed = await sendDraft("draft-failed-user", "approve", async () => {
+    throw new Error("Provider rejected the message");
+  });
+  assert.equal(failed.status, "failed");
+  assert.ok(failed.draft);
+  const uncertain = await sendDraft("draft-uncertain-user", "approve", async () => {
+    throw Object.assign(new Error("Provider response lost"), { outcomeUnknown: true });
+  });
+  assert.equal(uncertain.status, "outcome_unknown");
+  assert.ok(uncertain.draft);
 });
 test("another service instance sees persisted proposals", async () => {
   const options = { execute: async () => "created", connected: async () => true };

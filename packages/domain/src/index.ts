@@ -126,7 +126,11 @@ export const eventDraftSchema = z
     }
   });
 export const proposalSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("email.send"), data: emailDraftSchema }),
+  z.object({
+    kind: z.literal("email.send"),
+    data: emailDraftSchema,
+    draftId: z.string().uuid().optional(),
+  }),
   z.object({ kind: z.literal("calendar.create"), data: eventDraftSchema }),
   z.object({
     kind: z.literal("calendar.update"),
@@ -144,6 +148,7 @@ export interface ActionProposal {
   target?: CalendarEvent;
   targetVersion?: string;
   taskId?: string;
+  draftId?: string;
   account?: string;
   connectionId?: string;
   id: string;

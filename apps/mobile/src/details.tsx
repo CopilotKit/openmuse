@@ -255,6 +255,7 @@ function EmailEditor({ draft }: { draft?: Partial<EmailDraft> & { id?: string } 
         const action = await api.request<ActionProposal>("/api/actions", {
           kind: "email.send",
           data: parsed.data,
+          draftId: draft?.id,
         });
         await refresh();
         open({ type: "review", action });
@@ -571,7 +572,10 @@ function ReviewDetail({ initial }: { initial: ActionProposal }) {
     try {
       let next: Detail;
       if (action.kind === "email.send")
-        next = { type: "email", draft: emailDraftSchema.parse(action.data) };
+        next = {
+          type: "email",
+          draft: { ...emailDraftSchema.parse(action.data), id: action.draftId },
+        };
       else {
         const draft = eventDraftSchema.parse(action.data);
         if (action.kind === "calendar.update") {

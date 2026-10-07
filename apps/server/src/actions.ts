@@ -66,6 +66,7 @@ export class ActionService {
     const proposal: ActionProposal = {
       id,
       taskId,
+      draftId: input.kind === "email.send" ? input.draftId : undefined,
       title,
       kind: input.kind,
       data: input.data,
@@ -203,6 +204,8 @@ export class ActionService {
     }
     await this.db.put(owner, "actions", finished);
     await this.record(owner, finished, finished.result ?? finished.error ?? finished.status);
+    if (finished.status === "succeeded" && finished.draftId)
+      await this.db.remove(owner, "drafts", finished.draftId);
     return finished;
   }
   private async record(owner: string, action: ActionProposal, detail: string) {
