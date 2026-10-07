@@ -102,6 +102,68 @@ export function browserWorkerUrl(value?: string): string | undefined {
 // writes never re-fire here: they are dispatched outside the model loop through
 // reviewed, idempotency-keyed actions.
 export const MODEL_MAX_RETRIES = 2;
+
+export function parsePort(raw: string | undefined): number {
+  const port = Number(raw ?? 8787);
+  if (!Number.isInteger(port) || port < 1 || port > 65535)
+    throw new Error("PORT must be an integer between 1 and 65535");
+  return port;
+}
+
+export function parsePublicUrl(raw: string | undefined, port: number): string {
+  const value = (raw ?? `http://localhost:${port}`).trim().replace(/\/+$/, "");
+  if (!value) throw new Error("PUBLIC_API_URL must be a valid URL");
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("PUBLIC_API_URL must be a valid URL");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+    throw new Error("PUBLIC_API_URL must use http or https");
+  // Downstream consumers concatenate this value as a base string
+  // (Auth.sign does `${publicUrl}${path}?owner=...`, callback is
+  // `${publicUrl}/api/google/callback`), so credentials, queries,
+  // fragments, and subpaths would produce malformed links or leak secrets.
+  if (parsed.username || parsed.password)
+    throw new Error("PUBLIC_API_URL must not contain credentials");
+  if (parsed.search || parsed.hash)
+    throw new Error("PUBLIC_API_URL must not contain a query string or fragment");
+  if (parsed.pathname !== "/" && parsed.pathname !== "")
+    throw new Error("PUBLIC_API_URL must not contain a subpath");
+  return parsed.origin;
+}
+
+export function parseAllowedOrigins(raw: string | undefined): string[] {
+  const entries = (raw ?? "http://localhost:8081,http://127.0.0.1:8081")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  const origins: string[] = [];
+  for (const entry of entries) {
+    let parsed: URL;
+    try {
+      parsed = new URL(entry);
+    } catch {
+      throw new Error(`ALLOWED_ORIGINS contains an invalid origin: ${entry}`);
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+      throw new Error(`ALLOWED_ORIGINS contains an invalid origin: ${entry}`);
+    const origin = parsed.origin;
+    if (!origins.includes(origin)) origins.push(origin);
+  }
+  return origins;
+}
+
+export function isValidEncryptionKey(key: string): boolean {
+  try {
+    const bytes = Buffer.from(key, "base64");
+    return bytes.length === 32 && bytes.toString("base64") === key;
+  } catch {
+    return false;
+  }
+}
+
 export function readConfig(): Config {
   const mode = process.env.WORKSPACE_MODE ?? "sample";
   if (mode !== "sample" && mode !== "live")
@@ -131,8 +193,8 @@ export function readConfig(): Config {
         "COMPUTER_PROVIDER=e2b-desktop requires a unique COMPUTER_DEPLOYMENT_ID, e.g. from `openssl rand -hex 12`",
       );
   }
-  const port = Number(process.env.PORT ?? 8787);
-  const publicUrl = process.env.PUBLIC_API_URL ?? `http://localhost:${port}`;
+  const port = parsePort(process.env.PORT);
+  const publicUrl = parsePublicUrl(process.env.PUBLIC_API_URL, port);
   const config: Config = {
     mode,
     port,
@@ -163,16 +225,17 @@ export function readConfig(): Config {
     computerProvider,
     computerE2bTemplate: process.env.COMPUTER_E2B_TEMPLATE?.trim() || "desktop",
     e2bApiKey,
-    allowedOrigins: (
-      process.env.ALLOWED_ORIGINS ?? "http://localhost:8081,http://127.0.0.1:8081"
-    ).split(","),
+    allowedOrigins: parseAllowedOrigins(process.env.ALLOWED_ORIGINS),
     // Only trust X-Forwarded-For/X-Real-IP when the deployment is known to sit
     // behind a proxy that sets them; otherwise a direct caller can spoof them.
     trustProxy: process.env.TRUST_PROXY === "true",
   };
   if (
     mode === "live" &&
-    (!config.accessKey || config.accessKey.length < 24 || !config.encryptionKey)
+    (!config.accessKey ||
+      config.accessKey.length < 24 ||
+      !config.encryptionKey ||
+      !isValidEncryptionKey(config.encryptionKey))
   )
     throw new Error(
       "Live mode requires OPENMUSE_ACCESS_KEY (24+ characters) and TOKEN_ENCRYPTION_KEY (32-byte base64)",
