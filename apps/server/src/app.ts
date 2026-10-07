@@ -1,7 +1,6 @@
 import "./config.ts";
 import { randomUUID } from "node:crypto";
 import { MessageSchema } from "@ag-ui/core";
-import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
@@ -17,7 +16,7 @@ import { createAuth } from "./auth.ts";
 import { BrowserService } from "./browser.ts";
 import { ComputerService, type DockerRunner } from "./computer.ts";
 import { computerRoutes } from "./computer-routes.ts";
-import { assertApiDeploymentConfig, type Config } from "./config.ts";
+import { assertThreadsBackendConfig, type Config } from "./config.ts";
 import type { Store } from "./db.ts";
 import { agentRoutes } from "./engine/routes.ts";
 import { AgentService } from "./engine/service.ts";
@@ -25,6 +24,8 @@ import { AppError } from "./errors.ts";
 import { Files } from "./files.ts";
 import { GoogleAuth } from "./google-auth.ts";
 import { rateLimit } from "./rate-limit.ts";
+import { CHAT_THREADS_KIND, type LocalThreadRecord } from "./threads/local-runner.ts";
+import { createThreadProvider, type ThreadProvider } from "./threads/provider.ts";
 import { WorkspaceService } from "./workspace.ts";
 
 export async function createApp(
@@ -32,7 +33,7 @@ export async function createApp(
   config: Config,
   options: { docker?: DockerRunner } = {},
 ) {
-  assertApiDeploymentConfig(config);
+  assertThreadsBackendConfig(config);
   const auth = await createAuth(db, config),
     files = new Files(db, config, auth),
     google = new GoogleAuth(db, config),
@@ -47,8 +48,13 @@ export async function createApp(
   const browser = new BrowserService(db, config, auth, files);
   const computer = new ComputerService(db, config, options.docker);
   const agent = new AgentService(db, config, workspace, files, actions, browser, computer);
-  const intelligence = new CopilotKitIntelligence({ apiKey: config.intelligenceApiKey });
-  const runtime = makeRuntime(config, agent, auth, intelligence);
+  // The runner's persist path receives no request context, so the agents factory
+  // (in makeRuntime) records each built agent's owner in this shared registry.
+  const agentOwners = new WeakMap<object, string>();
+  const ownerOf = (agent: unknown) =>
+    typeof agent === "object" && agent !== null ? agentOwners.get(agent) : undefined;
+  const threads: ThreadProvider = createThreadProvider(config, { db, ownerOf });
+  const runtime = makeRuntime(config, agent, auth, threads, agentOwners);
   const app = new Hono<{ Variables: { owner: string } }>();
   const origins = new Set([...config.allowedOrigins, new URL(config.publicUrl).origin]);
   app.use("*", async (c, next) => {
@@ -101,6 +107,7 @@ export async function createApp(
       mode: config.mode,
       agentConfigured: agentConfigured(config),
       browserConfigured: Boolean(config.workerUrl && config.workerToken),
+      threadsBackend: config.threadsBackend ?? "intelligence",
     }),
   );
   let loginWindow = 0,
@@ -215,14 +222,12 @@ export async function createApp(
     const main = await db.get<{ threadId: string }>(owner, "conversation-settings", "main");
     if (!main) throw new AppError("Main conversation could not be loaded", 503);
     try {
-      await intelligence.getOrCreateThread({
-        threadId: main.threadId,
-        userId: owner,
-        agentId: "default",
-      });
+      await threads.getOrCreateMainThread({ owner, threadId: main.threadId });
     } catch {
       throw new AppError(
-        "Main conversation is unavailable. Check the Rich Threads connection and try again.",
+        threads.backend === "intelligence"
+          ? "Main conversation is unavailable. Check the Rich Threads connection and try again."
+          : "Main conversation could not be saved. Check the server database and try again.",
         502,
       );
     }
@@ -329,12 +334,44 @@ export async function createApp(
     await browser.input(c.get("owner"), c.req.param("id"), await c.req.json());
     return c.json({ ok: true });
   });
+  // The runtime's own local thread-list fallback is process-global and cannot
+  // scope by owner, so local mode lists from the database instead. The static
+  // route wins over the /api/copilotkit/* wildcard below; intelligence mode
+  // forwards to the runtime untouched.
+  app.get("/api/copilotkit/threads", async (c) => {
+    if (threads.backend !== "local") return proxyRuntime(c);
+    const url = new URL(c.req.url);
+    const agentId = url.searchParams.get("agentId") ?? "default";
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 100);
+    const offset = Math.max(Number(url.searchParams.get("cursor")) || 0, 0);
+    const records = (await db.list<LocalThreadRecord>(c.get("owner"), CHAT_THREADS_KIND)).filter(
+      (record) => record.agentId === agentId,
+    );
+    const page = records.slice(offset, offset + limit);
+    const nextOffset = offset + page.length;
+    return c.json({
+      threads: page.map((record) => ({
+        id: record.id,
+        name: record.name,
+        agentId: record.agentId,
+        organizationId: "",
+        createdById: "",
+        archived: record.archived,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+      })),
+      nextCursor: nextOffset < records.length ? String(nextOffset) : null,
+    });
+  });
   app.all("/api/copilotkit/*", async (c) => {
     if (!agentConfigured(config))
       throw new AppError(
         "Configure a model and provider API key, or a valid AG-UI endpoint, to start chat",
         503,
       );
+    return proxyRuntime(c);
+  });
+  async function proxyRuntime(c: { req: { raw: Request } }) {
     const response = await runtime.fetch(c.req.raw);
     // Runtime 1.70 emits SSE strings; a WHATWG Response body requires byte chunks.
     const encoder = new TextEncoder();
@@ -346,7 +383,7 @@ export async function createApp(
       }),
     );
     return new Response(body, { status: response.status, headers: response.headers });
-  });
+  }
   app.get("/", (c) =>
     c.json({ name: "OpenMuse", app: "http://localhost:8081", health: "/api/health" }),
   );
