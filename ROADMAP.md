@@ -33,19 +33,28 @@ The release is a personal-agent alpha: delegate a job, inspect its plan, supply 
 ## Device plane: the remaining half
 
 - [x] **Mobile client for the device work loop** (shipped 2026-10-04). `apps/mobile/src/device-agent-loop.ts` drives claim/heartbeat/report, aborts and stays silent when it loses a lease, retries through a network blip instead of abandoning live work, and keeps the run in hand going when the app is backgrounded. Off by default; turned on from Apps. Device work runs through the same agent as chat. See [docs/SYNC.md](docs/SYNC.md).
-- [ ] Background continuation when the app is killed, not just backgrounded. The lease already recovers the task, so this is an optimisation rather than a correctness fix.
+- [x] **Background continuation when the app is killed, not just backgrounded** (shipped 2026-10-06). The device work loop now persists its active claim to `AgentWorkStorage`
+  (SharedPreferences on Android via a foreground service, fire-and-forget SecureStore elsewhere)
+  and restores it on restart through a headless task (`apps/mobile/src/device-agent-loop.ts`:
+  `AgentWorkState`/`recoverAgentState()`/`AgentWorkStorage` + `restoreSavedState()`;
+  `apps/mobile/src/modules/headless-recovery.ts` + `AgentWorkService.ts`; Kotlin service in
+  `apps/mobile/plugins/agent-work-service/`; Expo plugin `withAgentWorkService.ts`). On process
+  restart the recovery banner offers Resume (restart the heartbeat to hold the lease) or Cancel
+  (clear saved state). A lapsed lease still requeues via the server side, so this is the
+  optimisation the lease-recovery path made safe. 19 new tests; suite 577/577. `recoverAgentState`
+  treats a malformed lease timestamp as dead, never live — consistent with `device-work.ts`.
 - [x] **Device-side pairing UX** (shipped 2026-10-04). An already-paired device lists what is waiting and mints a code; an unpaired one shows a code field to redeem it with. `GET /devices` now reports `paired` per device, without which the approving device has no target to mint for and a second phone could never be paired. See [docs/SYNC.md](docs/SYNC.md).
-- [ ] On-device model provider. **Revised 2026-10-05: tool-calling is implemented
-  and merged in meaty** (non-streaming [PR #380](https://github.com/Wiltermoodj/meaty/pull/380),
+- [x] **On-device model provider** (shipped 2026-10-06). tool-calling is implemented
+  and merged in meaty (non-streaming [PR #380](https://github.com/Wiltermoodj/meaty/pull/380),
   streaming [PR #383](https://github.com/Wiltermoodj/meaty/pull/383)). `meaty` serves
   `/v1/chat/completions` (SSE + non-streaming), `/v1/models`, audio, vision and
   embeddings, with full OpenAI-compatible tool-calling — but binds `127.0.0.1` on
   port 11435 only, and OpenMuse runs all inference in `apps/server`, which cannot
-  reach a phone's loopback. That reachability gap is the only remaining blocker.
+  reach a phone's loopback — closed by the phone-proxy sequence below.
   Decided 2026-10-04: the phone proxies to its own loopback endpoint, the server
   routes per request with a remote-then-API fallback, and meaty's endpoint uses
   standard OpenAI tool semantics (`tool_choice: "auto"` or omitted; `"required"`/named
-  is refused). Sequence (meaty-side complete; OpenMuse-side not started): provider
+  is refused). Sequence (meaty-side complete; OpenMuse-side complete): provider
   wiring → server relay → phone streaming client. Meaty is
   `Wiltermoodj/meaty` — a separate on-device AI app serving an HTTP contract,
   never a library OpenMuse imports. Detail in
