@@ -1,7 +1,7 @@
 import "./config.ts";
 import { randomUUID } from "node:crypto";
 import { MessageSchema } from "@ag-ui/core";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { z } from "zod";
@@ -18,6 +18,7 @@ import { ComputerService, type DockerRunner } from "./computer.ts";
 import { computerRoutes } from "./computer-routes.ts";
 import { assertThreadsBackendConfig, type Config } from "./config.ts";
 import type { Store } from "./db.ts";
+import { ConversationAgent } from "./engine/conversation.ts";
 import { agentRoutes } from "./engine/routes.ts";
 import { AgentService } from "./engine/service.ts";
 import { AppError } from "./errors.ts";
@@ -50,9 +51,16 @@ export async function createApp(
   const agent = new AgentService(db, config, workspace, files, actions, browser, computer);
   // The runner's persist path receives no request context, so the agents factory
   // (in makeRuntime) records each built agent's owner in this shared registry.
+  // The runtime clones the agent per request before handing it to the runner,
+  // so the WeakMap alone cannot resolve an owner; ConversationAgent carries
+  // its owner (clone() preserves it) and the map remains as a fallback.
   const agentOwners = new WeakMap<object, string>();
   const ownerOf = (agent: unknown) =>
-    typeof agent === "object" && agent !== null ? agentOwners.get(agent) : undefined;
+    agent instanceof ConversationAgent
+      ? agent.owner
+      : typeof agent === "object" && agent !== null
+        ? agentOwners.get(agent)
+        : undefined;
   const threads: ThreadProvider = createThreadProvider(config, { db, ownerOf });
   const runtime = makeRuntime(config, agent, auth, threads, agentOwners);
   const app = new Hono<{ Variables: { owner: string } }>();
@@ -363,6 +371,43 @@ export async function createApp(
       nextCursor: nextOffset < records.length ? String(nextOffset) : null,
     });
   });
+  // The runtime's local fallbacks for these endpoints are process-global with
+  // no owner concept: any signed-in user could read another owner's thread, and
+  // clear would wipe every owner. Local mode serves them owner-scoped from the
+  // database instead; other owners' threads are indistinguishable from missing
+  // ones (404, never 403) so the endpoints leak no existence information.
+  app.get("/api/copilotkit/threads/:id/messages", async (c) =>
+    threadDetail(c, "messages", (record) => record.messages),
+  );
+  app.get("/api/copilotkit/threads/:id/events", async (c) =>
+    threadDetail(c, "events", (record) => record.runs.flatMap((run) => run.events)),
+  );
+  app.get("/api/copilotkit/threads/:id/state", async (c) => threadDetail(c, "state", () => null));
+  app.post("/api/copilotkit/threads/clear", async (c) => {
+    if (threads.backend !== "local") return proxyRuntime(c);
+    const owner = c.get("owner");
+    // Delete only this owner's durable rows; memory is process-global, so it
+    // is cleared whole — other owners rehydrate from the database on their
+    // next access.
+    const records = await db.list<LocalThreadRecord>(owner, CHAT_THREADS_KIND);
+    for (const record of records) await db.remove(owner, CHAT_THREADS_KIND, record.id);
+    threads.runner.clearMemory();
+    return c.json({ ok: true });
+  });
+  async function threadDetail(
+    c: Context,
+    key: "messages" | "events" | "state",
+    pick: (record: LocalThreadRecord) => unknown,
+  ) {
+    if (threads.backend !== "local") return proxyRuntime(c);
+    const id = c.req.param("id");
+    if (!id) throw new AppError("Thread not found", 404);
+    const record = await db.get<LocalThreadRecord>(c.get("owner"), CHAT_THREADS_KIND, id);
+    // Another owner's thread is indistinguishable from a missing one, so the
+    // endpoint leaks no existence information.
+    if (!record) throw new AppError("Thread not found", 404);
+    return c.json({ [key]: pick(record) });
+  }
   app.all("/api/copilotkit/*", async (c) => {
     if (!agentConfigured(config))
       throw new AppError(

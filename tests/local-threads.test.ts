@@ -76,7 +76,7 @@ test("thread listing is owner-scoped from the database and paginates", async () 
       createdAt: now,
       updatedAt: now,
       messages: [],
-      events: [],
+      runs: [],
     });
   }
   const seen: string[] = [];
@@ -114,6 +114,63 @@ test("rename and archive stay honest 422s in local mode", async () => {
     body: JSON.stringify({ agentId: "default" }),
   });
   assert.equal(archive.status, 422);
+});
+
+test("thread detail endpoints are owner-scoped and clear stays owner-local", async () => {
+  const main = await (await app.request("/api/main-thread", { headers: headers() })).json();
+  const now = new Date().toISOString();
+  await db.put("local-user", CHAT_THREADS_KIND, {
+    id: "mine-detail",
+    owner: "local-user",
+    agentId: "default",
+    name: null,
+    archived: false,
+    createdAt: now,
+    updatedAt: now,
+    messages: [{ id: "m1", role: "user", content: "hi" }],
+    runs: [{ runId: "r1", createdAt: now, events: [{ type: "RUN_STARTED" }] }],
+  });
+  await db.put("someone-else", CHAT_THREADS_KIND, {
+    id: "theirs-detail",
+    owner: "someone-else",
+    agentId: "default",
+    name: null,
+    archived: false,
+    createdAt: now,
+    updatedAt: now,
+    messages: [{ id: "secret", role: "user", content: "not yours" }],
+    runs: [],
+  });
+  const mine = await app.request("/api/copilotkit/threads/mine-detail/messages", {
+    headers: headers(),
+  });
+  assert.equal(mine.status, 200);
+  assert.deepEqual((await mine.json()).messages, [{ id: "m1", role: "user", content: "hi" }]);
+  const events = await app.request("/api/copilotkit/threads/mine-detail/events", {
+    headers: headers(),
+  });
+  assert.equal(events.status, 200);
+  assert.equal((await events.json()).events.length, 1);
+  // Another owner's thread is indistinguishable from a missing one.
+  const theirs = await app.request("/api/copilotkit/threads/theirs-detail/messages", {
+    headers: headers(),
+  });
+  assert.equal(theirs.status, 404);
+  const missing = await app.request("/api/copilotkit/threads/nope/messages", {
+    headers: headers(),
+  });
+  assert.equal(missing.status, 404);
+  // Clear deletes only the authenticated owner's records.
+  const clear = await app.request("/api/copilotkit/threads/clear", {
+    method: "POST",
+    headers: headers(),
+  });
+  assert.equal(clear.status, 200);
+  const kept = await db.get("someone-else", CHAT_THREADS_KIND, "theirs-detail");
+  assert.ok(kept, "another owner's record survives this owner's clear");
+  assert.equal(kept.owner, "someone-else");
+  assert.equal(await db.get("local-user", CHAT_THREADS_KIND, "mine-detail"), null);
+  assert.equal(await db.get("local-user", CHAT_THREADS_KIND, main.threadId), null);
 });
 
 test("approvals, browser tools and background tasks behave as in intelligence mode", async () => {

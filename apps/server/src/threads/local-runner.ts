@@ -16,7 +16,19 @@ export const THREADS_CONTRACT_REF = "@copilotkit/runtime 1.70.1";
 
 export const CHAT_THREADS_KIND = "chat-threads";
 
-/** Durable per-thread record stored in the server's own database. */
+/** One persisted run: its compacted events, keyed for merge-on-write. */
+export interface LocalThreadRun {
+  runId: string;
+  createdAt: string;
+  events: unknown[];
+}
+
+/**
+ * Durable per-thread record stored in the server's own database. `runs` grows
+ * incrementally: memory eviction in the base runner may drop old runs from
+ * the in-memory store, so a persist must merge new runs into the stored set
+ * instead of overwriting it. `events` is the v1 shape, read for migration.
+ */
 export interface LocalThreadRecord {
   id: string;
   owner: string;
@@ -27,22 +39,30 @@ export interface LocalThreadRecord {
   updatedAt: string;
   /** Thread-level message snapshot (AG-UI Message[]) replayed on connect. */
   messages: unknown[];
-  /** Compacted AG-UI events across all runs of the thread, replayed on connect. */
-  events: unknown[];
+  runs: LocalThreadRun[];
+  /** v1 records stored all events at thread level; migrated on read. */
+  events?: unknown[];
 }
 
 type OwnerLookup = (agent: unknown) => string | undefined;
 
+/** The historic-run fields this class reads, decoupled from runtime internals. */
+type HistoricRun = {
+  runId?: unknown;
+  createdAt?: unknown;
+  events?: unknown;
+};
+
 /**
  * InMemoryAgentRunner durably backed by the OpenMuse store. The base runner
  * keeps everything in a process-global store that dies with the process; this
- * subclass rehydrates threads from the database before run/connect and saves
- * the snapshot once a run finalizes.
+ * subclass rehydrates threads from the database before run/connect and merges
+ * each finalized run into the durable record.
  *
  * Durability boundary: the terminal RUN_FINISHED event is held until the
  * snapshot write completes, so a client never sees a completed run that a
- * restart would lose. A failed write is reported as a visible RUN_ERROR
- * instead of being swallowed.
+ * restart would lose. A failed write on a successful run is reported as a
+ * visible RUN_ERROR; a failed run always terminates the stream cleanly.
  */
 export class PersistentAgentRunner extends InMemoryAgentRunner {
   /** threadId -> record, so owner/name survive restarts without a scan. */
@@ -59,10 +79,18 @@ export class PersistentAgentRunner extends InMemoryAgentRunner {
   override run(request: AgentRunnerRunRequest): Observable<BaseEvent> {
     const subject = new ReplaySubject<BaseEvent>(Infinity);
     this.hydrate(request.threadId).then(
-      () =>
-        this.gatePersistence(super.run(request), request.threadId, request.agent).subscribe(
-          subject,
-        ),
+      () => {
+        // A concurrent run on the thread throws synchronously; deliver it as
+        // an observable error instead of an unhandled rejection or a hang.
+        let source: Observable<BaseEvent>;
+        try {
+          source = super.run(request);
+        } catch (error) {
+          subject.error(error);
+          return;
+        }
+        this.gatePersistence(source, request.threadId, request.agent).subscribe(subject);
+      },
       (error: unknown) => subject.error(error),
     );
     return subject.asObservable();
@@ -102,11 +130,19 @@ export class PersistentAgentRunner extends InMemoryAgentRunner {
       .catch((error: unknown) => backgroundFailure("chat thread clear", error));
   }
 
+  /** Memory-only clear for the app route: durable rows are deleted per owner there. */
+  clearMemory(): void {
+    super.clearThreads();
+    this.index.clear();
+    this.scanIndex.clear();
+  }
+
   /**
    * Forward every event except the terminal RUN_FINISHED, which is held until
-   * the durable snapshot write settles. The base runner finalizes (appendRun)
+   * the durable write settles. The base runner finalizes (appendRun)
    * synchronously after emitting RUN_FINISHED, so the persist defers one
-   * macrotask and reads the finalized store.
+   * macrotask and reads the finalized store. A run that ends without
+   * RUN_FINISHED (internal failure) still persists what ran and completes.
    */
   private gatePersistence(
     source: Observable<BaseEvent>,
@@ -117,28 +153,34 @@ export class PersistentAgentRunner extends InMemoryAgentRunner {
       let finishEvent: BaseEvent | undefined;
       let persisted: Promise<void> | undefined;
       let sourceComplete = false;
+      const close = (errorEvent: BaseEvent | undefined) => {
+        if (subscriber.closed) return;
+        if (errorEvent) subscriber.next(errorEvent);
+        subscriber.complete();
+      };
       const flush = () => {
-        if (!sourceComplete || !persisted) return;
-        void persisted.then(
-          () => {
-            if (!subscriber.closed) {
-              if (finishEvent) subscriber.next(finishEvent);
-              subscriber.complete();
-            }
-          },
-          (error: unknown) => {
-            backgroundFailure("chat thread persistence", error);
-            if (!subscriber.closed) {
-              subscriber.next({
+        if (!sourceComplete) return;
+        if (persisted) {
+          void persisted.then(
+            () => close(finishEvent),
+            (error: unknown) => {
+              backgroundFailure("chat thread persistence", error);
+              close({
                 type: EventType.RUN_ERROR,
                 message:
                   "The run completed but the conversation could not be saved. " +
                   "Check the server database and try again.",
               } as BaseEvent);
-              subscriber.complete();
-            }
-          },
-        );
+            },
+          );
+        } else {
+          // No RUN_FINISHED means the run already failed; the runner appended
+          // a RUN_ERROR. Save what exists (best effort) and close the stream.
+          void new Promise<void>((resolve) => setImmediate(resolve))
+            .then(() => this.persist(threadId, agent))
+            .catch((error: unknown) => backgroundFailure("chat thread persistence", error))
+            .finally(() => close(undefined));
+        }
       };
       const subscription = source.subscribe({
         next: (event) => {
@@ -171,43 +213,69 @@ export class PersistentAgentRunner extends InMemoryAgentRunner {
     const store = ɵGLOBAL_STORE.getOrCreate(threadId);
     store.createdAt = Date.parse(record.createdAt);
     store.messagesSnapshot = record.messages as never;
-    // One synthetic run holding the persisted events is the canonical
-    // post-appendRun shape the base runner itself produces.
-    store.historicRuns = [
-      {
-        threadId,
-        runId: "persisted",
-        agentId: record.agentId,
-        parentRunId: null,
-        events: record.events,
-        messages: [],
-        createdAt: Date.parse(record.createdAt),
-      } as never,
-    ];
+    // Rebuild historic runs exactly as appendRun would have produced them, so
+    // connect/replay and further appends work unchanged.
+    store.historicRuns = this.recordRuns(record).map(
+      (run) =>
+        ({
+          threadId,
+          runId: run.runId,
+          agentId: record.agentId,
+          parentRunId: null,
+          events: run.events,
+          messages: [],
+          createdAt: Date.parse(run.createdAt),
+        }) as never,
+    );
   }
 
-  /** Write the finalized thread snapshot back to the database. */
+  /** Write the finalized thread snapshot back, merging runs already stored. */
   private async persist(threadId: string, agent: unknown): Promise<void> {
     const store = ɵGLOBAL_STORE.peek(threadId);
     if (!store) return;
     const prior = await this.findRecord(threadId);
     const owner = this.ownerOf(agent) ?? prior?.owner;
     if (!owner) throw new Error("No owner is associated with the running agent");
-    const createdAt = store.createdAt ?? Date.now();
+    const priorRuns = prior ? this.recordRuns(prior) : [];
+    const known = new Set(priorRuns.map((run) => run.runId));
+    const freshRuns = (store.historicRuns as HistoricRun[])
+      .filter(
+        (run) =>
+          typeof run.runId === "string" &&
+          run.runId !== "persisted" &&
+          !known.has(run.runId) &&
+          Array.isArray(run.events),
+      )
+      .map((run) => ({
+        runId: run.runId as string,
+        createdAt: new Date(Number(run.createdAt) || Date.now()).toISOString(),
+        events: run.events as unknown[],
+      }));
+    // A run that produced no events (immediate failure) must not create an
+    // empty or clobbering record; the prior durable state is authoritative.
+    if (freshRuns.length === 0) return;
     const record: LocalThreadRecord = {
       id: threadId,
       owner,
       agentId: prior?.agentId ?? "default",
       name: prior?.name ?? null,
       archived: prior?.archived ?? false,
-      createdAt: prior?.createdAt ?? new Date(createdAt).toISOString(),
+      createdAt: prior?.createdAt ?? new Date(store.createdAt ?? Date.now()).toISOString(),
       updatedAt: new Date().toISOString(),
       messages: store.messagesSnapshot as unknown[],
-      events: store.historicRuns.flatMap((run) => run.events) as unknown[],
+      runs: [...priorRuns, ...freshRuns],
     };
     await this.db.put(owner, CHAT_THREADS_KIND, record);
     this.index.set(threadId, record);
     this.scanIndex.set(threadId, record);
+  }
+
+  /** Runs of a record, migrating the v1 thread-level `events` shape on read. */
+  private recordRuns(record: LocalThreadRecord): LocalThreadRun[] {
+    if (Array.isArray(record.runs) && record.runs.length > 0) return record.runs;
+    if (Array.isArray(record.events) && record.events.length > 0)
+      return [{ runId: "migrated", createdAt: record.createdAt, events: record.events }];
+    return [];
   }
 
   /** Resolve a record by thread id; owners are not knowable from a thread id alone. */
