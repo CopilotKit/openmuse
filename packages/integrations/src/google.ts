@@ -297,6 +297,10 @@ const wellFormed = (value: string): string =>
     "\uFFFD",
   );
 
+function isAttachedPart(part: GmailPart): boolean {
+  return Boolean(part.filename) || part.mimeType === "message/rfc822";
+}
+
 function mapMessage(message: z.infer<typeof messageSchema>): Mail {
   const metadata = headers(message.payload);
   const plain: string[] = [];
@@ -307,10 +311,10 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
     // Attachments carry their own content (or an attached message); never merge
     // their parts into the parent text. A remote body has no filename: it is
     // hydrated above and still counts as message text.
-    const attached = Boolean(part.filename) || part.mimeType === "message/rfc822";
-    if (part.filename && part.body?.attachmentId)
+    const attached = isAttachedPart(part);
+    if (attached && part.body?.attachmentId)
       attachments.push(
-        `${message.id}:${part.body.attachmentId}:${encodeURIComponent(wellFormed(part.filename))}`,
+        `${message.id}:${part.body.attachmentId}:${encodeURIComponent(wellFormed(part.filename || "forwarded-message.eml"))}`,
       );
     if (
       !attached &&
@@ -471,10 +475,9 @@ export class GoogleClient {
     const hydrate = async (part: GmailPart, depth: number): Promise<void> => {
       if (depth > 30) throw new Error("Gmail message MIME nesting exceeds the limit");
       // Attached MIME trees are not part of the parent body. Leave their content
-      // lazy, just as mapMessage does when extracting the visible text.
-      if (part.filename || part.mimeType === "message/rfc822") return;
+      // lazy, matching the module-level mapMessage visible-text extractor.
+      if (isAttachedPart(part)) return;
       if (
-        !part.filename &&
         (part.mimeType === "text/plain" || part.mimeType === "text/html") &&
         part.body?.data === undefined &&
         part.body?.attachmentId
