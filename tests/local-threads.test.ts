@@ -101,7 +101,6 @@ test("thread listing is owner-scoped from the database and paginates", async () 
 });
 
 test("threads can be renamed, archived, restored and deleted in local mode", async () => {
-  const main = await (await app.request("/api/main-thread", { headers: headers() })).json();
   const now = new Date().toISOString();
   await db.put("local-user", CHAT_THREADS_KIND, {
     id: "manage-me",
@@ -197,6 +196,18 @@ test("thread management stays owner-scoped", async () => {
   assert.ok(kept, "another owner's record is untouched");
   assert.equal(kept.name, "Secret");
   assert.equal(kept.archived, false);
+});
+
+test("the runtime info advertises thread mutations in local mode", async () => {
+  const response = await app.request("/api/copilotkit/info", { headers: headers() });
+  assert.equal(response.status, 200, await response.clone().text());
+  const body = await response.json();
+  assert.equal(body.threadEndpoints.mutations, true, "the SDK must allow rename/archive/delete");
+  assert.equal(
+    body.threadEndpoints.realtimeMetadata,
+    false,
+    "streaming metadata stays Intelligence-only",
+  );
 });
 
 test("thread detail endpoints are owner-scoped and clear stays owner-local", async () => {

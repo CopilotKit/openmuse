@@ -64,7 +64,19 @@ export function defaultTitleGenerator(model: string | undefined): TitleGenerator
               : null
       ) as AnySummarizeAdapter | null;
       if (!adapter) return clip;
-      const result = await summarize({ adapter, text: clip, maxLength: 10, style: "concise" });
+      // Moonshot/Kimi rejects any temperature other than 1; OpenAI (0-2),
+      // Anthropic (0-1) and Gemini all accept 1, so pin it explicitly. The
+      // summarize default would otherwise inject a low temperature.
+      // maxLength 10 becomes max_output_tokens 10 for openai adapters, which
+      // truncates CJK titles mid-phrase (each hanzi costs several tokens), so
+      // an explicit 64-token cap overrides it (caller always wins).
+      const result = await summarize({
+        adapter,
+        text: clip,
+        maxLength: 10,
+        style: "concise",
+        modelOptions: { temperature: 1, max_output_tokens: 64 },
+      });
       return cleanTitle(result.summary) ?? clip;
     } catch {
       // A title must never surface as a chat error; the truncated message is

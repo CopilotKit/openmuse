@@ -342,6 +342,19 @@ export async function createApp(
     await browser.input(c.get("owner"), c.req.param("id"), await c.req.json());
     return c.json({ ok: true });
   });
+  // The runtime reports thread mutations as Intelligence-only, which makes the
+  // client SDK refuse rename/archive/delete before ever issuing a request.
+  // Local mode implements those endpoints owner-scoped below, so advertise
+  // them here; realtime metadata stays off. Intelligence passes through.
+  app.get("/api/copilotkit/info", async (c) => {
+    if (threads.backend !== "local") return proxyRuntime(c);
+    const response = await runtime.fetch(c.req.raw);
+    const body = (await response.json()) as {
+      threadEndpoints?: { mutations?: boolean; realtimeMetadata?: boolean };
+    };
+    if (body.threadEndpoints) body.threadEndpoints.mutations = true;
+    return c.json(body);
+  });
   // The runtime's own local thread-list fallback is process-global and cannot
   // scope by owner, so local mode lists from the database instead. The static
   // route wins over the /api/copilotkit/* wildcard below; intelligence mode
