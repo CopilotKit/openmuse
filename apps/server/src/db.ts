@@ -15,18 +15,28 @@ interface Database {
  * Postgres refuses a lone surrogate inside a jsonb value (22P02), and a record can carry text
  * no call site bounded: a client-supplied title, prompt or nested task input. Repair strings
  * and keys here, at the one boundary every durable write crosses.
+ *
+ * The cache holds the copy already built for an object, so a value referenced twice is repaired
+ * in every place it appears rather than handed back with its original text the second time. A
+ * cycle still ends in a circular structure and JSON.stringify reports it as it did before.
  */
-function jsonbSafe(value: unknown, seen = new WeakSet<object>()): unknown {
+function jsonbSafe(value: unknown, cache = new Map<object, unknown>()): unknown {
   if (typeof value === "string") return wellFormed(value);
   if (typeof value !== "object" || value === null) return value;
-  if (seen.has(value)) return value;
-  seen.add(value);
-  if (Array.isArray(value)) return value.map((item) => jsonbSafe(item, seen));
+  const cached = cache.get(value);
+  if (cached !== undefined) return cached;
+  if (Array.isArray(value)) {
+    const repaired: unknown[] = [];
+    cache.set(value, repaired);
+    for (const item of value) repaired.push(jsonbSafe(item, cache));
+    return repaired;
+  }
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) return value;
   const repaired: Record<string, unknown> = {};
+  cache.set(value, repaired);
   for (const [key, item] of Object.entries(value))
-    repaired[wellFormed(key)] = jsonbSafe(item, seen);
+    repaired[wellFormed(key)] = jsonbSafe(item, cache);
   return repaired;
 }
 

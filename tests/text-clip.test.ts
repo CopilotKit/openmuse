@@ -278,3 +278,17 @@ test("search does not report truncation for a repaired excerpt inside its budget
   assert.equal(result.results[0]?.excerpts[0], "a");
   assert.equal(result.truncated, false);
 });
+
+test("a value referenced twice is repaired everywhere it appears", async (t) => {
+  const store = await createStore();
+  t.after(() => store.close());
+  const shared = { keep: `shared \uD800 value` };
+  await store.put("clip-owner", "records", { id: "shared", first: shared, second: shared });
+  const saved = await store.get<{ first: { keep: string }; second: { keep: string } }>(
+    "clip-owner",
+    "records",
+    "shared",
+  );
+  assert.equal(saved?.first.keep, `shared ${replacement} value`);
+  assert.equal(saved?.second.keep, `shared ${replacement} value`);
+});
