@@ -1193,7 +1193,9 @@ export class AgentService {
     };
   }
   private matchesPrice(text: string, threshold: number) {
-    const matches = [...text.matchAll(/(?:\$|USD)\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)/g)];
+    const matches = [
+      ...text.matchAll(/(?:\$|USD)\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)(?![\d,]|\.\d)/g),
+    ];
     return matches.some((m) => Number(m[1].replace(/,/g, "")) < threshold);
   }
 }
