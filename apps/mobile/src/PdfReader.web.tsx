@@ -44,6 +44,9 @@ export default function PdfReader({ url, pageCount }: PdfReaderProps) {
         key={`${page}:${zoom}`}
         title="PDF document reader"
         src={`${url}#page=${page}&zoom=${zoom}`}
+        // The file-download Permissions-Policy leaves fullscreen to this
+        // origin; the iframe still needs the delegation for the viewer button.
+        allow="fullscreen"
         style={{ height: 570, width: "100%", border: 0, borderRadius: 12, background: "#e7e9e3" }}
       />
       <Text style={s.small}>Use the reader toolbar to download or print a copy.</Text>

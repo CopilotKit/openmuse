@@ -131,6 +131,10 @@ export class Store {
       `UPDATE records SET data=data || '{"status":"outcome_unknown","error":"Server restarted during execution. Check the provider before creating another action."}'::jsonb WHERE kind='actions' AND data->>'status'='executing'`,
     );
   }
+  /** Liveness probe for the readiness endpoint; rejects when the database is unreachable. */
+  async ping(): Promise<void> {
+    await this.db.query("SELECT 1");
+  }
   async take<T>(owner: string, kind: string, id: string): Promise<T | null> {
     const result = await this.db.query(
       "DELETE FROM records WHERE owner=$1 AND kind=$2 AND id=$3 RETURNING data",

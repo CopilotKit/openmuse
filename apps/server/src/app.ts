@@ -24,7 +24,8 @@ import { AgentService } from "./engine/service.ts";
 import { AppError } from "./errors.ts";
 import { Files } from "./files.ts";
 import { GoogleAuth } from "./google-auth.ts";
-import { rateLimit } from "./rate-limit.ts";
+import { createRateLimitStore, rateLimit, resolveRequestKey } from "./rate-limit.ts";
+import { createEdgeHeaders, isSignedRoute } from "./security-headers.ts";
 import { WorkspaceService } from "./workspace.ts";
 
 export async function createApp(
@@ -51,12 +52,16 @@ export async function createApp(
   const runtime = makeRuntime(config, agent, auth, intelligence);
   const app = new Hono<{ Variables: { owner: string } }>();
   const origins = new Set([...config.allowedOrigins, new URL(config.publicUrl).origin]);
+  // One prebuilt policy for both response paths: the middleware below and the
+  // CopilotKit raw-Response passthrough share headersFor(), so a change to one
+  // cannot silently miss the other.
+  const edgeHeaders = createEdgeHeaders(config);
+  // Hardening first so rejected requests (origin gate, rate limits, validation)
+  // carry the same headers as successful ones.
+  app.use("*", edgeHeaders.middleware);
   app.use("*", async (c, next) => {
     const origin = c.req.header("origin");
     if (origin && !origins.has(origin)) return c.json({ error: "Origin is not allowed" }, 403);
-    c.header("X-Content-Type-Options", "nosniff");
-    c.header("Referrer-Policy", "no-referrer");
-    c.header("Cache-Control", "no-store");
     await next();
   });
   app.use(
@@ -75,6 +80,53 @@ export async function createApp(
       onError: (c) => c.json({ error: "Request is too large; PDFs must be 10 MB or smaller" }, 413),
     }),
   );
+  // Health probes stay outside the shared budget so load-balancer checks are
+  // never turned away on a busy minute: they are registered before the
+  // `/api/*` limiter, which is the single exemption mechanism.
+  app.get("/api/health", (c) =>
+    c.json({
+      ok: true,
+      mode: config.mode,
+      agentConfigured: agentConfigured(config),
+      browserConfigured: Boolean(config.workerUrl && config.workerToken),
+    }),
+  );
+  // Coalesced probe: PGlite runs one query at a time, so concurrent Render
+  // checks share a single in-flight ping instead of queueing behind each other
+  // and making recovery slower. The per-request timeout still bounds the HTTP
+  // response; the shared ping keeps waiting once and is reused, never piled up.
+  let readyInFlight: Promise<void> | null = null;
+  app.get("/api/ready", async (c) => {
+    // Load balancers cannot authenticate, so readiness stays open like health.
+    // With the default embedded PGlite store this only proves the process is
+    // alive; with DATABASE_URL set it proves Postgres actually answers.
+    // PGlite runs one query at a time, so bound the probe: a slow query
+    // elsewhere must not make Render restart a healthy server.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>(
+      (_, reject) => (timer = setTimeout(() => reject(new Error("readiness timeout")), 1500)),
+    );
+    // Attach a noop handler up front so the rejection is never unhandled when
+    // the probe wins the race and the timer fires later (cleared below anyway).
+    timeout.catch(() => {});
+    try {
+      if (!readyInFlight) {
+        readyInFlight = db.ping().finally(() => {
+          readyInFlight = null;
+        });
+      }
+      const probe = readyInFlight;
+      // A late timer rejection after the probe wins must not surface as an
+      // unhandled rejection on the shared promise.
+      probe.catch(() => {});
+      await Promise.race([probe, timeout]);
+      return c.json({ ok: true, mode: config.mode, database: "up" });
+    } catch {
+      return c.json({ ok: false, mode: config.mode, database: "down" }, 503);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  });
   app.use("/api/*", rateLimit(Boolean(config.trustProxy)));
   app.onError((error, c) => {
     if (error instanceof z.ZodError)
@@ -95,23 +147,30 @@ export async function createApp(
       502,
     );
   });
-  app.get("/api/health", (c) =>
-    c.json({
-      ok: true,
-      mode: config.mode,
-      agentConfigured: agentConfigured(config),
-      browserConfigured: Boolean(config.workerUrl && config.workerToken),
-    }),
-  );
-  let loginWindow = 0,
-    loginAttempts = 0;
+  // Sign-in attempts are cheap for an attacker (one JSON body) and expensive to
+  // get wrong, so each client gets its own small bucket (10/min). A hard
+  // overall cap would pull against that goal — one address burning through it
+  // would lock everyone else out — so the flood monitor below only logs a
+  // warning instead of blocking. It counts only attempts that pass the
+  // per-client check, so already-rejected floods cannot consume it. Per-client
+  // keys depend on TRUST_PROXY: behind a proxy without it, every user shares
+  // one bucket, so deploy with TRUST_PROXY=true (see render.yaml / .env.example).
+  const signInPerClient = createRateLimitStore({
+    windowMs: 60_000,
+    maxRequests: 10,
+    maxEntries: 5_000,
+  });
+  const signInFlood = createRateLimitStore({
+    windowMs: 60_000,
+    maxRequests: 100,
+    maxEntries: 2,
+  });
   app.post("/api/session", async (c) => {
-    if (Date.now() - loginWindow > 60000) {
-      loginWindow = Date.now();
-      loginAttempts = 0;
-    }
-    if (++loginAttempts > 30)
+    const now = Date.now();
+    if (!signInPerClient.take(resolveRequestKey(c, Boolean(config.trustProxy)), now))
       throw new AppError("Too many sign-in attempts. Try again in a minute.", 429);
+    if (!signInFlood.take("global", now))
+      console.warn("[OpenMuse] sign-in flood: over 100 attempts in a minute");
     const body = z.object({ accessKey: z.string().optional() }).parse(await c.req.json());
     const session = await auth.session(body.accessKey);
     await workspace.ensureSample("local-user", actions);
@@ -131,10 +190,9 @@ export async function createApp(
     );
   });
   app.use("/api/*", async (c, next) => {
-    const signedRoute =
-      /^\/api\/files\/[^/]+\/content$|^\/api\/browsers\/[^/]+\/(?:preview|console)$/.test(
-        c.req.path,
-      );
+    // Shared with security-headers.ts so a new signed route cannot get the
+    // strictest CSP by forgetting one of the two lists.
+    const signedRoute = isSignedRoute(c.req.path);
     const owner =
       signedRoute && c.req.query("signature")
         ? auth.verify(new URL(c.req.url))
@@ -319,10 +377,8 @@ export async function createApp(
   });
   app.get("/api/browsers/:id/console", async (c) => {
     await browser.get(c.get("owner"), c.req.param("id"));
-    c.header(
-      "Content-Security-Policy",
-      "default-src 'self'; img-src 'self' blob:; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'",
-    );
+    // Content-Security-Policy for this page comes from the security-headers
+    // middleware, which preserves these allowances and adds framing protection.
     return c.html(browser.console(c.get("owner"), c.req.param("id")));
   });
   app.post("/api/browsers/:id/console", async (c) => {
@@ -345,7 +401,13 @@ export async function createApp(
         },
       }),
     );
-    return new Response(body, { status: response.status, headers: response.headers });
+    // A returned Response bypasses context headers, so apply the same edge
+    // policy the middleware sets instead of inheriting whatever the runtime
+    // happened to set.
+    const headers = new Headers(response.headers);
+    for (const [name, value] of Object.entries(edgeHeaders.headersFor(c.req.method, c.req.path)))
+      if (!headers.has(name)) headers.set(name, value);
+    return new Response(body, { status: response.status, headers });
   });
   app.get("/", (c) =>
     c.json({ name: "OpenMuse", app: "http://localhost:8081", health: "/api/health" }),

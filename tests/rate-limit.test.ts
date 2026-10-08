@@ -26,9 +26,17 @@ test("resolveClientKey ignores forwarding headers unless trustProxy is enabled",
   });
   assert.equal(untrustedA, untrustedB, "spoofed X-Forwarded-For must not change the bucket");
 
+  // Only the hop our own proxy appended (the last entry) is trusted: the
+  // leftmost entry is caller-controlled and must not mint a new bucket.
   const trustedA = resolveClientKey({ trustProxy: true, forwardedFor: "1.2.3.4, 10.0.0.1" });
   const trustedB = resolveClientKey({ trustProxy: true, forwardedFor: "5.6.7.8, 10.0.0.1" });
-  assert.notEqual(trustedA, trustedB, "a trusted proxy header should pick the first (client) hop");
+  assert.equal(
+    trustedA,
+    trustedB,
+    "spoofed leftmost entries sharing one proxy hop must share one bucket",
+  );
+  const trustedC = resolveClientKey({ trustProxy: true, forwardedFor: "1.2.3.4, 10.0.0.2" });
+  assert.notEqual(trustedA, trustedC, "distinct proxy-appended hops get distinct buckets");
 
   assert.equal(resolveClientKey({ trustProxy: true, realIp: "1.2.3.4" }), "proxy:1.2.3.4");
 });
@@ -54,11 +62,12 @@ test("createRateLimitStore caps total entries and evicts expired ones to make ro
   assert.equal(store.take("a", 0), true);
   assert.equal(store.take("b", 0), true);
   assert.equal(store.size(), 2);
-  assert.equal(store.take("c", 500), false, "a brand-new key must be rejected once at capacity");
+  // At capacity the oldest entry is evicted so newcomers are never locked out.
+  assert.equal(store.take("c", 500), true, "a brand-new key evicts the oldest entry");
   assert.equal(store.size(), 2, "the map must never exceed maxEntries");
 
-  // Once "a" and "b" expire, capacity should be reclaimed for a new key.
-  assert.equal(store.take("c", 2000), true);
+  // Once "b" and "c" expire, capacity should be reclaimed for a new key.
+  assert.equal(store.take("d", 2000), true);
   assert.equal(store.size(), 1);
 });
 
@@ -99,7 +108,9 @@ test("session token rotation does not create new pre-auth buckets", async () => 
 test("unauthenticated requests cannot multiply buckets by spoofing X-Forwarded-For", async () => {
   let lastStatus = 200;
   for (let i = 0; i < 121; i++) {
-    const response = await app.request("/api/health", {
+    // /api/health and /api/ready are exempt (load-balancer probes), so exercise
+    // a rate-limited route instead.
+    const response = await app.request("/api/workspace", {
       headers: { "X-Forwarded-For": `10.0.0.${i % 255}` },
     });
     lastStatus = response.status;
@@ -140,7 +151,7 @@ test("spoofed bearer tokens from one connection share a single bucket", async ()
   assert.equal(other.status, 200);
 });
 
-test("capacity exhaustion fails closed and recovers once entries expire", async () => {
+test("capacity exhaustion evicts the oldest entry instead of locking out", async () => {
   const addresses = ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"];
   let current = 0;
   const app = limitedApp({ maxEntries: 3, windowMs: 60_000, getAddress: () => addresses[current] });
@@ -148,15 +159,45 @@ test("capacity exhaustion fails closed and recovers once entries expire", async 
   for (current = 0; current < 4; current++) {
     statuses.push((await app.request("/api/ping")).status);
   }
-  assert.deepEqual(statuses, [200, 200, 200, 429], "the fourth connection is rejected");
-  current = 0;
+  assert.deepEqual(
+    statuses,
+    [200, 200, 200, 200],
+    "the fourth connection evicts the oldest entry instead of locking out",
+  );
+  current = 1;
   assert.equal((await app.request("/api/ping")).status, 200, "existing entries keep working");
+});
+
+test("an evicted entry restarts with a fresh budget", () => {
+  const store = createRateLimitStore({ windowMs: 60_000, maxRequests: 1, maxEntries: 2 });
+  assert.equal(store.take("a", 0), true);
+  assert.equal(store.take("b", 0), true);
+  // At capacity "c" evicts "a" (least recently used).
+  assert.equal(store.take("c", 1), true);
+  // The dropped key gets a fresh bucket rather than inheriting its old count.
+  assert.equal(store.take("a", 2), true, "evicted key restarts at count 1");
+  assert.equal(store.take("a", 3), false, "but the fresh bucket still enforces its limit");
+});
+
+test("recently active entries survive eviction over idle ones", () => {
+  const store = createRateLimitStore({ windowMs: 60_000, maxRequests: 2, maxEntries: 3 });
+  assert.equal(store.take("a", 0), true);
+  assert.equal(store.take("a", 1), true, "a is now at its limit (count 2)");
+  assert.equal(store.take("b", 2), true);
+  assert.equal(store.take("c", 3), true);
+  // Touch "b" so recency order is a, c, b; the next newcomer must evict "a".
+  assert.equal(store.take("b", 4), true, "b reaches its limit (count 2)");
+  assert.equal(store.take("d", 5), true, "newcomer evicts least-recently-active entry");
+  // "a" was evicted and restarts fresh; "b" kept its exhausted count.
+  assert.equal(store.take("a", 6), true, "evicted entry restarts fresh");
+  assert.equal(store.take("b", 6), false, "recently active entry keeps its count");
 });
 
 test("capacity exhaustion reclaims expired entries", () => {
   const store = createRateLimitStore({ windowMs: 1000, maxEntries: 3 });
   for (const key of ["conn:a", "conn:b", "conn:c"]) assert.equal(store.take(key, 0), true);
-  assert.equal(store.take("conn:d", 500), false);
+  // At capacity the oldest entry is evicted for the newcomer.
+  assert.equal(store.take("conn:d", 500), true);
   assert.equal(store.take("conn:d", 1500), true);
   assert.equal(store.size(), 1);
 });
