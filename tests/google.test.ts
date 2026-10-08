@@ -1018,3 +1018,47 @@ test("an outgoing attachment name with an unpaired surrogate still sends", async
     { name: "form\uD800.pdf", mimeType: "application/pdf", bytes: Buffer.from([1]) },
   ]);
 });
+
+test("attached MIME trees are not fetched while loading the parent message", async () => {
+  for (const attached of [
+    { mimeType: "message/rfc822", filename: "forwarded.eml" },
+    { mimeType: "message/rfc822" },
+    { mimeType: "multipart/mixed", filename: "attached.mime" },
+  ]) {
+    const reads: string[] = [];
+    const message = {
+      id: "outer",
+      threadId: "thread1",
+      payload: {
+        mimeType: "multipart/mixed",
+        parts: [
+          { mimeType: "text/plain", body: { data: base64url("Outer body.") } },
+          {
+            ...attached,
+            body: { attachmentId: "attached", size: 42 },
+            parts: [{ mimeType: "text/plain", body: { attachmentId: "inner", size: 20 } }],
+          },
+        ],
+      },
+    };
+    const client = clientWith((request) => {
+      const path = new URL(request.url).pathname;
+      reads.push(path);
+      if (path.includes("/attachments/"))
+        return json({ error: { message: "Unavailable attachment" } }, 404);
+      if (path.endsWith("/messages")) return json({ messages: [{ id: "outer" }] });
+      if (path.includes("/threads/")) return json({ id: "thread1", messages: [message] });
+      return json(message);
+    });
+    const [mail] = await client.listMail();
+    assert.equal(mail.body, "Outer body.");
+    assert.equal(reads.length, 2);
+    assert.deepEqual(mail.attachments, [
+      `outer:attached:${attached.filename || "forwarded-message.eml"}`,
+    ]);
+    const [threadMail] = await client.getThread("thread1");
+    assert.equal(threadMail.body, "Outer body.");
+    assert.deepEqual(threadMail.attachments, mail.attachments);
+    assert.equal(reads.length, 3);
+  }
+});
