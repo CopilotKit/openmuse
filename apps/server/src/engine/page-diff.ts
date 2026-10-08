@@ -1,4 +1,4 @@
-import { clip } from "../text.ts";
+import { clip } from "../../../../packages/domain/src/text.ts";
 
 /** Lines of page text for comparing two checks of a watched page. */
 export function pageLines(text: string, limit = 2000): string[] {

@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { BrowserSession } from "../../../packages/domain/src/index.ts";
+import { clip } from "../../../packages/domain/src/text.ts";
 import type { Auth } from "./auth.ts";
 import { browserConsole } from "./browser-console.ts";
 import type { Config } from "./config.ts";
 import type { Store } from "./db.ts";
 import { AppError } from "./errors.ts";
 import type { Files } from "./files.ts";
-import { clip } from "./text.ts";
 
 const sessionSchema = z.object({
   id: z.string(),

@@ -8,8 +8,8 @@ import {
   jevOptionSchema,
   jevPanelSchema,
 } from "../../../../packages/domain/src/jev.ts";
+import { clip } from "../../../../packages/domain/src/text.ts";
 import type { Store } from "../db.ts";
-import { clip } from "../text.ts";
 import { type JevAdapter, rankJevOptions } from "./adapter.ts";
 
 export type PresentChoicesInput = {

@@ -23,6 +23,7 @@ import type {
   Mail,
   ProposalInput,
 } from "../../../../packages/domain/src/index.ts";
+import { clip } from "../../../../packages/domain/src/text.ts";
 import type { ActionService } from "../actions.ts";
 import type { BrowserService } from "../browser.ts";
 import { ComputerService } from "../computer.ts";
@@ -32,7 +33,6 @@ import { AppError } from "../errors.ts";
 import type { Files } from "../files.ts";
 import { backgroundFailure } from "../log.ts";
 import { SearchService } from "../search.ts";
-import { clip } from "../text.ts";
 import type { WorkspaceService } from "../workspace.ts";
 import { analyzeSpending } from "./finance.ts";
 import { executeModelTask } from "./model.ts";

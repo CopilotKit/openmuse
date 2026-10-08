@@ -2,12 +2,32 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
+import { wellFormed } from "../../../packages/domain/src/text.ts";
 import { backgroundFailure } from "./log.ts";
 
 type Row = { data: Record<string, unknown> };
 interface Database {
   query: (sql: string, params?: unknown[]) => Promise<{ rows: Row[] }>;
   close: () => Promise<void>;
+}
+
+/**
+ * Postgres refuses a lone surrogate inside a jsonb value (22P02), and a record can carry text
+ * no call site bounded: a client-supplied title, prompt or nested task input. Repair strings
+ * and keys here, at the one boundary every durable write crosses.
+ */
+function jsonbSafe(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (typeof value === "string") return wellFormed(value);
+  if (typeof value !== "object" || value === null) return value;
+  if (seen.has(value)) return value;
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((item) => jsonbSafe(item, seen));
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return value;
+  const repaired: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value))
+    repaired[wellFormed(key)] = jsonbSafe(item, seen);
+  return repaired;
 }
 
 export class Store {
@@ -53,11 +73,12 @@ export class Store {
     return result.rows.map((row) => row.data as T);
   }
   async put<T extends { id: string }>(owner: string, kind: string, value: T): Promise<T> {
+    const record = jsonbSafe(value) as T;
     await this.db.query(
       "INSERT INTO records(owner,kind,id,data) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(owner,kind,id) DO UPDATE SET data=excluded.data,updated_at=now()",
-      [owner, kind, value.id, JSON.stringify(value)],
+      [owner, kind, record.id, JSON.stringify(record)],
     );
-    return value;
+    return record;
   }
   async remove(owner: string, kind: string, id: string): Promise<void> {
     await this.db.query("DELETE FROM records WHERE owner=$1 AND kind=$2 AND id=$3", [
@@ -75,7 +96,7 @@ export class Store {
   ): Promise<T | null> {
     const result = await this.db.query(
       "UPDATE records SET data=data || $5::jsonb,updated_at=now() WHERE owner=$1 AND kind=$2 AND id=$3 AND data @> $4::jsonb RETURNING data",
-      [owner, kind, id, JSON.stringify(expected), JSON.stringify(patch)],
+      [owner, kind, id, JSON.stringify(jsonbSafe(expected)), JSON.stringify(jsonbSafe(patch))],
     );
     return (result.rows[0]?.data as T | undefined) ?? null;
   }
@@ -100,9 +121,10 @@ export class Store {
     kind: string,
     value: T,
   ): Promise<T | null> {
+    const record = jsonbSafe(value) as T;
     const result = await this.db.query(
       "INSERT INTO records(owner,kind,id,data) VALUES($1,$2,$3,$4::jsonb) ON CONFLICT DO NOTHING RETURNING data",
-      [owner, kind, value.id, JSON.stringify(value)],
+      [owner, kind, record.id, JSON.stringify(record)],
     );
     return (result.rows[0]?.data as T | undefined) ?? null;
   }
@@ -144,7 +166,7 @@ export class Store {
   async updateCredential(owner: string, connectionId: string, secret: string): Promise<boolean> {
     const result = await this.db.query(
       "UPDATE records SET data=jsonb_set(data,'{secret}',$3::jsonb),updated_at=now() WHERE owner=$1 AND kind='credentials' AND id='google' AND data->>'connectionId'=$2 RETURNING data",
-      [owner, connectionId, JSON.stringify(secret)],
+      [owner, connectionId, JSON.stringify(jsonbSafe(secret))],
     );
     return result.rows.length === 1;
   }

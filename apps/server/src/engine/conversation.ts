@@ -12,13 +12,13 @@ import {
 } from "../../../../packages/domain/src/agent.ts";
 import { calendarRangeSchema } from "../../../../packages/domain/src/index.ts";
 import { jevActionPrefix, parseJevAction } from "../../../../packages/domain/src/jev.ts";
+import { clip } from "../../../../packages/domain/src/text.ts";
 import { computerInstructions, computerTools } from "../computer-tools.ts";
 import type { Config } from "../config.ts";
 import { createJevAdapter, type JevAdapter } from "../jev/adapter.ts";
 import { JevService } from "../jev/service.ts";
 import { presentChoicesTool } from "../jev/tools.ts";
 import { searchDescription, searchInputSchema, searchInstructions } from "../search.ts";
-import { clip } from "../text.ts";
 import type { AgentService } from "./service.ts";
 import { tanstackAgent } from "./tanstack-agent.ts";
 

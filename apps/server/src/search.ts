@@ -4,8 +4,8 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import project from "../../../package.json" with { type: "json" };
+import { clip } from "../../../packages/domain/src/text.ts";
 import type { Store } from "./db.ts";
-import { clip } from "./text.ts";
 
 export const searchInputSchema = z.object({
   objective: z.string().trim().min(1).max(2000),
@@ -132,8 +132,8 @@ export class SearchService {
         const excerpts = source.excerpts
           .map((excerpt) => {
             const bounded = clip(excerpt, remaining);
+            truncated ||= excerpt.length > remaining;
             remaining -= bounded.length;
-            truncated ||= bounded.length < excerpt.length;
             return bounded;
           })
           .filter(Boolean);
