@@ -162,28 +162,39 @@ export function IconButton({
   icon: Icon,
   label,
   onPress,
+  disabled,
+  small,
+  danger,
 }: {
   icon: LucideIcon;
   label: string;
   onPress: () => void;
+  disabled?: boolean;
+  small?: boolean;
+  danger?: boolean;
 }) {
+  const color = danger ? colors.danger : colors.text;
+  const size = small ? 32 : 44;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled }}
+      disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
         {
-          width: 44,
-          height: 44,
+          width: size,
+          height: size,
           alignItems: "center",
           justifyContent: "center",
-          borderRadius: 22,
+          borderRadius: small ? 16 : 22,
           backgroundColor: pressed ? colors.line : "#FFFFFF",
         },
+        disabled && { opacity: 0.4 },
       ]}
     >
-      <Icon size={20} strokeWidth={1.8} color={colors.text} />
+      <Icon size={small ? 16 : 20} strokeWidth={1.8} color={color} />
     </Pressable>
   );
 }
