@@ -4,7 +4,6 @@ import { InMemoryAgentRunner, ɵGLOBAL_STORE } from "@copilotkit/runtime/v2";
 import { type AnySummarizeAdapter, summarize } from "@tanstack/ai";
 import { anthropicSummarize } from "@tanstack/ai-anthropic";
 import { geminiSummarize } from "@tanstack/ai-gemini";
-import { openaiSummarize } from "@tanstack/ai-openai";
 import { Observable, ReplaySubject } from "rxjs";
 import type { Store } from "../db.ts";
 import { backgroundFailure } from "../log.ts";
@@ -40,6 +39,14 @@ function cleanTitle(summary: string): string | null {
  * the Intelligence backend's generateThreadNames), and fall back to a plain
  * truncation of the first user message when the model is unconfigured or the
  * call fails.
+ *
+ * OpenAI-compatible providers (including Moonshot/Kimi gateways) go through a
+ * direct chat-completions fetch instead of the @tanstack summarize activity:
+ * the activity maps maxLength to provider-native keys across several adapter
+ * layers, and gateways like Moonshot reject or truncate under those mappings
+ * (kimi-k3 only allows temperature=1 and spends ~200 reasoning tokens before
+ * the summary text). A direct request keeps every knob explicit and the
+ * failure surface is a single catch.
  */
 export function defaultTitleGenerator(model: string | undefined): TitleGenerator {
   return async (text) => {
@@ -48,34 +55,57 @@ export function defaultTitleGenerator(model: string | undefined): TitleGenerator
     const [, provider = "", modelId = ""] = model?.trim().match(/^([^/:]*)[/:](.*)$/) ?? [];
     if (!provider || !modelId.trim()) return clip;
     try {
+      if (provider.toLowerCase() === "openai") {
+        const baseURL = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(
+          /\/+$/,
+          "",
+        );
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey) return clip;
+        // Moonshot/Kimi rejects any temperature other than 1; plain OpenAI
+        // (0-2) accepts 1 as well. 256 completion tokens leaves room for
+        // reasoning tokens before the short summary text.
+        const response = await fetch(`${baseURL}/chat/completions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model: modelId.trim(),
+            messages: [
+              {
+                role: "user",
+                content: `用一句话概括以下内容的主题，直接输出标题本身，不要加引号、标点或解释：${clip}`,
+              },
+            ],
+            temperature: 1,
+            max_tokens: 256,
+          }),
+        });
+        if (!response.ok) return clip;
+        const body = (await response.json()) as {
+          choices?: { message?: { content?: string } }[];
+        };
+        return cleanTitle(body.choices?.[0]?.message?.content ?? "") ?? clip;
+      }
       const id = modelId.trim();
       const adapter = (
-        provider.toLowerCase() === "openai"
-          ? openaiSummarize(id as never, { baseURL: process.env.OPENAI_BASE_URL } as never)
-          : provider.toLowerCase() === "anthropic"
-            ? anthropicSummarize(id as never, { baseURL: process.env.ANTHROPIC_BASE_URL } as never)
-            : provider.toLowerCase() === "google"
-              ? geminiSummarize(
-                  id as never,
-                  {
-                    baseURL: process.env.GOOGLE_GENERATIVE_AI_BASE_URL,
-                  } as never,
-                )
-              : null
+        provider.toLowerCase() === "anthropic"
+          ? anthropicSummarize(id as never, { baseURL: process.env.ANTHROPIC_BASE_URL } as never)
+          : provider.toLowerCase() === "google"
+            ? geminiSummarize(
+                id as never,
+                {
+                  baseURL: process.env.GOOGLE_GENERATIVE_AI_BASE_URL,
+                } as never,
+              )
+            : null
       ) as AnySummarizeAdapter | null;
       if (!adapter) return clip;
-      // Moonshot/Kimi rejects any temperature other than 1; OpenAI (0-2),
-      // Anthropic (0-1) and Gemini all accept 1, so pin it explicitly. The
-      // summarize default would otherwise inject a low temperature.
-      // maxLength 10 becomes max_output_tokens 10 for openai adapters, which
-      // truncates CJK titles mid-phrase (each hanzi costs several tokens), so
-      // an explicit 64-token cap overrides it (caller always wins).
       const result = await summarize({
         adapter,
         text: clip,
         maxLength: 10,
         style: "concise",
-        modelOptions: { temperature: 1, max_output_tokens: 64 },
+        modelOptions: { temperature: 1, max_tokens: 256 },
       });
       return cleanTitle(result.summary) ?? clip;
     } catch {
