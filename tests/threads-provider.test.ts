@@ -10,6 +10,7 @@ import type { Config } from "../apps/server/src/config.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
 import {
   CHAT_THREADS_KIND,
+  defaultTitleGenerator,
   type LocalThreadRecord,
   PersistentAgentRunner,
   THREADS_CONTRACT_REF,
@@ -81,8 +82,8 @@ function cloneOf(agent: never): never {
   return (agent as unknown as { clone(): unknown }).clone() as never;
 }
 
-function runnerFor() {
-  return new PersistentAgentRunner(db, ownerOf);
+function runnerFor(titleGenerator?: (text: string) => Promise<string | null>) {
+  return new PersistentAgentRunner(db, ownerOf, titleGenerator);
 }
 
 async function runOnce(
@@ -311,6 +312,86 @@ test("clearThreads wipes the durable records as well as memory", async () => {
   const runner = runnerFor();
   await runner.clearThreads();
   assert.equal((await db.list("owner-1", CHAT_THREADS_KIND)).length, 0);
+});
+
+test("deleteThread drops one thread from the in-memory store", async () => {
+  // A store whose owner lookup fails never persists, so connect cannot
+  // rehydrate from the database — the assertion stays memory-only.
+  await runOnce(
+    new PersistentAgentRunner(db, () => undefined),
+    "thread-delete",
+    fakeAgent("thread-delete", "owner-1"),
+  );
+  const runner = runnerFor();
+  runner.deleteThread("thread-delete");
+  assert.equal(ɵGLOBAL_STORE.peek("thread-delete"), undefined);
+  const replayed = await firstValueFrom(
+    runner.connect({ threadId: "thread-delete" }).pipe(toArray()),
+  );
+  assert.equal(replayed.length, 0, "a deleted thread replays nothing from memory");
+});
+
+test("an untitled thread gets a generated title after the run", async () => {
+  const calls: string[] = [];
+  const runner = runnerFor(async (text) => {
+    calls.push(text);
+    return "周报助手";
+  });
+  await runOnce(runner, "thread-titled", fakeAgent("thread-titled", "owner-1"));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const record = await db.get<LocalThreadRecord>("owner-1", CHAT_THREADS_KIND, "thread-titled");
+  assert.ok(record);
+  assert.equal(record.name, "周报助手");
+  assert.equal(calls[0], "Hello", "the title input is the first user message");
+});
+
+test("an existing title is never overwritten by auto-titling", async () => {
+  const now = new Date().toISOString();
+  await db.put("owner-1", CHAT_THREADS_KIND, {
+    id: "thread-named",
+    owner: "owner-1",
+    agentId: "default",
+    name: "Hand picked",
+    archived: false,
+    createdAt: now,
+    updatedAt: now,
+    messages: [{ id: "user-1", role: "user", content: "Hello" }],
+    runs: [],
+  });
+  const runner = runnerFor(async () => {
+    throw new Error("must not be called");
+  });
+  await runOnce(runner, "thread-named", fakeAgent("thread-named", "owner-1"));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const record = await db.get<LocalThreadRecord>("owner-1", CHAT_THREADS_KIND, "thread-named");
+  assert.ok(record);
+  assert.equal(record.name, "Hand picked");
+});
+
+test("a title generator failure leaves the thread untitled without breaking the run", async () => {
+  const runner = runnerFor(async () => {
+    throw new Error("model down");
+  });
+  const events = await runOnce(runner, "thread-untitled", fakeAgent("thread-untitled", "owner-1"));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.ok(events.some((event) => (event as { type: string }).type === EventType.RUN_FINISHED));
+  const record = await db.get<LocalThreadRecord>("owner-1", CHAT_THREADS_KIND, "thread-untitled");
+  assert.ok(record);
+  assert.equal(record.name, null);
+});
+
+test("defaultTitleGenerator falls back to a truncated message without a model", async () => {
+  const long = "帮我写一份".repeat(30);
+  const title = await defaultTitleGenerator(undefined)(long);
+  assert.ok(title, "a message without a configured model still gets a title");
+  assert.ok(title.length <= 60, "the fallback title is clipped");
+  assert.equal(await defaultTitleGenerator(undefined)("   "), null, "blank text titles nothing");
+  assert.equal(await defaultTitleGenerator(undefined)("帮我写一份"), "帮我写一份");
+  assert.equal(
+    await defaultTitleGenerator(undefined)("line one\nline two"),
+    "line one line two",
+    "newlines collapse to spaces",
+  );
 });
 
 test("createThreadProvider selects the backend from config", async () => {

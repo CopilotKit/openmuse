@@ -8,6 +8,7 @@ import {
   Plus,
   RefreshCw,
   Settings2,
+  Trash2,
 } from "lucide-react-native";
 import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
@@ -32,6 +33,7 @@ const ThreadContext = createContext<{
   retry: () => void;
   select: (selection: Selection) => void;
   start: () => void;
+  removeVisited: (id: string) => void;
   claimPrompt: (id: number) => boolean;
 } | null>(null);
 export function ThreadsProvider({ children }: { children: ReactNode }) {
@@ -88,6 +90,10 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
         selection,
         select,
         start: () => select({ id: newThreadId(), existing: false }),
+        removeVisited: (id) => {
+          setVisited((items) => items.filter((item) => item.id !== id));
+          if (selection.id === id) select({ id: mainId, existing: true });
+        },
       }}
     >
       {children}
@@ -110,12 +116,10 @@ export function ThreadsSheet({ onClose }: { onClose: () => void }) {
     retry,
     select,
     start,
+    removeVisited,
   } = useMuseThread();
   const { workspace, open, navigate, refresh } = useWorkspace();
   const threads = useThreads({ agentId: "default", enabled, includeArchived: true, limit: 20 });
-  // Local persistence serves list/replay but not rename/archive (the runtime
-  // returns 422 for those without Intelligence), so hide rather than fake them.
-  const canManageThreads = (workspace.runtime.threadsBackend ?? "intelligence") === "intelligence";
   const [editing, setEditing] = useState<string>();
   const [name, setName] = useState("");
   const [error, setError] = useState("");
@@ -172,11 +176,9 @@ export function ThreadsSheet({ onClose }: { onClose: () => void }) {
             </Button>
             <View style={[s.between, { marginTop: 12 }]}>
               <Text style={s.heading}>Side chats</Text>
-              {canManageThreads && (
-                <Button small onPress={() => setArchived(!archived)}>
-                  {archived ? "Show active" : "Archived"}
-                </Button>
-              )}
+              <Button small onPress={() => setArchived(!archived)}>
+                {archived ? "Show active" : "Archived"}
+              </Button>
             </View>
             {threads.isLoading && <ActivityIndicator color={colors.blueDark} />}
             <ErrorNotice error={error || threads.error?.message} />
@@ -226,45 +228,56 @@ export function ThreadsSheet({ onClose }: { onClose: () => void }) {
                     style={[s.row, { gap: 10 }]}
                   >
                     <MessageCircle size={19} color={colors.text} />
-                    <Text style={[s.text, { flex: 1 }]}>
+                    <Text style={[s.text, { flex: 1 }]} numberOfLines={1} ellipsizeMode="tail">
                       {thread.name || "Untitled conversation"}
                     </Text>
                   </Pressable>
                   {editing === thread.id && (
                     <Field label="Conversation name" value={name} onChangeText={setName} />
                   )}
-                  {canManageThreads && (
-                    <View style={[s.row, { gap: 8 }]}>
-                      <Button
-                        small
-                        disabled={threads.isMutating || (editing === thread.id && !name.trim())}
-                        onPress={() => {
-                          if (editing === thread.id)
-                            void mutate(() => threads.renameThread(thread.id, name.trim()));
-                          else {
-                            setEditing(thread.id);
-                            setName(thread.name || "");
-                          }
-                        }}
-                      >
-                        {editing === thread.id ? "Save name" : "Rename"}
-                      </Button>
-                      <Button
-                        small
-                        icon={Archive}
-                        disabled={threads.isMutating}
-                        onPress={() =>
-                          void mutate(() =>
-                            thread.archived
-                              ? threads.unarchiveThread(thread.id)
-                              : threads.archiveThread(thread.id),
-                          )
+                  <View style={[s.row, { gap: 8 }]}>
+                    <Button
+                      small
+                      disabled={threads.isMutating || (editing === thread.id && !name.trim())}
+                      onPress={() => {
+                        if (editing === thread.id)
+                          void mutate(() => threads.renameThread(thread.id, name.trim()));
+                        else {
+                          setEditing(thread.id);
+                          setName(thread.name || "");
                         }
-                      >
-                        {thread.archived ? "Restore" : "Archive"}
-                      </Button>
-                    </View>
-                  )}
+                      }}
+                    >
+                      {editing === thread.id ? "Save name" : "Rename"}
+                    </Button>
+                    <Button
+                      small
+                      icon={Archive}
+                      disabled={threads.isMutating}
+                      onPress={() =>
+                        void mutate(() =>
+                          thread.archived
+                            ? threads.unarchiveThread(thread.id)
+                            : threads.archiveThread(thread.id),
+                        )
+                      }
+                    >
+                      {thread.archived ? "Restore" : "Archive"}
+                    </Button>
+                    <Button
+                      small
+                      icon={Trash2}
+                      disabled={threads.isMutating}
+                      onPress={() =>
+                        void mutate(async () => {
+                          await threads.deleteThread(thread.id);
+                          removeVisited(thread.id);
+                        })
+                      }
+                    >
+                      Delete
+                    </Button>
+                  </View>
                 </View>
               ))}
             {!threads.isLoading &&

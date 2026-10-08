@@ -1,20 +1,78 @@
 import { type BaseEvent, EventType } from "@ag-ui/client";
 import type { AgentRunnerConnectRequest, AgentRunnerRunRequest } from "@copilotkit/runtime/v2";
 import { InMemoryAgentRunner, ɵGLOBAL_STORE } from "@copilotkit/runtime/v2";
+import { type AnySummarizeAdapter, summarize } from "@tanstack/ai";
+import { anthropicSummarize } from "@tanstack/ai-anthropic";
+import { geminiSummarize } from "@tanstack/ai-gemini";
+import { openaiSummarize } from "@tanstack/ai-openai";
 import { Observable, ReplaySubject } from "rxjs";
 import type { Store } from "../db.ts";
 import { backgroundFailure } from "../log.ts";
 
-/**
- * Pinned against the @copilotkit/runtime store contract (1.70.1). The only
- * internal-API (ɵ) surface this module touches is ɵGLOBAL_STORE, used to
- * rehydrate a thread after a server restart and to snapshot it for saving; a
- * runtime upgrade that moves it breaks compilation here, in one place,
- * rather than silently dropping persistence.
- */
 export const THREADS_CONTRACT_REF = "@copilotkit/runtime 1.70.1";
 
 export const CHAT_THREADS_KIND = "chat-threads";
+
+const TITLE_MAX_LENGTH = 60;
+
+/** Turns a user's opening message into a conversation title, or null to skip. */
+export type TitleGenerator = (text: string) => Promise<string | null>;
+
+/**
+ * Single-line title text capped at TITLE_MAX_LENGTH chars. Newlines collapse
+ * to spaces so a message never breaks the one-line thread list layout.
+ */
+export function fallbackTitle(text: string): string {
+  const singleLine = text.replace(/\s+/g, " ").trim();
+  return singleLine.slice(0, TITLE_MAX_LENGTH);
+}
+
+function cleanTitle(summary: string): string | null {
+  const title = summary
+    .replace(/^["'`“”‘’]+|["'`“”‘’]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return title ? fallbackTitle(title) : null;
+}
+
+/**
+ * Default title chain: ask the configured model for a short title (mirroring
+ * the Intelligence backend's generateThreadNames), and fall back to a plain
+ * truncation of the first user message when the model is unconfigured or the
+ * call fails.
+ */
+export function defaultTitleGenerator(model: string | undefined): TitleGenerator {
+  return async (text) => {
+    const clip = fallbackTitle(text);
+    if (!clip) return null;
+    const [, provider = "", modelId = ""] = model?.trim().match(/^([^/:]*)[/:](.*)$/) ?? [];
+    if (!provider || !modelId.trim()) return clip;
+    try {
+      const id = modelId.trim();
+      const adapter = (
+        provider.toLowerCase() === "openai"
+          ? openaiSummarize(id as never, { baseURL: process.env.OPENAI_BASE_URL } as never)
+          : provider.toLowerCase() === "anthropic"
+            ? anthropicSummarize(id as never, { baseURL: process.env.ANTHROPIC_BASE_URL } as never)
+            : provider.toLowerCase() === "google"
+              ? geminiSummarize(
+                  id as never,
+                  {
+                    baseURL: process.env.GOOGLE_GENERATIVE_AI_BASE_URL,
+                  } as never,
+                )
+              : null
+      ) as AnySummarizeAdapter | null;
+      if (!adapter) return clip;
+      const result = await summarize({ adapter, text: clip, maxLength: 10, style: "concise" });
+      return cleanTitle(result.summary) ?? clip;
+    } catch {
+      // A title must never surface as a chat error; the truncated message is
+      // a perfectly good stand-in.
+      return clip;
+    }
+  };
+}
 
 /** One persisted run: its compacted events, keyed for merge-on-write. */
 export interface LocalThreadRun {
@@ -46,6 +104,26 @@ export interface LocalThreadRecord {
 
 type OwnerLookup = (agent: unknown) => string | undefined;
 
+type MessageLike = { role?: unknown; content?: unknown };
+
+/** Plain text of the first user message in a snapshot, for titling. */
+function firstUserText(messages: unknown): string | null {
+  if (!Array.isArray(messages)) return null;
+  for (const raw of messages) {
+    const message = raw as MessageLike;
+    if (message?.role !== "user") continue;
+    if (typeof message.content === "string" && message.content.trim())
+      return message.content.trim();
+    if (Array.isArray(message.content)) {
+      for (const part of message.content as { type?: unknown; text?: unknown }[]) {
+        if (part && part.type === "text" && typeof part.text === "string" && part.text.trim())
+          return part.text.trim();
+      }
+    }
+  }
+  return null;
+}
+
 /** The historic-run fields this class reads, decoupled from runtime internals. */
 type HistoricRun = {
   runId?: unknown;
@@ -72,6 +150,7 @@ export class PersistentAgentRunner extends InMemoryAgentRunner {
   constructor(
     private readonly db: Store,
     private readonly ownerOf: OwnerLookup,
+    private readonly titleGenerator: TitleGenerator = () => Promise.resolve(null),
   ) {
     super();
   }
@@ -135,6 +214,27 @@ export class PersistentAgentRunner extends InMemoryAgentRunner {
     super.clearThreads();
     this.index.clear();
     this.scanIndex.clear();
+  }
+
+  /** Forget one thread in memory; the app route deletes the durable row per owner. */
+  deleteThread(threadId: string): void {
+    const store = ɵGLOBAL_STORE.peek(threadId);
+    if (store) {
+      // removeThread exists at runtime (in-memory.mjs:222) but is typed private;
+      // the runner has no single-thread delete, so reach the one store primitive.
+      (ɵGLOBAL_STORE as unknown as { removeThread(id: string, store: unknown): void }).removeThread(
+        threadId,
+        store,
+      );
+    }
+    this.index.delete(threadId);
+    this.scanIndex.delete(threadId);
+  }
+
+  /** Keep the runner's caches in step after the app layer renames/archives a thread. */
+  syncRecord(record: LocalThreadRecord): void {
+    this.index.set(record.id, record);
+    this.scanIndex.set(record.id, record);
   }
 
   /**
@@ -268,6 +368,31 @@ export class PersistentAgentRunner extends InMemoryAgentRunner {
     await this.db.put(owner, CHAT_THREADS_KIND, record);
     this.index.set(threadId, record);
     this.scanIndex.set(threadId, record);
+    if (record.name === null) this.titleThread(record);
+  }
+
+  /**
+   * Name an untitled thread after its first run. Fire-and-forget: a title is
+   * cosmetic and must never delay RUN_FINISHED or surface as a chat error.
+   * An untitled record is retried on the next persist, so a transient model
+   * failure self-heals.
+   */
+  private titleThread(record: LocalThreadRecord): void {
+    const text = firstUserText(record.messages);
+    if (!text) return;
+    void this.titleGenerator(text)
+      .then((title) => {
+        if (!title) return;
+        const current = this.index.get(record.id) ?? this.scanIndex.get(record.id);
+        // The thread may have been renamed or deleted while the title call was in flight.
+        if (!current || current.name !== null) return;
+        const named = { ...current, name: title };
+        return this.db.put(current.owner, CHAT_THREADS_KIND, named).then(() => {
+          this.index.set(record.id, named);
+          this.scanIndex.set(record.id, named);
+        });
+      })
+      .catch((error: unknown) => backgroundFailure("chat thread titling", error));
   }
 
   /** Runs of a record, migrating the v1 thread-level `events` shape on read. */

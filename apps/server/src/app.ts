@@ -358,16 +358,7 @@ export async function createApp(
     const page = records.slice(offset, offset + limit);
     const nextOffset = offset + page.length;
     return c.json({
-      threads: page.map((record) => ({
-        id: record.id,
-        name: record.name,
-        agentId: record.agentId,
-        organizationId: "",
-        createdById: "",
-        archived: record.archived,
-        createdAt: record.createdAt,
-        updatedAt: record.updatedAt,
-      })),
+      threads: page.map(threadListItem),
       nextCursor: nextOffset < records.length ? String(nextOffset) : null,
     });
   });
@@ -383,6 +374,45 @@ export async function createApp(
     threadDetail(c, "events", (record) => record.runs.flatMap((run) => run.events)),
   );
   app.get("/api/copilotkit/threads/:id/state", async (c) => threadDetail(c, "state", () => null));
+  // Thread management is Intelligence-only in the runtime (422 without it).
+  // Local mode implements the same contract owner-scoped against the database
+  // so the app UI works identically on both backends.
+  app.patch("/api/copilotkit/threads/:id", async (c) => {
+    if (threads.backend !== "local") return proxyRuntime(c);
+    const body = z
+      .object({
+        agentId: z.string().optional(),
+        name: z.string().min(1).optional(),
+        archived: z.boolean().optional(),
+      })
+      .parse(await c.req.json().catch(() => ({})));
+    const record = await ownedThread(c);
+    const updated: LocalThreadRecord = {
+      ...record,
+      ...(body.name !== undefined ? { name: body.name } : {}),
+      ...(body.archived !== undefined ? { archived: body.archived } : {}),
+    };
+    await db.put(c.get("owner"), CHAT_THREADS_KIND, updated);
+    threads.runner.syncRecord(updated);
+    return c.json(threadListItem(updated));
+  });
+  app.post("/api/copilotkit/threads/:id/archive", async (c) => {
+    if (threads.backend !== "local") return proxyRuntime(c);
+    await c.req.json().catch(() => ({}));
+    const record = await ownedThread(c);
+    const updated: LocalThreadRecord = { ...record, archived: true };
+    await db.put(c.get("owner"), CHAT_THREADS_KIND, updated);
+    threads.runner.syncRecord(updated);
+    return c.json({ threadId: record.id, archived: true });
+  });
+  app.delete("/api/copilotkit/threads/:id", async (c) => {
+    if (threads.backend !== "local") return proxyRuntime(c);
+    await c.req.json().catch(() => ({}));
+    const record = await ownedThread(c);
+    await db.remove(c.get("owner"), CHAT_THREADS_KIND, record.id);
+    threads.runner.deleteThread(record.id);
+    return c.json({ threadId: record.id, deleted: true });
+  });
   app.post("/api/copilotkit/threads/clear", async (c) => {
     if (threads.backend !== "local") return proxyRuntime(c);
     const owner = c.get("owner");
@@ -400,13 +430,31 @@ export async function createApp(
     pick: (record: LocalThreadRecord) => unknown,
   ) {
     if (threads.backend !== "local") return proxyRuntime(c);
+    const record = await ownedThread(c);
+    return c.json({ [key]: pick(record) });
+  }
+  /** Local-mode record lookup scoped to the authenticated owner: 404, never 403. */
+  async function ownedThread(c: Context): Promise<LocalThreadRecord> {
     const id = c.req.param("id");
     if (!id) throw new AppError("Thread not found", 404);
     const record = await db.get<LocalThreadRecord>(c.get("owner"), CHAT_THREADS_KIND, id);
     // Another owner's thread is indistinguishable from a missing one, so the
     // endpoint leaks no existence information.
     if (!record) throw new AppError("Thread not found", 404);
-    return c.json({ [key]: pick(record) });
+    return record;
+  }
+  /** The list shape the CopilotKit SDK parses; shared by list and rename. */
+  function threadListItem(record: LocalThreadRecord) {
+    return {
+      id: record.id,
+      name: record.name,
+      agentId: record.agentId,
+      organizationId: "",
+      createdById: "",
+      archived: record.archived,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    };
   }
   app.all("/api/copilotkit/*", async (c) => {
     if (!agentConfigured(config))

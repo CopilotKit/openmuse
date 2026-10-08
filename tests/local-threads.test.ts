@@ -100,20 +100,103 @@ test("thread listing is owner-scoped from the database and paginates", async () 
   );
 });
 
-test("rename and archive stay honest 422s in local mode", async () => {
+test("threads can be renamed, archived, restored and deleted in local mode", async () => {
   const main = await (await app.request("/api/main-thread", { headers: headers() })).json();
-  const rename = await app.request(`/api/copilotkit/threads/${main.threadId}`, {
+  const now = new Date().toISOString();
+  await db.put("local-user", CHAT_THREADS_KIND, {
+    id: "manage-me",
+    owner: "local-user",
+    agentId: "default",
+    name: null,
+    archived: false,
+    createdAt: now,
+    updatedAt: now,
+    messages: [],
+    runs: [],
+  });
+  // Rename returns the updated thread in the list shape the SDK parses.
+  const renamed = await app.request("/api/copilotkit/threads/manage-me", {
     method: "PATCH",
     headers: headers(),
-    body: JSON.stringify({ agentId: "default", name: "Renamed" }),
+    body: JSON.stringify({ agentId: "default", name: "Weekly report" }),
   });
-  assert.equal(rename.status, 422);
-  const archive = await app.request(`/api/copilotkit/threads/${main.threadId}/archive`, {
+  assert.equal(renamed.status, 200, await renamed.clone().text());
+  assert.equal((await renamed.json()).name, "Weekly report");
+  // Archive moves it out of the active list into the archived filter.
+  const archived = await app.request("/api/copilotkit/threads/manage-me/archive", {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({ agentId: "default" }),
   });
-  assert.equal(archive.status, 422);
+  assert.equal(archived.status, 200);
+  assert.deepEqual(await archived.json(), { threadId: "manage-me", archived: true });
+  const list = async () =>
+    (
+      await (
+        await app.request("/api/copilotkit/threads?agentId=default&limit=100", {
+          headers: headers(),
+        })
+      ).json()
+    ).threads as { id: string; archived: boolean }[];
+  assert.ok(
+    (await list()).some((thread) => thread.id === "manage-me" && thread.archived),
+    "the archived thread shows in the archived list",
+  );
+  // Restore puts it back in the active list.
+  const restored = await app.request("/api/copilotkit/threads/manage-me", {
+    method: "PATCH",
+    headers: headers(),
+    body: JSON.stringify({ agentId: "default", archived: false }),
+  });
+  assert.equal(restored.status, 200);
+  assert.ok(
+    (await list()).some((thread) => thread.id === "manage-me" && !thread.archived),
+    "the restored thread shows in the active list",
+  );
+  // Delete removes the durable record and the list entry.
+  const deleted = await app.request("/api/copilotkit/threads/manage-me", {
+    method: "DELETE",
+    headers: headers(),
+    body: JSON.stringify({ agentId: "default" }),
+  });
+  assert.equal(deleted.status, 200);
+  assert.deepEqual(await deleted.json(), { threadId: "manage-me", deleted: true });
+  assert.equal(await db.get("local-user", CHAT_THREADS_KIND, "manage-me"), null);
+  assert.ok(
+    !(await list()).some((thread) => thread.id === "manage-me"),
+    "the deleted thread is gone from the list",
+  );
+});
+
+test("thread management stays owner-scoped", async () => {
+  const now = new Date().toISOString();
+  await db.put("someone-else", CHAT_THREADS_KIND, {
+    id: "manage-theirs",
+    owner: "someone-else",
+    agentId: "default",
+    name: "Secret",
+    archived: false,
+    createdAt: now,
+    updatedAt: now,
+    messages: [{ id: "m1", role: "user", content: "hi" }],
+    runs: [],
+  });
+  for (const [method, path, body] of [
+    ["PATCH", "/api/copilotkit/threads/manage-theirs", { agentId: "default", name: "Hijack" }],
+    ["POST", "/api/copilotkit/threads/manage-theirs/archive", { agentId: "default" }],
+    ["DELETE", "/api/copilotkit/threads/manage-theirs", { agentId: "default" }],
+  ] as const) {
+    const response = await app.request(path, {
+      method,
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 404, `${method} ${path} must not touch another owner's thread`);
+  }
+  const kept = await db.get("someone-else", CHAT_THREADS_KIND, "manage-theirs");
+  assert.ok(kept, "another owner's record is untouched");
+  assert.equal(kept.name, "Secret");
+  assert.equal(kept.archived, false);
 });
 
 test("thread detail endpoints are owner-scoped and clear stays owner-local", async () => {
