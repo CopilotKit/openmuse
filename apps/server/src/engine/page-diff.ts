@@ -1,8 +1,10 @@
+import { clip } from "../text.ts";
+
 /** Lines of page text for comparing two checks of a watched page. */
 export function pageLines(text: string, limit = 2000): string[] {
   const lines = new Set<string>();
   for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/\s+/g, " ").trim().slice(0, 300);
+    const line = clip(raw.replace(/\s+/g, " ").trim(), 300);
     if (line) lines.add(line);
     if (lines.size >= limit) break;
   }
@@ -61,7 +63,7 @@ export function diffPage(previous: string[], current: string[]): PageDiff {
 export function describePageDiff(diff: PageDiff) {
   const section = (title: string, lines: string[], limit: number) => {
     if (!lines.length) return [];
-    const shown = lines.slice(0, limit).map((line) => `• ${line.slice(0, 160)}`);
+    const shown = lines.slice(0, limit).map((line) => `• ${clip(line, 160)}`);
     const more = lines.length > limit ? [`+${lines.length - limit} more`] : [];
     return [`${title}:`, ...shown, ...more];
   };

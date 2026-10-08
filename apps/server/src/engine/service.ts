@@ -32,6 +32,7 @@ import { AppError } from "../errors.ts";
 import type { Files } from "../files.ts";
 import { backgroundFailure } from "../log.ts";
 import { SearchService } from "../search.ts";
+import { clip } from "../text.ts";
 import type { WorkspaceService } from "../workspace.ts";
 import { analyzeSpending } from "./finance.ts";
 import { executeModelTask } from "./model.ts";
@@ -220,7 +221,7 @@ export class AgentService {
             : ["Understand the outcome", "Plan the work", "Use connected tools", "Return a result"];
     const task: AgentTask = {
       id,
-      title: input.title ?? input.prompt.slice(0, 90),
+      title: input.title ?? clip(input.prompt, 90),
       prompt: input.prompt,
       kind: input.kind,
       goalId: input.goalId,
@@ -728,7 +729,7 @@ export class AgentService {
     await this.db.insertIfAbsent(owner, "notifications", value);
   }
   mailEvidence(mail: Mail): Evidence {
-    return { id: mail.id, kind: "mail", title: mail.subject, excerpt: mail.body.slice(0, 400) };
+    return { id: mail.id, kind: "mail", title: mail.subject, excerpt: clip(mail.body, 400) };
   }
   async artifact(
     owner: string,
@@ -1130,7 +1131,7 @@ export class AgentService {
         checks: monitor.checks + 1,
         lastCheckedAt: date(),
         lastHash: currentHash,
-        lastValue: text.slice(0, 1000),
+        lastValue: clip(text, 1000),
         nextCheckAt,
         error: null,
       },
@@ -1146,11 +1147,11 @@ export class AgentService {
     await ctx.event(
       "observation",
       previousHash ? "Checked for changes" : "Saved the first observation",
-      text.slice(0, 1000),
+      clip(text, 1000),
     );
     if (shouldNotify) {
       await ctx.guard();
-      await ctx.event("result", "A meaningful change was found", changes || text.slice(0, 500));
+      await ctx.event("result", "A meaningful change was found", changes || clip(text, 500));
     }
     const count = diff ? countPageDiff(diff) : "";
     return {
@@ -1174,7 +1175,7 @@ export class AgentService {
               title: monitor.title,
               body: changes
                 ? `Changed at ${observation.url}\n${changes}`
-                : `Condition met at ${observation.url}: ${text.slice(0, 240)}`,
+                : `Condition met at ${observation.url}: ${clip(text, 240)}`,
               key: `monitor:${monitor.id}:${alertSequence}:${currentHash}`,
             }
           : null,
@@ -1186,7 +1187,7 @@ export class AgentService {
           kind: "web",
           title: observation.title,
           url: observation.url,
-          excerpt: text.slice(0, 600),
+          excerpt: clip(text, 600),
         },
       ],
       plan: task.plan.map((s) => ({ ...s, status: "succeeded" })),

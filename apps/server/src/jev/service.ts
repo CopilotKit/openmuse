@@ -9,6 +9,7 @@ import {
   jevPanelSchema,
 } from "../../../../packages/domain/src/jev.ts";
 import type { Store } from "../db.ts";
+import { clip } from "../text.ts";
 import { type JevAdapter, rankJevOptions } from "./adapter.ts";
 
 export type PresentChoicesInput = {
@@ -351,7 +352,7 @@ export class JevService {
         runId,
         kind,
         reference,
-        text: text.slice(0, 30_000),
+        text: clip(text, 30_000),
       });
       return;
     }
