@@ -1,4 +1,4 @@
-import { type AgentRunner, CopilotKitIntelligence } from "@copilotkit/runtime/v2";
+import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import type { Config, ThreadsBackend } from "../config.ts";
 import { intelligenceKeyRequiredMessage } from "../config.ts";
 import type { Store } from "../db.ts";
@@ -17,7 +17,7 @@ export type ThreadProvider =
     }
   | {
       backend: "local";
-      runner: AgentRunner;
+      runner: PersistentAgentRunner;
       getOrCreateMainThread(input: { owner: string; threadId: string }): Promise<void>;
     };
 
@@ -58,7 +58,7 @@ export function createThreadProvider(
         createdAt: now,
         updatedAt: now,
         messages: [],
-        events: [],
+        runs: [],
       });
     },
   };
