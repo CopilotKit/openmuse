@@ -1,8 +1,7 @@
 import "./config.ts";
 import { randomUUID } from "node:crypto";
 import { MessageSchema } from "@ag-ui/core";
-import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { z } from "zod";
@@ -17,14 +16,17 @@ import { createAuth } from "./auth.ts";
 import { BrowserService } from "./browser.ts";
 import { ComputerService, type DockerRunner } from "./computer.ts";
 import { computerRoutes } from "./computer-routes.ts";
-import { assertApiDeploymentConfig, type Config } from "./config.ts";
+import { assertThreadsBackendConfig, type Config } from "./config.ts";
 import type { Store } from "./db.ts";
+import { ConversationAgent } from "./engine/conversation.ts";
 import { agentRoutes } from "./engine/routes.ts";
 import { AgentService } from "./engine/service.ts";
 import { AppError } from "./errors.ts";
 import { Files } from "./files.ts";
 import { GoogleAuth } from "./google-auth.ts";
 import { rateLimit } from "./rate-limit.ts";
+import { CHAT_THREADS_KIND, type LocalThreadRecord } from "./threads/local-runner.ts";
+import { createThreadProvider, type ThreadProvider } from "./threads/provider.ts";
 import { WorkspaceService } from "./workspace.ts";
 
 export async function createApp(
@@ -32,7 +34,7 @@ export async function createApp(
   config: Config,
   options: { docker?: DockerRunner } = {},
 ) {
-  assertApiDeploymentConfig(config);
+  assertThreadsBackendConfig(config);
   const auth = await createAuth(db, config),
     files = new Files(db, config, auth),
     google = new GoogleAuth(db, config),
@@ -47,8 +49,20 @@ export async function createApp(
   const browser = new BrowserService(db, config, auth, files);
   const computer = new ComputerService(db, config, options.docker);
   const agent = new AgentService(db, config, workspace, files, actions, browser, computer);
-  const intelligence = new CopilotKitIntelligence({ apiKey: config.intelligenceApiKey });
-  const runtime = makeRuntime(config, agent, auth, intelligence);
+  // The runner's persist path receives no request context, so the agents factory
+  // (in makeRuntime) records each built agent's owner in this shared registry.
+  // The runtime clones the agent per request before handing it to the runner,
+  // so the WeakMap alone cannot resolve an owner; ConversationAgent carries
+  // its owner (clone() preserves it) and the map remains as a fallback.
+  const agentOwners = new WeakMap<object, string>();
+  const ownerOf = (agent: unknown) =>
+    agent instanceof ConversationAgent
+      ? agent.owner
+      : typeof agent === "object" && agent !== null
+        ? agentOwners.get(agent)
+        : undefined;
+  const threads: ThreadProvider = createThreadProvider(config, { db, ownerOf });
+  const runtime = makeRuntime(config, agent, auth, threads, agentOwners);
   const app = new Hono<{ Variables: { owner: string } }>();
   const origins = new Set([...config.allowedOrigins, new URL(config.publicUrl).origin]);
   app.use("*", async (c, next) => {
@@ -101,6 +115,7 @@ export async function createApp(
       mode: config.mode,
       agentConfigured: agentConfigured(config),
       browserConfigured: Boolean(config.workerUrl && config.workerToken),
+      threadsBackend: config.threadsBackend ?? "intelligence",
     }),
   );
   let loginWindow = 0,
@@ -215,14 +230,12 @@ export async function createApp(
     const main = await db.get<{ threadId: string }>(owner, "conversation-settings", "main");
     if (!main) throw new AppError("Main conversation could not be loaded", 503);
     try {
-      await intelligence.getOrCreateThread({
-        threadId: main.threadId,
-        userId: owner,
-        agentId: "default",
-      });
+      await threads.getOrCreateMainThread({ owner, threadId: main.threadId });
     } catch {
       throw new AppError(
-        "Main conversation is unavailable. Check the Rich Threads connection and try again.",
+        threads.backend === "intelligence"
+          ? "Main conversation is unavailable. Check the Rich Threads connection and try again."
+          : "Main conversation could not be saved. Check the server database and try again.",
         502,
       );
     }
@@ -329,12 +342,142 @@ export async function createApp(
     await browser.input(c.get("owner"), c.req.param("id"), await c.req.json());
     return c.json({ ok: true });
   });
+  // The runtime reports thread mutations as Intelligence-only, which makes the
+  // client SDK refuse rename/archive/delete before ever issuing a request.
+  // Local mode implements those endpoints owner-scoped below, so advertise
+  // them here; realtime metadata stays off. Intelligence passes through.
+  app.get("/api/copilotkit/info", async (c) => {
+    if (threads.backend !== "local") return proxyRuntime(c);
+    const response = await runtime.fetch(c.req.raw);
+    const body = (await response.json()) as {
+      threadEndpoints?: { mutations?: boolean; realtimeMetadata?: boolean };
+    };
+    if (body.threadEndpoints) body.threadEndpoints.mutations = true;
+    return c.json(body);
+  });
+  // The runtime's own local thread-list fallback is process-global and cannot
+  // scope by owner, so local mode lists from the database instead. The static
+  // route wins over the /api/copilotkit/* wildcard below; intelligence mode
+  // forwards to the runtime untouched.
+  app.get("/api/copilotkit/threads", async (c) => {
+    if (threads.backend !== "local") return proxyRuntime(c);
+    const url = new URL(c.req.url);
+    const agentId = url.searchParams.get("agentId") ?? "default";
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 100);
+    const offset = Math.max(Number(url.searchParams.get("cursor")) || 0, 0);
+    const records = (await db.list<LocalThreadRecord>(c.get("owner"), CHAT_THREADS_KIND)).filter(
+      (record) => record.agentId === agentId,
+    );
+    const page = records.slice(offset, offset + limit);
+    const nextOffset = offset + page.length;
+    return c.json({
+      threads: page.map(threadListItem),
+      nextCursor: nextOffset < records.length ? String(nextOffset) : null,
+    });
+  });
+  // The runtime's local fallbacks for these endpoints are process-global with
+  // no owner concept: any signed-in user could read another owner's thread, and
+  // clear would wipe every owner. Local mode serves them owner-scoped from the
+  // database instead; other owners' threads are indistinguishable from missing
+  // ones (404, never 403) so the endpoints leak no existence information.
+  app.get("/api/copilotkit/threads/:id/messages", async (c) =>
+    threadDetail(c, "messages", (record) => record.messages),
+  );
+  app.get("/api/copilotkit/threads/:id/events", async (c) =>
+    threadDetail(c, "events", (record) => record.runs.flatMap((run) => run.events)),
+  );
+  app.get("/api/copilotkit/threads/:id/state", async (c) => threadDetail(c, "state", () => null));
+  // Thread management is Intelligence-only in the runtime (422 without it).
+  // Local mode implements the same contract owner-scoped against the database
+  // so the app UI works identically on both backends.
+  app.patch("/api/copilotkit/threads/:id", async (c) => {
+    if (threads.backend !== "local") return proxyRuntime(c);
+    const body = z
+      .object({
+        agentId: z.string().optional(),
+        name: z.string().min(1).optional(),
+        archived: z.boolean().optional(),
+      })
+      .parse(await c.req.json().catch(() => ({})));
+    const record = await ownedThread(c);
+    const updated: LocalThreadRecord = {
+      ...record,
+      ...(body.name !== undefined ? { name: body.name } : {}),
+      ...(body.archived !== undefined ? { archived: body.archived } : {}),
+    };
+    await db.put(c.get("owner"), CHAT_THREADS_KIND, updated);
+    threads.runner.syncRecord(updated);
+    return c.json(threadListItem(updated));
+  });
+  app.post("/api/copilotkit/threads/:id/archive", async (c) => {
+    if (threads.backend !== "local") return proxyRuntime(c);
+    await c.req.json().catch(() => ({}));
+    const record = await ownedThread(c);
+    const updated: LocalThreadRecord = { ...record, archived: true };
+    await db.put(c.get("owner"), CHAT_THREADS_KIND, updated);
+    threads.runner.syncRecord(updated);
+    return c.json({ threadId: record.id, archived: true });
+  });
+  app.delete("/api/copilotkit/threads/:id", async (c) => {
+    if (threads.backend !== "local") return proxyRuntime(c);
+    await c.req.json().catch(() => ({}));
+    const record = await ownedThread(c);
+    await db.remove(c.get("owner"), CHAT_THREADS_KIND, record.id);
+    threads.runner.deleteThread(record.id);
+    return c.json({ threadId: record.id, deleted: true });
+  });
+  app.post("/api/copilotkit/threads/clear", async (c) => {
+    if (threads.backend !== "local") return proxyRuntime(c);
+    const owner = c.get("owner");
+    // Delete only this owner's durable rows; memory is process-global, so it
+    // is cleared whole — other owners rehydrate from the database on their
+    // next access.
+    const records = await db.list<LocalThreadRecord>(owner, CHAT_THREADS_KIND);
+    for (const record of records) await db.remove(owner, CHAT_THREADS_KIND, record.id);
+    threads.runner.clearMemory();
+    return c.json({ ok: true });
+  });
+  async function threadDetail(
+    c: Context,
+    key: "messages" | "events" | "state",
+    pick: (record: LocalThreadRecord) => unknown,
+  ) {
+    if (threads.backend !== "local") return proxyRuntime(c);
+    const record = await ownedThread(c);
+    return c.json({ [key]: pick(record) });
+  }
+  /** Local-mode record lookup scoped to the authenticated owner: 404, never 403. */
+  async function ownedThread(c: Context): Promise<LocalThreadRecord> {
+    const id = c.req.param("id");
+    if (!id) throw new AppError("Thread not found", 404);
+    const record = await db.get<LocalThreadRecord>(c.get("owner"), CHAT_THREADS_KIND, id);
+    // Another owner's thread is indistinguishable from a missing one, so the
+    // endpoint leaks no existence information.
+    if (!record) throw new AppError("Thread not found", 404);
+    return record;
+  }
+  /** The list shape the CopilotKit SDK parses; shared by list and rename. */
+  function threadListItem(record: LocalThreadRecord) {
+    return {
+      id: record.id,
+      name: record.name,
+      agentId: record.agentId,
+      organizationId: "",
+      createdById: "",
+      archived: record.archived,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    };
+  }
   app.all("/api/copilotkit/*", async (c) => {
     if (!agentConfigured(config))
       throw new AppError(
         "Configure a model and provider API key, or a valid AG-UI endpoint, to start chat",
         503,
       );
+    return proxyRuntime(c);
+  });
+  async function proxyRuntime(c: { req: { raw: Request } }) {
     const response = await runtime.fetch(c.req.raw);
     // Runtime 1.70 emits SSE strings; a WHATWG Response body requires byte chunks.
     const encoder = new TextEncoder();
@@ -346,7 +489,7 @@ export async function createApp(
       }),
     );
     return new Response(body, { status: response.status, headers: response.headers });
-  });
+  }
   app.get("/", (c) =>
     c.json({ name: "OpenMuse", app: "http://localhost:8081", health: "/api/health" }),
   );

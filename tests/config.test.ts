@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  assertApiDeploymentConfig,
+  assertThreadsBackendConfig,
   browserWorkerUrl,
   type Config,
   readConfig,
@@ -17,6 +17,7 @@ const sampleConfig: Config = {
   agentBackend: "sample",
   googleRedirectUri: "http://localhost:8787/api/google/callback",
   allowedOrigins: ["http://localhost:8081"],
+  threadsBackend: "intelligence",
 };
 
 function liveConfig(intelligenceApiKey?: string): Config {
@@ -37,7 +38,7 @@ const missingKeyMessage =
 test("every API mode rejects a missing or blank Intelligence key", () => {
   for (const mode of [sampleConfig, liveConfig()]) {
     for (const key of [undefined, "", " \t\n"]) {
-      assert.throws(() => assertApiDeploymentConfig({ ...mode, intelligenceApiKey: key }), {
+      assert.throws(() => assertThreadsBackendConfig({ ...mode, intelligenceApiKey: key }), {
         name: "Error",
         message: missingKeyMessage,
       });
@@ -48,9 +49,46 @@ test("every API mode rejects a missing or blank Intelligence key", () => {
 test("every API mode accepts a non-empty Intelligence key", () => {
   for (const mode of [sampleConfig, liveConfig()]) {
     assert.doesNotThrow(() =>
-      assertApiDeploymentConfig({ ...mode, intelligenceApiKey: "test-project-key-never-sent" }),
+      assertThreadsBackendConfig({ ...mode, intelligenceApiKey: "test-project-key-never-sent" }),
     );
   }
+});
+
+test("the local threads backend starts without an Intelligence key", () => {
+  for (const mode of [sampleConfig, liveConfig()]) {
+    assert.doesNotThrow(() =>
+      assertThreadsBackendConfig({
+        ...mode,
+        threadsBackend: "local",
+        intelligenceApiKey: undefined,
+      }),
+    );
+  }
+});
+
+test("readConfig rejects an unknown THREADS_BACKEND", (t) => {
+  const previous = { ...process.env };
+  t.after(() => {
+    process.env = previous;
+  });
+  process.env.WORKSPACE_MODE = "sample";
+  process.env.CPK_INTELLIGENCE_API_KEY = "test-project-key-never-sent";
+  process.env.THREADS_BACKEND = "sqlite";
+  assert.throws(() => readConfig(), /THREADS_BACKEND must be intelligence or local/);
+});
+
+test("readConfig defaults to the intelligence backend and reports local explicitly", (t) => {
+  const previous = { ...process.env };
+  t.after(() => {
+    process.env = previous;
+  });
+  process.env.WORKSPACE_MODE = "sample";
+  process.env.CPK_INTELLIGENCE_API_KEY = "test-project-key-never-sent";
+  delete process.env.THREADS_BACKEND;
+  assert.equal(readConfig().threadsBackend, "intelligence");
+  process.env.THREADS_BACKEND = "local";
+  assert.equal(readConfig().threadsBackend, "local");
+  assert.equal(readConfig().intelligenceApiKey, "test-project-key-never-sent");
 });
 
 test("web search is enabled by default with an explicit opt-out", (t) => {

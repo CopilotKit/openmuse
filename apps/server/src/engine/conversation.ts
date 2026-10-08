@@ -30,7 +30,8 @@ export class ConversationAgent extends AbstractAgent {
   constructor(
     private readonly config: Config,
     private readonly service: AgentService,
-    private readonly owner: string,
+    /** Read by the local threads backend after the runtime clones the agent per request. */
+    readonly owner: string,
     private readonly jevAdapter: JevAdapter | undefined = createJevAdapter(config),
   ) {
     super({ agentId: "default" });
