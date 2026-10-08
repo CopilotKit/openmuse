@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { localDateTime } from "../../../packages/domain/src/date-time.ts";
+import { compareEventStart, localDateTime } from "../../../packages/domain/src/date-time.ts";
 import type {
   ActionProposal,
   ActivityEntry,
@@ -104,7 +104,7 @@ export class WorkspaceService {
           (!options.timeMin || Date.parse(event.end) > Date.parse(options.timeMin))
         );
       })
-      .sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+      .sort(compareEventStart);
     return { events, truncated: false };
   }
   private async cacheMail(owner: string, mail: Mail[], connectionId: string) {
@@ -328,7 +328,7 @@ export class WorkspaceService {
         email: tokens?.account ?? (this.config.mode === "sample" ? "alex@example.com" : ""),
       },
       mail: mail.sort((a, b) => b.date.localeCompare(a.date)),
-      events: events.sort((a, b) => Date.parse(a.start) - Date.parse(b.start)),
+      events: events.sort(compareEventStart),
       files: await this.files.list(owner),
       browsers: await this.db.list<BrowserSession>(owner, "browsers"),
       actions: await this.db.list<ActionProposal>(owner, "actions"),
@@ -385,9 +385,7 @@ export class WorkspaceService {
       : undefined;
     return {
       mail: wantMail ? mail.sort((a, b) => b.date.localeCompare(a.date)) : undefined,
-      events: wantEvents
-        ? events.sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
-        : undefined,
+      events: wantEvents ? events.sort(compareEventStart) : undefined,
       files,
     };
   }
