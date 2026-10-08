@@ -2,7 +2,7 @@ import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
 import type { Config, ThreadsBackend } from "../config.ts";
 import { intelligenceKeyRequiredMessage } from "../config.ts";
 import type { Store } from "../db.ts";
-import { CHAT_THREADS_KIND, PersistentAgentRunner } from "./local-runner.ts";
+import { CHAT_THREADS_KIND, defaultTitleGenerator, PersistentAgentRunner } from "./local-runner.ts";
 
 /**
  * Persistence boundary for chat threads. "intelligence" is the CopilotKit-hosted
@@ -42,7 +42,11 @@ export function createThreadProvider(
   }
   if (config.intelligenceApiKey)
     console.warn("[OpenMuse] THREADS_BACKEND=local ignores CPK_INTELLIGENCE_API_KEY.");
-  const runner = new PersistentAgentRunner(deps.db, deps.ownerOf);
+  const runner = new PersistentAgentRunner(
+    deps.db,
+    deps.ownerOf,
+    defaultTitleGenerator(config.model),
+  );
   const { db } = deps;
   return {
     backend: "local",
