@@ -585,11 +585,16 @@ function ReviewDetail({ initial }: { initial: ActionProposal }) {
           next = { type: "event", event: { ...draft, id: eventId } };
         } else next = { type: "event", draft };
       }
-      await api.request(`/api/actions/${action.id}/decide`, {
+      const result = await api.request<ActionProposal>(`/api/actions/${action.id}/decide`, {
         decision: "deny",
         hash: action.hash,
       });
       await refresh();
+      // A review already replaced or sent elsewhere shows its outcome instead of an editor.
+      if (result.status !== "denied") {
+        setLocal(result);
+        return;
+      }
       open(next);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

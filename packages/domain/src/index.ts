@@ -129,7 +129,7 @@ export const proposalSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("email.send"),
     data: emailDraftSchema,
-    draftId: z.string().uuid().optional(),
+    draftId: z.uuid().optional(),
   }),
   z.object({ kind: z.literal("calendar.create"), data: eventDraftSchema }),
   z.object({

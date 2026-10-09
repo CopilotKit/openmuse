@@ -151,6 +151,87 @@ test("a draft stays when its email is declined, fails or has an unknown outcome"
   assert.equal(uncertain.status, "outcome_unknown");
   assert.ok(uncertain.draft);
 });
+test("an expired review keeps its draft", async () => {
+  let now = Date.now();
+  const service = new ActionService(db, {
+    execute: async () => "sent",
+    connected: async () => true,
+    now: () => now,
+  });
+  const draft = await db.put("draft-expired-user", "drafts", { ...email.data, id: randomUUID() });
+  const proposal = await service.propose("draft-expired-user", { ...email, draftId: draft.id });
+  now += 31 * 60 * 1000;
+  await assert.rejects(
+    service.decide("draft-expired-user", proposal.id, proposal.hash, "approve"),
+    /expired/i,
+  );
+  assert.ok(await db.get("draft-expired-user", "drafts", draft.id));
+});
+test("a draft rewritten after its review started is kept when that review is approved", async () => {
+  const service = new ActionService(db, {
+    execute: async () => "sent",
+    connected: async () => true,
+  });
+  const id = randomUUID();
+  await db.put("draft-rewrite-user", "drafts", { ...email.data, id });
+  const proposal = await service.propose("draft-rewrite-user", { ...email, draftId: id });
+  await db.put("draft-rewrite-user", "drafts", { ...email.data, id, body: "Rewritten" });
+  await service.decide("draft-rewrite-user", proposal.id, proposal.hash, "approve");
+  const kept = await db.get<{ body: string }>("draft-rewrite-user", "drafts", id);
+  assert.equal(kept?.body, "Rewritten");
+});
+test("a newer review of a draft replaces the older one, so the email is sent once", async () => {
+  let sends = 0;
+  const service = new ActionService(db, {
+    execute: async () => {
+      sends++;
+      return "sent";
+    },
+    connected: async () => true,
+  });
+  const draft = await db.put("draft-twice-user", "drafts", { ...email.data, id: randomUUID() });
+  const first = await service.propose("draft-twice-user", { ...email, draftId: draft.id });
+  const second = await service.propose("draft-twice-user", { ...email, draftId: draft.id });
+  const stale = await service.decide("draft-twice-user", first.id, first.hash, "approve");
+  assert.equal(stale.status, "cancelled");
+  const sent = await service.decide("draft-twice-user", second.id, second.hash, "approve");
+  assert.equal(sent.status, "succeeded");
+  assert.equal(sends, 1);
+  assert.equal(await db.get("draft-twice-user", "drafts", draft.id), null);
+});
+test("a failed draft cleanup still reports the email as sent", async (t) => {
+  const store = await createStore();
+  t.after(() => store.close());
+  const service = new ActionService(store, {
+    execute: async () => "sent",
+    connected: async () => true,
+  });
+  const draft = await store.put("cleanup-user", "drafts", { ...email.data, id: randomUUID() });
+  const proposal = await service.propose("cleanup-user", { ...email, draftId: draft.id });
+  const unavailable = async () => {
+    throw new Error("Database briefly unavailable");
+  };
+  Object.assign(store, { remove: unavailable, removeIf: unavailable });
+  const logged = t.mock.method(console, "error", () => {});
+  const result = await service.decide("cleanup-user", proposal.id, proposal.hash, "approve");
+  assert.equal(result.status, "succeeded");
+  assert.equal(logged.mock.callCount(), 1);
+});
+test("a review only links a draft that exists for the same owner", async () => {
+  const service = new ActionService(db, {
+    execute: async () => "sent",
+    connected: async () => true,
+  });
+  const draft = await db.put("draft-owner", "drafts", { ...email.data, id: randomUUID() });
+  await assert.rejects(
+    service.propose("draft-other-owner", { ...email, draftId: draft.id }),
+    /Draft not found/,
+  );
+  await assert.rejects(
+    service.propose("draft-owner", { ...email, draftId: randomUUID() }),
+    /Draft not found/,
+  );
+});
 test("another service instance sees persisted proposals", async () => {
   const options = { execute: async () => "created", connected: async () => true };
   const first = new ActionService(db, options);

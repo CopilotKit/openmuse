@@ -196,14 +196,13 @@ export async function createApp(
       ? await db.get<{ createdAt: string }>(c.get("owner"), "drafts", body.id)
       : null;
     if (body.id && !existing) throw new AppError("Draft not found", 404);
-    return c.json(
-      await db.put(c.get("owner"), "drafts", {
-        ...body,
-        id: body.id ?? randomUUID(),
-        createdAt: existing?.createdAt ?? new Date().toISOString(),
-      }),
-      201,
-    );
+    const saved = await db.put(c.get("owner"), "drafts", {
+      ...body,
+      id: body.id ?? randomUUID(),
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+    });
+    if (existing) await actions.cancelDraftReviews(c.get("owner"), saved.id);
+    return c.json(saved, 201);
   });
   app.get("/api/main-thread", async (c) => {
     const owner = c.get("owner");

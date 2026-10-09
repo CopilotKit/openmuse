@@ -7,6 +7,7 @@ import {
 } from "../../../packages/domain/src/index.ts";
 import type { Store } from "./db.ts";
 import { AppError } from "./errors.ts";
+import { backgroundFailure } from "./log.ts";
 
 interface Options {
   execute: (
@@ -51,6 +52,12 @@ export class ActionService {
       if (existing) return existing;
     }
     const parsed = proposalSchema.parse(raw);
+    if (
+      parsed.kind === "email.send" &&
+      parsed.draftId &&
+      !(await this.db.get(owner, "drafts", parsed.draftId))
+    )
+      throw new AppError("Draft not found", 404);
     const connection = await this.options.connection?.(owner);
     if (this.options.connection && !connection)
       throw new AppError("Connect Google before preparing an action", 409);
@@ -97,8 +104,31 @@ export class ActionService {
       if (!existing) throw new AppError("Prepared action could not be loaded", 409);
       return existing;
     }
+    if (saved.draftId) {
+      await this.db.compareAndSwap(owner, "drafts", saved.draftId, {}, { actionId: saved.id });
+      await this.cancelDraftReviews(owner, saved.draftId, saved.id);
+    }
     await this.record(owner, saved, "Ready for your review");
     return saved;
+  }
+  /** Leaves at most one pending send per draft, so one draft cannot be sent twice. */
+  async cancelDraftReviews(owner: string, draftId: string, keepId?: string) {
+    for (const action of await this.db.listByStatus<ActionProposal>(
+      owner,
+      "actions",
+      "awaiting_review",
+    )) {
+      if (action.draftId !== draftId || action.id === keepId) continue;
+      const cancelled = await this.db.compareAndSwap<ActionProposal>(
+        owner,
+        "actions",
+        action.id,
+        { status: "awaiting_review" },
+        { status: "cancelled" },
+      );
+      if (cancelled)
+        await this.record(owner, cancelled, "Replaced by a newer version of the draft");
+    }
   }
   async decide(
     owner: string,
@@ -204,8 +234,15 @@ export class ActionService {
     }
     await this.db.put(owner, "actions", finished);
     await this.record(owner, finished, finished.result ?? finished.error ?? finished.status);
-    if (finished.status === "succeeded" && finished.draftId)
-      await this.db.remove(owner, "drafts", finished.draftId);
+    if (finished.status === "succeeded" && finished.draftId) {
+      // The email has already gone out, so a cleanup failure must not read as a failed send.
+      // A draft saved again after this review no longer links to it and is kept.
+      try {
+        await this.db.removeIf(owner, "drafts", finished.draftId, { actionId: finished.id });
+      } catch (error) {
+        backgroundFailure("sent draft cleanup", error);
+      }
+    }
     return finished;
   }
   private async record(owner: string, action: ActionProposal, detail: string) {
