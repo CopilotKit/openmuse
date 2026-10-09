@@ -41,6 +41,30 @@ export class Store {
     );
     return result.rows.map((row) => row.data as T);
   }
+  async listByTaskId<T = Record<string, unknown>>(
+    owner: string,
+    kind: string,
+    taskId: string,
+  ): Promise<T[]> {
+    const result = await this.db.query(
+      "SELECT data FROM records WHERE owner=$1 AND kind=$2 AND data->>'taskId'=$3 ORDER BY updated_at DESC,id",
+      [owner, kind, taskId],
+    );
+    return result.rows.map((row) => row.data as T);
+  }
+  /** Rows of one kind named by id, in the same order `list` returns them. */
+  async listByIds<T = Record<string, unknown>>(
+    owner: string,
+    kind: string,
+    ids: readonly string[],
+  ): Promise<T[]> {
+    if (ids.length === 0) return [];
+    const result = await this.db.query(
+      "SELECT data FROM records WHERE owner=$1 AND kind=$2 AND id=ANY($3) ORDER BY updated_at DESC,id",
+      [owner, kind, [...ids]],
+    );
+    return result.rows.map((row) => row.data as T);
+  }
   async listByStatus<T = Record<string, unknown>>(
     owner: string,
     kind: string,

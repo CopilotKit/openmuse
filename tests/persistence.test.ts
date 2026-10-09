@@ -140,3 +140,68 @@ test("listByStatus matches list plus status filtering", async () => {
     await store.close();
   }
 });
+
+test("listByTaskId matches list plus taskId filtering", async () => {
+  const store = await createStore();
+  try {
+    // A gap between writes gives each row its own `updated_at`, so `list`'s newest-first order is
+    // the reverse of the insertion order and a helper that forgot to order cannot pass by accident.
+    const gap = () => new Promise((resolve) => setTimeout(resolve, 3));
+    for (const id of ["e0", "e1", "e2"]) {
+      await store.put("owner", "run-events", { id, taskId: "t1" });
+      await gap();
+    }
+    await store.put("owner", "run-events", { id: "e-other", taskId: "t2" });
+    await store.put("owner", "run-events", { id: "e-none" });
+
+    const scoped = await store.listByTaskId<{ id: string; taskId?: string }>(
+      "owner",
+      "run-events",
+      "t1",
+    );
+    const expected = (
+      await store.list<{ id: string; taskId?: string }>("owner", "run-events")
+    ).filter((item) => item.taskId === "t1");
+    assert.deepEqual(scoped, expected);
+    assert.deepEqual(
+      scoped.map((item) => item.id),
+      ["e2", "e1", "e0"],
+    );
+
+    await store.put("other", "run-events", { id: "x", taskId: "t1" });
+    await store.put("owner", "goals", { id: "g", taskId: "t1" });
+    assert.equal((await store.listByTaskId("owner", "run-events", "t1")).length, 3);
+    assert.equal((await store.listByTaskId("nobody", "run-events", "t1")).length, 0);
+  } finally {
+    await store.close();
+  }
+});
+
+test("listByIds matches list plus id filtering, and reads nothing for no ids", async () => {
+  const store = await createStore();
+  try {
+    const gap = () => new Promise((resolve) => setTimeout(resolve, 3));
+    for (const id of ["f0", "f1", "f2"]) {
+      await store.put("owner", "files", { id, name: id });
+      await gap();
+    }
+    await store.put("owner", "files", { id: "f-other", name: "other" });
+
+    const ids = ["f0", "f2", "f-missing"];
+    const scoped = await store.listByIds<{ id: string }>("owner", "files", ids);
+    const expected = (await store.list<{ id: string }>("owner", "files")).filter((item) =>
+      ids.includes(item.id),
+    );
+    assert.deepEqual(scoped, expected);
+    assert.deepEqual(
+      scoped.map((item) => item.id),
+      ["f2", "f0"],
+    );
+
+    assert.deepEqual(await store.listByIds("owner", "files", []), []);
+    await store.put("other", "files", { id: "f0" });
+    assert.equal((await store.listByIds("owner", "files", ["f0"])).length, 1);
+  } finally {
+    await store.close();
+  }
+});
