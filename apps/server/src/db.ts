@@ -66,6 +66,17 @@ export class Store {
       id,
     ]);
   }
+  async removeIf(
+    owner: string,
+    kind: string,
+    id: string,
+    expected: Record<string, unknown>,
+  ): Promise<void> {
+    await this.db.query(
+      "DELETE FROM records WHERE owner=$1 AND kind=$2 AND id=$3 AND data @> $4::jsonb",
+      [owner, kind, id, JSON.stringify(expected)],
+    );
+  }
   async compareAndSwap<T>(
     owner: string,
     kind: string,
