@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { BrowserSession } from "../../../packages/domain/src/index.ts";
+import { clip } from "../../../packages/domain/src/text.ts";
 import type { Auth } from "./auth.ts";
 import { browserConsole } from "./browser-console.ts";
 import type { Config } from "./config.ts";
@@ -122,6 +123,10 @@ export class BrowserService {
     const session = sessionSchema.parse(payload);
     if (session.id !== expectedId)
       throw new AppError("Browser worker returned a different session", 502);
+    // A worker-supplied title can end inside a surrogate pair. A lone surrogate survives
+    // JSON.stringify as a \udXXX escape that Postgres refuses in jsonb, so repair it at the
+    // one place every session response is written.
+    session.title = clip(session.title, 300);
     await this.db.put(owner, "browsers", session);
     return this.decorate(owner, session);
   }
@@ -166,6 +171,11 @@ export class BrowserService {
         await this.request(`/sessions/${encodeURIComponent(id)}/read`, undefined, signal)
       ).json(),
     );
+    // The worker clips DOM text by code unit, so a bound can leave a lone surrogate even
+    // when the page itself was well formed. Repair the title and text before either is
+    // saved as a record or returned for task evidence.
+    result.title = clip(result.title, 300);
+    result.text = clip(result.text, 100_000);
     await this.save(
       owner,
       {
@@ -220,7 +230,7 @@ export class BrowserService {
       return {
         sessionId: id,
         ...page,
-        text: page.text.slice(0, 30_000),
+        text: clip(page.text, 30_000),
         truncated: page.truncated || page.text.length > 30_000,
       };
     });

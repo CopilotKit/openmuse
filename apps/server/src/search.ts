@@ -4,6 +4,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import project from "../../../package.json" with { type: "json" };
+import { clip } from "../../../packages/domain/src/text.ts";
 import type { Store } from "./db.ts";
 
 export const searchInputSchema = z.object({
@@ -108,7 +109,7 @@ export class SearchService {
       );
       if (result.isError) {
         const text = result.content.find((block) => block.type === "text");
-        throw new Error(text?.type === "text" ? text.text.slice(0, 500) : "Search tool failed");
+        throw new Error(text?.type === "text" ? clip(text.text, 500) : "Search tool failed");
       }
       const text = result.content.find((block) => block.type === "text");
       const parsed = payloadSchema.safeParse(
@@ -130,16 +131,16 @@ export class SearchService {
       const results = sources.slice(0, 10).map((source) => {
         const excerpts = source.excerpts
           .map((excerpt) => {
-            const bounded = excerpt.slice(0, remaining);
+            const bounded = clip(excerpt, remaining);
+            truncated ||= excerpt.length > remaining;
             remaining -= bounded.length;
-            truncated ||= bounded.length < excerpt.length;
             return bounded;
           })
           .filter(Boolean);
         truncated ||= (source.title?.length ?? 0) > 300;
         return {
           url: source.url,
-          title: source.title?.slice(0, 300) ?? null,
+          title: typeof source.title === "string" ? clip(source.title, 300) : null,
           excerpts,
           publish_date: source.publish_date ?? null,
         };
@@ -151,7 +152,7 @@ export class SearchService {
           const text =
             typeof warning === "string" ? warning : `${warning.type}: ${warning.message}`;
           truncated ||= text.length > 500;
-          return text.slice(0, 500);
+          return clip(text, 500);
         }),
         truncated,
       };
@@ -159,7 +160,7 @@ export class SearchService {
       signal?.throwIfAborted();
       if (deadline.aborted) throw new Error("Parallel search timed out after 45 seconds");
       throw new Error(
-        `Parallel search failed: ${error instanceof Error ? error.message.slice(0, 500) : "Unknown error"}`,
+        `Parallel search failed: ${error instanceof Error ? clip(error.message, 500) : "Unknown error"}`,
       );
     } finally {
       // The fixed Parallel endpoint is stateless; close streams without masking the result.
