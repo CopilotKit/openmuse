@@ -52,7 +52,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.0",
     "@copilotkit/aimock": "1.42.0",
-    "@copilotkit/core": "1.70.1",
+    "@copilotkit/core": "1.78.0",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.15.5",
     "tsx": "^4.20.0",
