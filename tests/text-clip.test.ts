@@ -242,6 +242,21 @@ test("a record write repairs nested strings and keys no call site bounded", asyn
   assert.deepEqual(saved?.input, { deep: [`x${replacement}`], [`k${replacement}`]: "v" });
 });
 
+test("two keys that collapse under repair keep the later value, deterministically", async (t) => {
+  // wellFormed() maps a lone surrogate and U+FFFD onto the same U+FFFD, so two distinct keys can
+  // become one. A jsonb key cannot hold the surrogate, so one value cannot be stored at all;
+  // insertion order decides which survives, matching how JSON.parse resolves a duplicate key.
+  const store = await createStore();
+  t.after(() => store.close());
+  const loneSurrogate = `a\uD800x`;
+  const repaired = `a${replacement}x`;
+  const record = { id: "collapse", [loneSurrogate]: "first", [repaired]: "second" };
+  await store.put("clip-owner", "records", record);
+  const saved = await store.get<Record<string, string>>("clip-owner", "records", "collapse");
+  assert.deepEqual(Object.keys(saved ?? {}).sort(), [repaired, "id"]);
+  assert.equal(saved?.[repaired], "second");
+});
+
 test("a client title, prompt or nested input cannot fail the task write", async (t) => {
   const browser = await browserFixture(t, () => {
     throw new Error("task creation must not contact the worker");

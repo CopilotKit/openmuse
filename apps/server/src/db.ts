@@ -35,6 +35,10 @@ function jsonbSafe(value: unknown, cache = new Map<object, unknown>()): unknown 
   if (prototype !== Object.prototype && prototype !== null) return value;
   const repaired: Record<string, unknown> = {};
   cache.set(value, repaired);
+  // Keys are repaired too, since a lone surrogate in a key fails the write the same way. Two keys
+  // that differ only by such a surrogate collapse into one; insertion order makes the later value
+  // win, the way JSON.parse resolves a duplicate key. The surrogate key is unstorable, so one value
+  // has to go and this keeps which one it is deterministic.
   for (const [key, item] of Object.entries(value))
     repaired[wellFormed(key)] = jsonbSafe(item, cache);
   return repaired;
