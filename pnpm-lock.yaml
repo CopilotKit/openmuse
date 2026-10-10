@@ -73,8 +73,8 @@ importers:
         specifier: ^2.4.0
         version: 2.5.15
       '@copilotkit/aimock':
-        specifier: 1.42.0
-        version: 1.42.0
+        specifier: 1.45.0
+        version: 1.45.0
       '@copilotkit/core':
         specifier: 1.70.1
         version: 1.70.1(@ag-ui/core@0.0.59)(zod@4.6.5)
@@ -963,8 +963,8 @@ packages:
       react-dom:
         optional: true
 
-  '@copilotkit/aimock@1.42.0':
-    resolution: {integrity: sha512-P8mIGzSdIByeegbrqkjj9uiLJqeUl3H33gmePsfl8ttVJjkx3TqYp+lF+SxZSDdr/NGx0NJmKxcVT6OibUmNqg==}
+  '@copilotkit/aimock@1.45.0':
+    resolution: {integrity: sha512-BnD3+3p9nWC9cirqRnXmeJkav3oWqnGppiqSPSaNVFRqprurJceFM1BoUf+7xX4a+FsseUm/9vsOia7Qu5gJog==}
     engines: {node: '>=20.15.0'}
     hasBin: true
     peerDependencies:
@@ -7290,7 +7290,7 @@ snapshots:
       react: 19.1.0
       react-dom: 19.1.0(react@19.1.0)
 
-  '@copilotkit/aimock@1.42.0': {}
+  '@copilotkit/aimock@1.45.0': {}
 
   '@copilotkit/channels-core@0.9.2(zod@3.25.76)':
     dependencies:
