@@ -1,4 +1,5 @@
 import { View } from "react-native";
+import { i18n } from "./i18n";
 import { Field } from "./ui";
 export interface DateFieldsProps {
   label: string;
@@ -12,7 +13,7 @@ export default function DateFields({ label, date, time, allDay, onChange }: Date
     <View style={{ flexDirection: "row", gap: 12 }}>
       <View style={{ flex: 1.2 }}>
         <Field
-          label={`${label} date`}
+          label={i18n.t("a11y.datePart", { label })}
           value={date}
           onChangeText={(value) => onChange(value, time)}
           placeholder="YYYY-MM-DD"
@@ -22,10 +23,10 @@ export default function DateFields({ label, date, time, allDay, onChange }: Date
       {!allDay && (
         <View style={{ flex: 1 }}>
           <Field
-            label={`${label} time`}
+            label={i18n.t("a11y.timePart", { label })}
             value={time}
             onChangeText={(value) => onChange(date, value)}
-            placeholder="HH:MM (24-hour)"
+            placeholder={i18n.t("date.hourHint")}
             keyboardType="numbers-and-punctuation"
           />
         </View>

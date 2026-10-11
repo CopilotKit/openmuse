@@ -32,12 +32,13 @@ import {
   type Mail,
   type ProposalInput,
 } from "../../../packages/domain/src";
-import { DelegateSheet, NotificationsSheet, TaskDetail } from "./agent-ui";
+import { DelegateSheet, NotificationsSheet, statusLabel, TaskDetail } from "./agent-ui";
 import BrowserConsole from "./BrowserConsole";
 import { browserAddress, browserSite } from "./browser-address";
 import { ComputerSheet } from "./computer";
 import DateTimeEditor from "./DateTimeEditor";
 import { localDateTime, zonedInstant } from "./date-time";
+import { i18n, names } from "./i18n";
 import PdfReader from "./PdfReader";
 import {
   Button,
@@ -78,13 +79,21 @@ export function Details({ detail }: { detail: Detail }) {
   if (detail.type === "review") return <ReviewDetail initial={detail.action} />;
   if (detail.type === "browser") return <BrowserDetail initial={detail.browser} />;
   return (
-    <Sheet title="Your workspace" subtitle="A little room for everything." onClose={close}>
+    <Sheet
+      title={i18n.t("workspace.title")}
+      subtitle={i18n.t("workspace.subtitle")}
+      onClose={close}
+    >
       {[
-        { section: "mail" as const, title: "Mail", icon: MailIcon },
-        { section: "calendar" as const, title: "Calendar", icon: CalendarDays },
-        { section: "browser" as const, title: "Browser", icon: Globe2 },
-        { section: "files" as const, title: "Files", icon: FileText },
-        { section: "activity" as const, title: "Activity", icon: Clock3 },
+        { section: "mail" as const, title: i18n.t("section.mailTitle"), icon: MailIcon },
+        {
+          section: "calendar" as const,
+          title: i18n.t("section.calendarTitle"),
+          icon: CalendarDays,
+        },
+        { section: "browser" as const, title: i18n.t("section.browserTitle"), icon: Globe2 },
+        { section: "files" as const, title: i18n.t("section.filesTitle"), icon: FileText },
+        { section: "activity" as const, title: i18n.t("section.activityTitle"), icon: Clock3 },
         { section: "connections" as const, title: "Connections", icon: ShieldCheck },
       ].map((item) => (
         <LinkRow
@@ -142,13 +151,13 @@ function MailDetail({ mail: m }: { mail: Mail }) {
   return (
     <Sheet
       title={m.subject}
-      subtitle={`${thread.length} message${thread.length === 1 ? "" : "s"} in this conversation`}
+      subtitle={i18n.t("mail.threadCount", { count: thread.length })}
       onClose={close}
     >
       {loading && (
         <View style={[s.row, { gap: 10, paddingBottom: 20 }]}>
           <ActivityIndicator color={colors.blueDark} />
-          <Text style={s.muted}>Loading the conversation…</Text>
+          <Text style={s.muted}>{i18n.t("mail.loadingConversation")}</Text>
         </View>
       )}
       {thread.map((message) => (
@@ -157,7 +166,9 @@ function MailDetail({ mail: m }: { mail: Mail }) {
             <View style={{ gap: 4, flex: 1 }}>
               <Text style={s.heading}>{message.sender}</Text>
               <Text style={s.small}>{message.from}</Text>
-              <Text style={s.small}>To: {message.to.join(", ")}</Text>
+              <Text style={s.small}>
+                {i18n.t("common.toLine", { recipients: message.to.join(", ") })}
+              </Text>
             </View>
             <Text style={s.small}>
               {dateLabel(message.date)} · {timeLabel(message.date)}
@@ -173,7 +184,7 @@ function MailDetail({ mail: m }: { mail: Mail }) {
               <LinkRow
                 key={id}
                 title={file.name}
-                detail={`${file.pageCount} pages · PDF attachment`}
+                detail={i18n.t("common.pdfAttachment", { count: file.pageCount, ...names })}
                 icon={FileText}
                 onPress={() => open({ type: "file", file })}
               />
@@ -191,7 +202,9 @@ function MailDetail({ mail: m }: { mail: Mail }) {
         </Card>
       ))}
       <ErrorNotice error={error} />
-      {!!error && <Button onPress={() => setRetry(retry + 1)}>Reload conversation</Button>}
+      {!!error && (
+        <Button onPress={() => setRetry(retry + 1)}>{i18n.t("mail.reloadConversation")}</Button>
+      )}
       <Button
         primary
         icon={Reply}
@@ -212,7 +225,7 @@ function MailDetail({ mail: m }: { mail: Mail }) {
           })
         }
       >
-        Write a reply
+        {i18n.t("mail.writeReply")}
       </Button>
     </Sheet>
   );
@@ -264,7 +277,7 @@ function EmailEditor({ draft }: { draft?: Partial<EmailDraft> & { id?: string } 
           ...(draft?.id ? { id: draft.id } : {}),
         });
         await refresh();
-        notify("Draft saved in OpenMuse.");
+        notify(i18n.t("mail.draftSaved", names));
         close();
       }
     } catch (e) {
@@ -275,12 +288,12 @@ function EmailEditor({ draft }: { draft?: Partial<EmailDraft> & { id?: string } 
   }
   return (
     <Sheet
-      title={draft?.threadId ? "Write a reply" : "A new message"}
-      subtitle={`From ${w.profile.email} · saved privately in OpenMuse`}
+      title={draft?.threadId ? i18n.t("mail.writeReply") : "A new message"}
+      subtitle={i18n.t("mail.fromSaved", { ...names, email: w.profile.email })}
       onClose={close}
     >
       <Field
-        label="To"
+        label={i18n.t("mail.to")}
         value={to}
         onChangeText={setTo}
         placeholder="person@example.com"
@@ -290,40 +303,42 @@ function EmailEditor({ draft }: { draft?: Partial<EmailDraft> & { id?: string } 
       <View style={{ flexDirection: "row", gap: 16 }}>
         <View style={{ flex: 1 }}>
           <Field
-            label="Cc"
+            label={i18n.t("mail.cc")}
             value={cc}
             onChangeText={setCc}
-            placeholder="Optional"
+            placeholder={i18n.t("common.optional")}
             autoCapitalize="none"
           />
         </View>
         <View style={{ flex: 1 }}>
           <Field
-            label="Bcc"
+            label={i18n.t("mail.bcc")}
             value={bcc}
             onChangeText={setBcc}
-            placeholder="Optional"
+            placeholder={i18n.t("common.optional")}
             autoCapitalize="none"
           />
         </View>
       </View>
       <Field
-        label="Subject"
+        label={i18n.t("mail.subject")}
         value={subject}
         onChangeText={setSubject}
-        placeholder="What’s on your mind?"
+        placeholder={i18n.t("mail.subjectPlaceholder")}
       />
       <Field
-        label="Message"
+        label={i18n.t("mail.message")}
         value={body}
         onChangeText={setBody}
         multiline
-        placeholder="Start your message…"
+        placeholder={i18n.t("mail.messagePlaceholder")}
         style={{ minHeight: 210 }}
       />
       {w.files.length > 0 && (
         <Card style={{ padding: 16, marginBottom: 18 }}>
-          <Text style={[s.heading, { fontSize: 13, marginBottom: 5 }]}>Attachments</Text>
+          <Text style={[s.heading, { fontSize: 13, marginBottom: 5 }]}>
+            {i18n.t("mail.attachments")}
+          </Text>
           {w.files.map((f) => (
             <CheckRow
               key={f.id}
@@ -349,7 +364,7 @@ function EmailEditor({ draft }: { draft?: Partial<EmailDraft> & { id?: string } 
           disabled={!!busy}
           onPress={() => void save(true)}
         >
-          Review email
+          {i18n.t("mail.reviewEmail")}
         </Button>
         <Button
           icon={Save}
@@ -357,7 +372,7 @@ function EmailEditor({ draft }: { draft?: Partial<EmailDraft> & { id?: string } 
           disabled={!!busy}
           onPress={() => void save(false)}
         >
-          Save draft
+          {i18n.t("mail.saveDraft")}
         </Button>
       </View>
       <Text style={[s.small, { marginTop: 13 }]}>
@@ -451,13 +466,13 @@ function EventEditor({
       onClose={close}
     >
       <Field
-        label="Event title"
+        label={i18n.t("calendar.eventTitle")}
         value={title}
         onChangeText={setTitle}
-        placeholder="What are you making time for?"
+        placeholder={i18n.t("calendar.eventTitlePlaceholder")}
       />
       <CheckRow
-        label="All-day event"
+        label={i18n.t("calendar.allDayEvent")}
         checked={allDay}
         onPress={() => {
           try {
@@ -479,49 +494,57 @@ function EventEditor({
         }}
       />
       <DateTimeEditor
-        label="Starts"
+        label={i18n.t("calendar.starts")}
         value={start}
         onChange={setStart}
         timeZone={zone}
         allDay={allDay}
       />
-      <DateTimeEditor label="Ends" value={end} onChange={setEnd} timeZone={zone} allDay={allDay} />
+      <DateTimeEditor
+        label={i18n.t("calendar.ends")}
+        value={end}
+        onChange={setEnd}
+        timeZone={zone}
+        allDay={allDay}
+      />
       {allDay && (
-        <Text style={[s.small, { marginBottom: 15 }]}>
-          The end date is the day after the last day of your event.
-        </Text>
+        <Text style={[s.small, { marginBottom: 15 }]}>{i18n.t("calendar.endDateHint")}</Text>
       )}
       <Field
-        label="Time zone"
+        label={i18n.t("calendar.timeZone")}
         value={zone}
         onChangeText={setZone}
         placeholder="America/Los_Angeles"
       />
       <Field
-        label="Location or meeting link"
+        label={i18n.t("calendar.location")}
         value={location}
         onChangeText={setLocation}
-        placeholder="Optional"
+        placeholder={i18n.t("common.optional")}
       />
       <Field
-        label="Attendees"
+        label={i18n.t("calendar.attendees")}
         value={attendees}
         onChangeText={setAttendees}
-        placeholder="Email addresses, separated by commas"
+        placeholder={i18n.t("calendar.attendeesPlaceholder")}
       />
       <Field
-        label="Notes"
+        label={i18n.t("calendar.notes")}
         value={description}
         onChangeText={setDescription}
         multiline
-        placeholder="Anything else to keep in mind?"
+        placeholder={i18n.t("calendar.notesPlaceholder")}
       />
       {!!conflicts.length && (
         <Card style={{ backgroundColor: colors.orange, padding: 16, marginBottom: 16 }}>
-          <Text style={s.heading}>This time overlaps</Text>
+          <Text style={s.heading}>{i18n.t("calendar.overlaps")}</Text>
           {conflicts.map((c) => (
             <Text key={c.id} style={s.muted}>
-              {c.title} · {timeLabel(c.start, c.timeZone)}–{timeLabel(c.end, c.timeZone)}
+              {i18n.t("calendar.overlapLine", {
+                title: c.title,
+                start: timeLabel(c.start, c.timeZone),
+                end: timeLabel(c.end, c.timeZone),
+              })}
             </Text>
           ))}
         </Card>
@@ -529,11 +552,11 @@ function EventEditor({
       <ErrorNotice error={error} />
       <View style={[s.row, { gap: 10, flexWrap: "wrap" }]}>
         <Button primary icon={ShieldCheck} busy={busy} onPress={() => void propose()}>
-          Review {e ? "changes" : "event"}
+          {e ? i18n.t("calendar.reviewChanges") : i18n.t("calendar.reviewEvent")}
         </Button>
         {e && (
           <Button icon={Trash2} disabled={busy} danger onPress={() => void propose(true)}>
-            Review deletion
+            {i18n.t("calendar.reviewDeletion")}
           </Button>
         )}
       </View>
@@ -612,24 +635,28 @@ function ReviewDetail({ initial }: { initial: ActionProposal }) {
           <Text style={s.heading}>{action.title}</Text>
           <Text style={s.small}>{action.kind.replace(".", " · ")}</Text>
         </View>
-        <Chip tint={pending ? colors.lavender : colors.green}>
-          {action.status.replace(/_/g, " ")}
-        </Chip>
+        <Chip tint={pending ? colors.lavender : colors.green}>{statusLabel(action.status)}</Chip>
       </View>
       <Card style={{ gap: 13 }}>
-        <ReviewLine label="Account" value={action.account || w.profile.email} />
+        <ReviewLine label={i18n.t("calendar.account")} value={action.account || w.profile.email} />
         {email ? (
           <>
-            <ReviewLine label="To" value={arrayText(d.to)} />
-            <ReviewLine label="Cc" value={arrayText(d.cc) || "None"} />
-            <ReviewLine label="Bcc" value={arrayText(d.bcc) || "None"} />
-            <ReviewLine label="Subject" value={String(d.subject || "")} />
+            <ReviewLine label={i18n.t("mail.to")} value={arrayText(d.to)} />
+            <ReviewLine
+              label={i18n.t("mail.cc")}
+              value={arrayText(d.cc) || i18n.t("common.none")}
+            />
+            <ReviewLine
+              label={i18n.t("mail.bcc")}
+              value={arrayText(d.bcc) || i18n.t("common.none")}
+            />
+            <ReviewLine label={i18n.t("mail.subject")} value={String(d.subject || "")} />
             <View style={s.divider} />
             <Text selectable style={[s.text, { lineHeight: 25 }]}>
               {String(d.body || "")}
             </Text>
             <View style={s.divider} />
-            <Text style={s.label}>Attachments</Text>
+            <Text style={s.label}>{i18n.t("mail.attachments")}</Text>
             {Array.isArray(d.attachmentIds) && d.attachmentIds.length ? (
               d.attachmentIds.map((id) => {
                 const file = w.files.find((f) => f.id === id);
@@ -640,16 +667,16 @@ function ReviewDetail({ initial }: { initial: ActionProposal }) {
                 );
               })
             ) : (
-              <Text style={s.muted}>No attachments</Text>
+              <Text style={s.muted}>{i18n.t("mail.noAttachments")}</Text>
             )}
           </>
         ) : (
           <>
-            <ReviewLine label="Event" value={String(d.title || "")} />
+            <ReviewLine label={i18n.t("calendar.event")} value={String(d.title || "")} />
             {action.kind !== "calendar.delete" && (
               <>
                 <ReviewLine
-                  label="Starts"
+                  label={i18n.t("calendar.starts")}
                   value={
                     d.allDay
                       ? String(d.start || "")
@@ -657,21 +684,40 @@ function ReviewDetail({ initial }: { initial: ActionProposal }) {
                   }
                 />
                 <ReviewLine
-                  label="Ends"
+                  label={i18n.t("calendar.ends")}
                   value={
                     d.allDay
                       ? `${String(d.end || "")} (exclusive)`
                       : `${dateLabel(String(d.end || ""), { year: "numeric", month: "short", day: "numeric", timeZone: String(d.timeZone || "UTC") })} · ${timeLabel(String(d.end || ""), String(d.timeZone || "UTC"))}`
                   }
                 />
-                <ReviewLine label="Time zone" value={String(d.timeZone || "")} />
-                <ReviewLine label="All day" value={d.allDay ? "Yes" : "No"} />
-                <ReviewLine label="Location" value={String(d.location || "None")} />
-                <ReviewLine label="Attendees" value={arrayText(d.attendees) || "Just you"} />
-                <ReviewLine label="Notes" value={String(d.description || "None")} />
+                <ReviewLine label={i18n.t("calendar.timeZone")} value={String(d.timeZone || "")} />
+                <ReviewLine
+                  label={i18n.t("calendar.allDayLabel")}
+                  value={d.allDay ? i18n.t("common.yes") : i18n.t("common.no")}
+                />
+                <ReviewLine
+                  label={i18n.t("calendar.locationShort")}
+                  value={String(d.location || i18n.t("common.none"))}
+                />
+                <ReviewLine
+                  label={i18n.t("calendar.attendees")}
+                  value={arrayText(d.attendees) || i18n.t("common.justYou")}
+                />
+                <ReviewLine
+                  label={i18n.t("calendar.notes")}
+                  value={String(d.description || i18n.t("common.none"))}
+                />
               </>
             )}
-            <ReviewLine label="Calendar" value={String(d.calendarId || "primary")} />
+            <ReviewLine
+              label={i18n.t("calendar.calendar")}
+              value={
+                String(d.calendarId || "primary") === "primary"
+                  ? i18n.t("common.primaryCalendar")
+                  : String(d.calendarId)
+              }
+            />
             <Text style={s.small}>
               {action.kind === "calendar.delete"
                 ? "This removes the event and may notify its attendees."
@@ -692,15 +738,12 @@ function ReviewDetail({ initial }: { initial: ActionProposal }) {
         <>
           <Text style={[s.small, { marginVertical: 17 }]}>
             Review expires{" "}
-            {new Date(action.expiresAt).toLocaleString(undefined, {
+            {dateLabel(action.expiresAt, {
               year: "numeric",
               month: "short",
               day: "numeric",
-              hour: "numeric",
-              minute: "2-digit",
-              timeZoneName: "short",
-            })}
-            . Your approval applies only to the details shown above.
+            })}{" "}
+            {timeLabel(action.expiresAt)}. Your approval applies only to the details shown above.
           </Text>
           <View style={[s.row, { gap: 10, flexWrap: "wrap" }]}>
             <Button primary icon={Check} busy={busy} onPress={() => void decide("approve")}>
@@ -712,17 +755,17 @@ function ReviewDetail({ initial }: { initial: ActionProposal }) {
             </Button>
             {action.kind !== "calendar.delete" && (
               <Button icon={Edit3} disabled={busy} onPress={() => void edit()}>
-                Edit details
+                {i18n.t("calendar.editDetails")}
               </Button>
             )}
             <Button icon={X} disabled={busy} onPress={() => void decide("deny")}>
-              Don’t proceed
+              {i18n.t("calendar.dontProceed")}
             </Button>
           </View>
         </>
       ) : (
         <Button style={{ alignSelf: "flex-start", marginTop: 19 }} onPress={close}>
-          Done
+          {i18n.t("common.done")}
         </Button>
       )}
     </Sheet>
@@ -790,7 +833,11 @@ function FileDetail({ file: f }: { file: Artifact }) {
   return (
     <Sheet
       title={f.name}
-      subtitle={`${f.pageCount} pages · ${Math.max(1, Math.round(f.size / 1024))} KB · ${f.source}`}
+      subtitle={i18n.t("common.fileMeta", {
+        count: f.pageCount,
+        size: Math.max(1, Math.round(f.size / 1024)),
+        source: f.source,
+      })}
       onClose={close}
       wide
     >
@@ -803,15 +850,13 @@ function FileDetail({ file: f }: { file: Artifact }) {
           icon={Send}
           onPress={() => open({ type: "email", draft: { attachmentIds: [f.id] } })}
         >
-          Attach to email
+          {i18n.t("files.attachToEmail")}
         </Button>
       </View>
       {f.fields && f.fields.length > 0 && (
         <Card>
-          <SectionHeading title="Fill this form" />
-          <Text style={[s.muted, { marginBottom: 18 }]}>
-            Add your details below. Saving creates a new copy and keeps the original intact.
-          </Text>
+          <SectionHeading title={i18n.t("files.fillForm")} />
+          <Text style={[s.muted, { marginBottom: 18 }]}>{i18n.t("files.fillHint")}</Text>
           {f.fields.map((field) =>
             field.type === "unsupported" ? (
               <Text key={field.name} style={s.muted}>
@@ -834,13 +879,13 @@ function FileDetail({ file: f }: { file: Artifact }) {
             ),
           )}
           <Button primary icon={Save} busy={busy} onPress={() => void fill()}>
-            Save filled copy
+            {i18n.t("files.saveFilled")}
           </Button>
         </Card>
       )}
       <ErrorNotice error={error} />
       <Text style={[s.small, { marginTop: 15 }]}>
-        Added {dateLabel(f.createdAt)}
+        {i18n.t("common.addedOn", { date: dateLabel(f.createdAt) })}
         {f.parentId ? " · filled copy" : ""}
       </Text>
     </Sheet>
@@ -926,14 +971,17 @@ function BrowserDetail({ initial }: { initial: BrowserSession }) {
   return (
     <Sheet
       title={browserSite(browser.url)}
-      subtitle={`${browser.status} · updated ${timeLabel(browser.updatedAt)}`}
+      subtitle={i18n.t("browser.updated", {
+        status: statusLabel(browser.status),
+        time: timeLabel(browser.updatedAt),
+      })}
       onClose={close}
       wide
     >
       <View style={[s.row, { gap: 10, marginBottom: 16 }]}>
         <View style={{ flex: 1 }}>
           <Field
-            label="Website address"
+            label={i18n.t("computer.website")}
             value={url}
             onChangeText={setUrl}
             autoCapitalize="none"
@@ -949,11 +997,11 @@ function BrowserDetail({ initial }: { initial: BrowserSession }) {
       {loading ? (
         <View style={[s.row, { gap: 10, paddingVertical: 24 }]}>
           {error ? (
-            <Button onPress={() => setRetry(retry + 1)}>Retry connection</Button>
+            <Button onPress={() => setRetry(retry + 1)}>{i18n.t("browser.retryConnection")}</Button>
           ) : (
             <>
               <ActivityIndicator color={colors.blueDark} />
-              <Text style={s.muted}>Connecting to your browser…</Text>
+              <Text style={s.muted}>{i18n.t("browser.connecting")}</Text>
             </>
           )}
         </View>
@@ -984,22 +1032,22 @@ function BrowserDetail({ initial }: { initial: BrowserSession }) {
             icon={ExternalLink}
             onPress={() => void Linking.openURL(api.url(browser.consoleUrl || ""))}
           >
-            Open browser in a window
+            {i18n.t("browser.openWindow")}
           </Button>
         )}
         {!loading && (
           <Button icon={RotateCw} disabled={busy} onPress={() => setRetry(retry + 1)}>
-            Refresh connection
+            {i18n.t("browser.refreshConnection")}
           </Button>
         )}
         {!loading && browser.status !== "closed" && (
           <Button icon={Download} busy={busy} onPress={() => void importDownloads()}>
-            Import PDF downloads
+            {i18n.t("browser.importDownloads", names)}
           </Button>
         )}
         {!loading && browser.status !== "closed" && (
           <Button icon={X} danger busy={busy} onPress={() => void mutate(true)}>
-            Close session
+            {i18n.t("browser.closeSession")}
           </Button>
         )}
       </View>

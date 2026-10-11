@@ -3,6 +3,7 @@ import { useContext } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 import { z } from "zod";
 import { BrowserRunContext } from "./browser-tool-card";
+import { i18n } from "./i18n";
 import { Button, Card, colors, ErrorNotice, s } from "./ui";
 import { useWorkspace } from "./workspace";
 
@@ -50,7 +51,11 @@ export function MailToolCard({
           <Mail size={16} color={colors.muted} />
         )}
         <Text style={s.muted}>
-          {!active ? "Mail reading paused" : search ? "Checking your inbox…" : "Reading the email…"}
+          {!active
+            ? i18n.t("mail.paused")
+            : search
+              ? i18n.t("mail.checking")
+              : i18n.t("mail.reading")}
         </Text>
       </View>
     );
@@ -58,16 +63,15 @@ export function MailToolCard({
     const parsed = z
       .object({ matches: z.array(z.object({ id: z.string() })), truncated: z.boolean() })
       .safeParse(value);
-    if (!parsed.success)
-      return <ErrorNotice error="The mailbox did not return readable results." />;
+    if (!parsed.success) return <ErrorNotice error={i18n.t("mail.unreadable")} />;
     const count = parsed.data.matches.length;
     return (
       <View style={[s.row, { gap: 9, padding: 12 }]}>
         <Search size={16} color={colors.muted} />
         <Text style={s.muted}>
           {count
-            ? `Found ${parsed.data.truncated ? "at least " : ""}${count} ${count === 1 ? "email" : "emails"}`
-            : "No matching emails"}
+            ? i18n.t(parsed.data.truncated ? "mail.foundAtLeast" : "mail.foundEmails", { count })
+            : i18n.t("mail.noMatches")}
         </Text>
       </View>
     );
@@ -75,9 +79,9 @@ export function MailToolCard({
   const parsed = z
     .object({ messages: z.array(messageSchema), truncated: z.boolean() })
     .safeParse(value);
-  if (!parsed.success) return <ErrorNotice error="The email could not be displayed." />;
+  if (!parsed.success) return <ErrorNotice error={i18n.t("mail.cannotDisplay")} />;
   const message = parsed.data.messages.at(-1);
-  if (!message) return <Text style={s.muted}>No messages in this thread.</Text>;
+  if (!message) return <Text style={s.muted}>{i18n.t("mail.noMessages")}</Text>;
   return (
     <Card
       style={{ padding: 18, gap: 14, backgroundColor: "#F0EFF2", maxWidth: 440, width: "100%" }}
@@ -89,10 +93,7 @@ export function MailToolCard({
         <View style={{ flex: 1 }}>
           <Text style={[s.text, { fontWeight: "600" }]}>{message.sender}</Text>
           <Text style={s.small}>
-            Email ·{" "}
-            {parsed.data.messages.length === 1
-              ? "1 message"
-              : `${parsed.data.messages.length} messages`}
+            {i18n.t("mail.emailCount", { count: parsed.data.messages.length })}
           </Text>
         </View>
       </View>
@@ -100,9 +101,9 @@ export function MailToolCard({
       <Text style={s.muted} numberOfLines={3}>
         {message.body}
       </Text>
-      {parsed.data.truncated && <Text style={s.small}>Showing an excerpt of this thread.</Text>}
+      {parsed.data.truncated && <Text style={s.small}>{i18n.t("mail.excerpt")}</Text>}
       <Button small icon={Mail} onPress={() => open({ type: "mail", mail: message })}>
-        Open email
+        {i18n.t("mail.openEmail")}
       </Button>
     </Card>
   );
