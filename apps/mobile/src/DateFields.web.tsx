@@ -1,4 +1,5 @@
 import { Text, View } from "react-native";
+import { i18n } from "./i18n";
 import { colors, s } from "./ui";
 
 interface DateFieldsProps {
@@ -24,9 +25,11 @@ export default function DateFields({ label, date, time, allDay, onChange }: Date
   return (
     <View style={{ flexDirection: "row", gap: 12, marginBottom: 16 }}>
       <View style={{ flex: 1.2, gap: 7 }}>
-        <Text style={[s.small, { fontWeight: "600", color: colors.text }]}>{label} date</Text>
+        <Text style={[s.small, { fontWeight: "600", color: colors.text }]}>
+          {i18n.t("a11y.datePart", { label })}
+        </Text>
         <input
-          aria-label={`${label} date`}
+          aria-label={i18n.t("a11y.datePart", { label })}
           type="date"
           value={date}
           onChange={(e) => onChange(e.target.value, time)}
@@ -35,9 +38,11 @@ export default function DateFields({ label, date, time, allDay, onChange }: Date
       </View>
       {!allDay && (
         <View style={{ flex: 1, gap: 7 }}>
-          <Text style={[s.small, { fontWeight: "600", color: colors.text }]}>{label} time</Text>
+          <Text style={[s.small, { fontWeight: "600", color: colors.text }]}>
+            {i18n.t("a11y.timePart", { label })}
+          </Text>
           <input
-            aria-label={`${label} time`}
+            aria-label={i18n.t("a11y.timePart", { label })}
             type="time"
             value={time}
             onChange={(e) => onChange(date, e.target.value)}

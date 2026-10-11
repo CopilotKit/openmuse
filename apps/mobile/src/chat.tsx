@@ -36,6 +36,7 @@ import {
   threadLocked,
 } from "./conversation-run";
 import { DesktopToolCard } from "./desktop-tool-card";
+import { i18n, names } from "./i18n";
 import { confirmedJevSelection, displayJevUserMessage, latestJevPanelId } from "./jev-actions";
 import { JevInteractionContext, JevToolCard } from "./jev-tool-card";
 import { MailToolCard } from "./mail-tool-card";
@@ -178,12 +179,20 @@ function ServerToolCard({
   if (task) return <TaskThreadCard task={task} />;
   return (
     <Card style={{ padding: 16, gap: 10 }}>
-      <Text style={s.heading}>{loading ? `Saving ${name.toLowerCase()}…` : name}</Text>
+      <Text style={s.heading}>
+        {loading
+          ? i18n.t("chat.saving", { name: name.toLowerCase() })
+          : name === "Tracking"
+            ? i18n.t("goals.tracking")
+            : name === "Memory"
+              ? i18n.t("settings.memory")
+              : name}
+      </Text>
       {parsed.success && parsed.data.error ? (
         <ErrorNotice error={parsed.data.error} />
       ) : (
         <Text style={s.muted}>
-          {loading ? "Waiting for the server." : "Open the workspace to see the saved result."}
+          {loading ? i18n.t("chat.waitingServer") : i18n.t("chat.openSaved")}
         </Text>
       )}
       <Button
@@ -511,7 +520,7 @@ export function ChatScreen({
           <>
             <ErrorNotice error={historyError} />
             <Button onPress={() => setHistoryAttempt((attempt) => attempt + 1)}>
-              Retry loading conversation
+              {i18n.t("chat.retryHistory")}
             </Button>
           </>
         )}
@@ -535,25 +544,30 @@ export function ChatScreen({
                 maxWidth: 350,
               }}
             >
-              A little help. A lot more room for life.
+              {i18n.t("chat.help")}
             </Text>
             <Text style={[s.muted, { maxWidth: 320, textAlign: "center", lineHeight: 23 }]}>
-              Tell me what’s on your mind. I can make a plan, work with your apps, and use my
-              computer to help.
+              {i18n.t("chat.helpDetail")}
             </Text>
             <View style={{ width: "100%", maxWidth: 360, marginTop: 14, gap: 8 }}>
               {[
                 {
-                  text: "Find cool things on Hacker News",
+                  key: "news",
+                  text: i18n.t("chat.suggestNews"),
                   action: () => enqueue("Check out Hacker News for cool stuff"),
                 },
                 {
-                  text: "Summarize copilotkit.ai",
+                  key: "site",
+                  text: i18n.t("chat.suggestSite"),
                   action: () => enqueue("Summarize copilotkit.ai"),
                 },
-                { text: "Keep an eye on a website", action: () => navigate("goals") },
+                {
+                  key: "watch",
+                  text: i18n.t("chat.suggestWatch"),
+                  action: () => navigate("goals"),
+                },
               ].map((item) => (
-                <Button key={item.text} onPress={item.action}>
+                <Button key={item.key} onPress={item.action}>
                   {item.text}
                 </Button>
               ))}
@@ -568,6 +582,10 @@ export function ChatScreen({
                   ? displayJevUserMessage(
                       message.content,
                       messages.slice(0, messages.indexOf(message)),
+                      {
+                        unavailable: i18n.t("jev.unavailable"),
+                        selected: (label) => i18n.t("jev.selected", { label }),
+                      },
                     )
                   : message.content
                 : "";
@@ -709,7 +727,7 @@ export function ChatScreen({
         {(!richThreads || selection.id === mainId) && <BackgroundUpdates />}
         {(busy || agent.isRunning) && (
           <View
-            accessibilityLabel="Agent is working"
+            accessibilityLabel={i18n.t("a11y.agentWorking")}
             style={[
               s.row,
               {
@@ -750,7 +768,7 @@ export function ChatScreen({
                 .catch((e) => setError(e instanceof Error ? e.message : String(e)));
             }}
           >
-            Retry response
+            {i18n.t("chat.retryResponse")}
           </Button>
         )}
       </ScrollView>
@@ -765,7 +783,7 @@ export function ChatScreen({
             list.current?.scrollToEnd({ animated: true });
           }}
         >
-          Latest messages
+          {i18n.t("chat.latest")}
         </Button>
       )}
       <KeyboardAvoidingView
@@ -781,7 +799,7 @@ export function ChatScreen({
               void saveHistory().catch((e) => setSaveError(String(e)));
             }}
           >
-            Retry saving conversation
+            {i18n.t("chat.retrySave")}
           </Button>
         )}
         {!!outbox.pending.length && (
@@ -792,11 +810,19 @@ export function ChatScreen({
             {outbox.pending.map((message) => (
               <View key={message.id} style={[s.row, { gap: 8 }]}>
                 <Text numberOfLines={2} style={[s.muted, { flex: 1 }]}>
-                  {displayJevUserMessage(message.text, messages)}
+                  {displayJevUserMessage(message.text, messages, {
+                    unavailable: i18n.t("jev.unavailable"),
+                    selected: (label) => i18n.t("jev.selected", { label }),
+                  })}
                 </Text>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`Remove queued message: ${displayJevUserMessage(message.text, messages)}`}
+                  accessibilityLabel={i18n.t("a11y.removeQueued", {
+                    text: displayJevUserMessage(message.text, messages, {
+                      unavailable: i18n.t("jev.unavailable"),
+                      selected: (label) => i18n.t("jev.selected", { label }),
+                    }),
+                  })}
                   hitSlop={10}
                   onPress={() => {
                     queue.remove(message.id);
@@ -820,14 +846,14 @@ export function ChatScreen({
                   flush();
                 }}
               >
-                Send queued messages
+                {i18n.t("chat.sendQueued")}
               </Button>
             )}
           </View>
         )}
         {picking && (
           <Card style={{ marginBottom: 12, padding: 15 }}>
-            <Text style={s.heading}>Add a document</Text>
+            <Text style={s.heading}>{i18n.t("chat.addDocument")}</Text>
             <ScrollView style={{ maxHeight: 230 }} keyboardShouldPersistTaps="handled">
               {w.files.length ? (
                 w.files.map((f) => (
@@ -845,7 +871,7 @@ export function ChatScreen({
                   />
                 ))
               ) : (
-                <Text style={s.muted}>Import a PDF in Files to use it in a conversation.</Text>
+                <Text style={s.muted}>{i18n.t("chat.importFirst", names)}</Text>
               )}
             </ScrollView>
             <Button
@@ -853,7 +879,7 @@ export function ChatScreen({
               onPress={() => setPicking(false)}
               style={{ alignSelf: "flex-end", marginTop: 8 }}
             >
-              Done
+              {i18n.t("common.done")}
             </Button>
           </Card>
         )}
@@ -879,7 +905,7 @@ export function ChatScreen({
                   <Pressable
                     key={f.id}
                     accessibilityRole="button"
-                    accessibilityLabel={`Remove attachment: ${f.name}`}
+                    accessibilityLabel={i18n.t("a11y.removeAttachment", { name: f.name })}
                     onPress={() => setAttachments((ids) => ids.filter((id) => id !== f.id))}
                     style={[
                       s.row,
@@ -908,7 +934,7 @@ export function ChatScreen({
           <View style={[s.row, { gap: 7, alignItems: "flex-end" }]}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Attach a document"
+              accessibilityLabel={i18n.t("a11y.attachDocument")}
               accessibilityState={{ expanded: picking }}
               onPress={() => setPicking(!picking)}
               style={({ pressed }) => ({
@@ -925,7 +951,7 @@ export function ChatScreen({
               </Text>
             </Pressable>
             <TextInput
-              accessibilityLabel="Message OpenMuse"
+              accessibilityLabel={i18n.t("a11y.messageAgent", names)}
               value={draft}
               onChangeText={setDraft}
               onContentSizeChange={(event) =>
@@ -933,12 +959,12 @@ export function ChatScreen({
               }
               placeholder={
                 !isReady
-                  ? "Connecting…"
+                  ? i18n.t("chat.connecting")
                   : !loaded
                     ? historyError
-                      ? "Conversation unavailable"
-                      : "Loading conversation…"
-                    : "Message…"
+                      ? i18n.t("chat.unavailable")
+                      : i18n.t("chat.loading")
+                    : i18n.t("chat.placeholder")
               }
               placeholderTextColor="#949B9F"
               selectionColor={colors.blueDark}
@@ -975,7 +1001,7 @@ export function ChatScreen({
             />
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={replying ? "Stop reply" : "Send message"}
+              accessibilityLabel={replying ? i18n.t("chat.stopReply") : i18n.t("chat.sendMessage")}
               disabled={!replying && (!draft.trim() || !loaded || !isReady)}
               onPress={replying ? () => void stop() : send}
               style={({ pressed }) => ({

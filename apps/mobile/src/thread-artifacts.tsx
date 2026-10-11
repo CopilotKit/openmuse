@@ -5,6 +5,7 @@ import type { Artifact, BrowserSession } from "../../../packages/domain/src";
 import type { AgentArtifact, AgentTask } from "../../../packages/domain/src/agent";
 import { ArtifactCard, TaskCard } from "./agent-ui";
 import { BrowserThreadCard } from "./computer";
+import { i18n, names } from "./i18n";
 import { Button, Card, colors, ErrorNotice, s } from "./ui";
 import { useWorkspace } from "./workspace";
 
@@ -13,7 +14,7 @@ export function FileThreadCard({ file }: { file: Artifact }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Open PDF: ${file.name}`}
+      accessibilityLabel={i18n.t("a11y.openPdf", { ...names, name: file.name })}
       onPress={() => open({ type: "file", file })}
       style={{ width: "100%", maxWidth: 440 }}
     >
@@ -38,9 +39,7 @@ export function FileThreadCard({ file }: { file: Artifact }) {
               </View>
             ))
           ) : (
-            <Text style={s.muted}>
-              {file.pageCount} {file.pageCount === 1 ? "page" : "pages"} · Tap to read the document
-            </Text>
+            <Text style={s.muted}>{i18n.t("files.tapToRead", { count: file.pageCount })}</Text>
           )}
         </View>
         <View style={[s.row, { gap: 13 }]}>
@@ -51,7 +50,7 @@ export function FileThreadCard({ file }: { file: Artifact }) {
             <Text numberOfLines={2} style={s.heading}>
               {file.name}
             </Text>
-            <Text style={s.muted}>PDF</Text>
+            <Text style={s.muted}>{names.pdf}</Text>
           </View>
           <ChevronRight size={18} color={colors.muted} />
         </View>
@@ -106,7 +105,7 @@ export function TaskThreadCard({ task }: { task: AgentTask }) {
       <ErrorNotice error={error} />
       {!!error && (
         <Button small onPress={() => setAttempt((value) => value + 1)}>
-          Reload task results
+          {i18n.t("files.reloadResults")}
         </Button>
       )}
     </View>

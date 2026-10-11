@@ -145,14 +145,24 @@ function panelForAction(messages: readonly unknown[], action: JevAction): JevPan
   return null;
 }
 
-export function displayJevUserMessage(text: string, precedingMessages: readonly unknown[]): string {
+export function displayJevUserMessage(
+  text: string,
+  precedingMessages: readonly unknown[],
+  copy: {
+    unavailable: string;
+    selected: (label: string) => string;
+  } = {
+    unavailable: "Choice unavailable",
+    selected: (label) => `Selected: ${label}`,
+  },
+): string {
   if (!text.startsWith(jevActionPrefix)) return text;
   const action = actionFromText(text);
-  if (!action) return "Choice unavailable";
+  if (!action) return copy.unavailable;
   const option = panelForAction(precedingMessages, action)?.options.find(
     (candidate) => candidate.id === action.optionId,
   );
-  return option ? `Selected: ${option.label}` : "Choice unavailable";
+  return option ? copy.selected(option.label) : copy.unavailable;
 }
 
 export function confirmedJevSelection(

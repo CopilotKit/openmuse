@@ -22,3 +22,9 @@ test("future timestamps beyond clock skew show a date instead of just now", () =
 test("an unparseable timestamp is returned unchanged", () => {
   assert.equal(relativeDate("not-a-date", now), "not-a-date");
 });
+
+test("relative time follows the requested locale", () => {
+  assert.equal(relativeDate("2026-09-30T11:59:30Z", now, "zh-Hans"), "刚刚");
+  assert.equal(relativeDate("2026-09-30T11:30:00Z", now, "zh-Hans"), "30分钟前");
+  assert.equal(relativeDate("2026-09-30T09:00:00Z", now, "zh-Hans"), "3小时前");
+});

@@ -20,8 +20,10 @@ import type {
   ComputerDirectory,
   ComputerSnapshot,
 } from "../../../packages/domain/src/computer";
+import { statusLabel } from "./agent-ui";
 import { useComputerDraft } from "./computer-drafts";
 import { DesktopStream } from "./desktop-stream";
+import { i18n, names } from "./i18n";
 import { Button, Card, colors, Empty, ErrorNotice, Field, LinkRow, s, timeLabel } from "./ui";
 import { useWorkspace } from "./workspace";
 
@@ -156,17 +158,17 @@ export function LinuxWorkspace({
         <View style={[s.row, { gap: 12 }]}>
           <Terminal size={24} color={colors.blueDark} />
           <View style={{ flex: 1, gap: 4 }}>
-            <Text style={s.heading}>Your Linux workspace</Text>
+            <Text style={s.heading}>{i18n.t("computer.linux")}</Text>
             <Text style={s.muted}>
               {running
-                ? "Running · files persist when stopped"
+                ? i18n.t("computer.runningNote")
                 : snapshot?.status === "stopped"
-                  ? "Stopped · your files are saved"
+                  ? i18n.t("computer.stoppedNote")
                   : snapshot?.status === "unconfigured"
-                    ? "Set up the computer to get started"
+                    ? i18n.t("computer.setupNote")
                     : snapshot?.status === "error"
-                      ? "Connection needs attention"
-                      : "Connecting…"}
+                      ? i18n.t("computer.attentionNote")
+                      : i18n.t("computer.connecting")}
             </Text>
           </View>
           {!snapshot && !error && <ActivityIndicator color={colors.blueDark} />}
@@ -176,11 +178,11 @@ export function LinuxWorkspace({
           <View style={[s.row, { gap: 8, flexWrap: "wrap" }]}>
             {running ? (
               <Button icon={Power} busy={busy} onPress={() => void control("stop")}>
-                Stop computer
+                {i18n.t("computer.stop")}
               </Button>
             ) : (
               <Button primary icon={Play} busy={busy} onPress={() => void control("start")}>
-                Start computer
+                {i18n.t("computer.start")}
               </Button>
             )}
             <Button
@@ -192,7 +194,7 @@ export function LinuxWorkspace({
                   .catch((e) => setError(message(e)))
               }
             >
-              Refresh
+              {i18n.t("common.refresh")}
             </Button>
           </View>
         )}
@@ -206,7 +208,7 @@ export function LinuxWorkspace({
               .catch((e) => setError(message(e)))
           }
         >
-          Retry connection
+          {i18n.t("browser.retryConnection")}
         </Button>
       )}
       {snapshot?.enabled && (
@@ -215,10 +217,10 @@ export function LinuxWorkspace({
             {editingCommand || command.length > 0 || snapshot.commands.length === 0 ? (
               <View style={{ borderRadius: 22, backgroundColor: "#F1F3F4", padding: 18, gap: 8 }}>
                 <Text style={{ color: colors.muted, fontSize: 12, fontFamily: mono }}>
-                  TERMINAL
+                  {i18n.t("computer.terminal")}
                 </Text>
                 <Field
-                  label="Working directory"
+                  label={i18n.t("computer.workingDirectory")}
                   value={cwd}
                   onChangeText={setCwd}
                   autoCapitalize="none"
@@ -226,7 +228,7 @@ export function LinuxWorkspace({
                   style={{ fontFamily: mono }}
                 />
                 <Field
-                  label="Command"
+                  label={i18n.t("computer.command")}
                   value={command}
                   onChangeText={setCommand}
                   placeholder="pwd"
@@ -246,7 +248,7 @@ export function LinuxWorkspace({
                       setCommand((text) => text.replace(/[‘’]/g, "'").replace(/[“”]/g, '"'))
                     }
                   >
-                    Use straight quotes
+                    {i18n.t("computer.straightQuotes")}
                   </Button>
                 )}
                 <Button
@@ -256,11 +258,11 @@ export function LinuxWorkspace({
                   disabled={!running || !command.trim() || busy}
                   onPress={() => void run()}
                 >
-                  Run command
+                  {i18n.t("computer.run")}
                 </Button>
                 <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 18 }}>
                   {snapshot.network === "enabled"
-                    ? "Runs on your computer with internet access. Start GUI apps with >/dev/null 2>&1 & to open them on the Desktop tab."
+                    ? i18n.t("computer.commandHint", { command: ">/dev/null 2>&1 &" })
                     : "Runs on your computer. Network access is off. Use Browser for the web."}
                 </Text>
               </View>
@@ -271,19 +273,15 @@ export function LinuxWorkspace({
                 disabled={!running || busy || !!commandRunning}
                 onPress={() => setEditingCommand(true)}
               >
-                New command
+                {i18n.t("computer.newCommand")}
               </Button>
             )}
-            {!!commandRunning && (
-              <Text style={s.muted}>
-                Working… The result will appear here. Stop the computer to end running commands.
-              </Text>
-            )}
+            {!!commandRunning && <Text style={s.muted}>{i18n.t("computer.working")}</Text>}
             {snapshot.commands.length === 0 ? (
               <Empty
                 icon={Terminal}
-                title="Ready for your first command"
-                detail="Run scripts, work with files, or ask your agent to create something here."
+                title={i18n.t("computer.firstCommand")}
+                detail={i18n.t("computer.firstCommandDetail")}
               />
             ) : (
               [...snapshot.commands]
@@ -293,7 +291,7 @@ export function LinuxWorkspace({
             )}
             {snapshot.commands.length > 5 && (
               <Button small onPress={() => setShowHistory(!showHistory)}>
-                {showHistory ? "Show recent commands" : "Earlier commands"}
+                {showHistory ? i18n.t("computer.showRecent") : i18n.t("computer.earlierCommands")}
               </Button>
             )}
           </View>
@@ -315,8 +313,8 @@ function ComputerDesktop({ running }: { running: boolean }) {
     return (
       <Empty
         icon={Monitor}
-        title="Desktop is off"
-        detail="Start the computer to see and control its desktop."
+        title={i18n.t("computer.desktopOff")}
+        detail={i18n.t("computer.desktopOffDetail")}
       />
     );
   return (
@@ -350,7 +348,7 @@ function CommandReceipt({ run }: { run: ComputerCommand }) {
             },
           ]}
         >
-          {run.status.replace("_", " ")}
+          {statusLabel(run.status)}
           {run.exitCode !== undefined ? ` · exit ${run.exitCode}` : ""}
         </Text>
         <Text style={s.small}>{timeLabel(run.startedAt)}</Text>
@@ -379,13 +377,9 @@ function CommandReceipt({ run }: { run: ComputerCommand }) {
             </Text>
           )}
           {!run.stdout && !run.stderr && run.status !== "running" && (
-            <Text style={s.small}>No output</Text>
+            <Text style={s.small}>{i18n.t("computer.noOutput")}</Text>
           )}
-          {run.truncated && (
-            <Text style={s.small}>
-              Output reached the display limit. Write large results to a file.
-            </Text>
-          )}
+          {run.truncated && <Text style={s.small}>{i18n.t("computer.outputLimit")}</Text>}
         </>
       )}
       {!!(run.stdout || run.stderr) && (
@@ -530,7 +524,7 @@ function ComputerFiles({ running, active }: { running: boolean; active: boolean 
   return (
     <View style={{ gap: 12 }}>
       <View style={s.between}>
-        <Text style={s.heading}>Workspace files</Text>
+        <Text style={s.heading}>{i18n.t("computer.files")}</Text>
         {(busy || loading) && <ActivityIndicator color={colors.blueDark} />}
       </View>
       <Text selectable style={[s.small, { fontFamily: mono }]}>
@@ -538,13 +532,11 @@ function ComputerFiles({ running, active }: { running: boolean; active: boolean 
       </Text>
       <ErrorNotice error={error} />
       {!!notice && <Text style={[s.small, { color: "#248258" }]}>{notice}</Text>}
-      {!running && (
-        <Text style={s.muted}>Start the computer to browse or edit its saved files.</Text>
-      )}
+      {!running && <Text style={s.muted}>{i18n.t("computer.filesNeedStart")}</Text>}
       {editor ? (
         <>
           <Field
-            label="File path"
+            label={i18n.t("computer.filePath")}
             value={editor.path}
             onChangeText={(value) => setEditor({ ...editor, path: value })}
             autoCorrect={false}
@@ -552,7 +544,7 @@ function ComputerFiles({ running, active }: { running: boolean; active: boolean 
             style={{ fontFamily: mono }}
           />
           <Field
-            label="File contents"
+            label={i18n.t("computer.fileContents")}
             value={editor.text}
             onChangeText={(value) => setEditor({ ...editor, text: value })}
             multiline
@@ -571,7 +563,7 @@ function ComputerFiles({ running, active }: { running: boolean; active: boolean 
               disabled={!running || !editor.path.trim()}
               onPress={() => void save()}
             >
-              Save file
+              {i18n.t("computer.saveFile")}
             </Button>
             <Button
               disabled={busy}
@@ -595,7 +587,7 @@ function ComputerFiles({ running, active }: { running: boolean; active: boolean 
                 icon={ArrowLeft}
                 onPress={() => setPath(path.slice(0, path.lastIndexOf("/")) || "/workspace")}
               >
-                Up
+                {i18n.t("computer.up")}
               </Button>
             )}
             <Button
@@ -612,7 +604,7 @@ function ComputerFiles({ running, active }: { running: boolean; active: boolean 
                 });
               }}
             >
-              New file
+              {i18n.t("computer.newFile")}
             </Button>
             <Button
               small
@@ -620,7 +612,7 @@ function ComputerFiles({ running, active }: { running: boolean; active: boolean 
               icon={FolderPlus}
               onPress={() => setFolder("")}
             >
-              New folder
+              {i18n.t("computer.newFolder")}
             </Button>
             <Button
               small
@@ -628,7 +620,7 @@ function ComputerFiles({ running, active }: { running: boolean; active: boolean 
               icon={RefreshCw}
               onPress={() => setRetry(retry + 1)}
             >
-              Refresh files
+              {i18n.t("computer.refreshFiles")}
             </Button>
             <Button
               small
@@ -641,10 +633,8 @@ function ComputerFiles({ running, active }: { running: boolean; active: boolean 
           </View>
           {importing && (
             <Card>
-              <Text style={s.heading}>Choose a saved PDF</Text>
-              <Text style={[s.small, { marginTop: 6 }]}>
-                Copies into this folder. A file with the same name will be replaced.
-              </Text>
+              <Text style={s.heading}>{i18n.t("files.chooseSavedPdf", names)}</Text>
+              <Text style={[s.small, { marginTop: 6 }]}>{i18n.t("files.pdfCopies")}</Text>
               {workspace.files.map((file) => (
                 <LinkRow
                   key={file.id}
@@ -654,14 +644,14 @@ function ComputerFiles({ running, active }: { running: boolean; active: boolean 
                 />
               ))}
               {!workspace.files.length && (
-                <Text style={s.muted}>Add a document from mail or Files first.</Text>
+                <Text style={s.muted}>{i18n.t("files.addDocumentFirst")}</Text>
               )}
             </Card>
           )}
           {folder !== undefined && (
             <Card style={{ gap: 8 }}>
               <Field
-                label="Folder name"
+                label={i18n.t("computer.folderName")}
                 value={folder}
                 onChangeText={setFolder}
                 autoCapitalize="none"
@@ -674,10 +664,10 @@ function ComputerFiles({ running, active }: { running: boolean; active: boolean 
                   busy={busy}
                   onPress={() => void mkdir()}
                 >
-                  Create folder
+                  {i18n.t("computer.createFolder")}
                 </Button>
                 <Button disabled={busy} onPress={() => setFolder(undefined)}>
-                  Cancel
+                  {i18n.t("common.cancel")}
                 </Button>
               </View>
             </Card>
@@ -714,8 +704,8 @@ function ComputerFiles({ running, active }: { running: boolean; active: boolean 
             directory.entries.length === 0 && (
               <Empty
                 icon={Folder}
-                title="A little space to create"
-                detail="Add a file here, or ask your agent to make one in its workspace."
+                title={i18n.t("computer.spaceToCreate")}
+                detail={i18n.t("computer.spaceToCreateDetail")}
               />
             )}
         </>
