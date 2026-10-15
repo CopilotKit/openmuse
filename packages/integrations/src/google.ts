@@ -10,6 +10,7 @@ import {
   eventDraftSchema,
   type Mail,
 } from "../../domain/src/index.ts";
+import { clip, wellFormed } from "../../domain/src/text.ts";
 
 const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
 const CALENDAR = "https://www.googleapis.com/calendar/v3";
@@ -286,16 +287,6 @@ function decoderFor(charset: string): TextDecoder {
     return new TextDecoder();
   }
 }
-/**
- * Replace unpaired surrogates with U+FFFD so encodeURIComponent cannot throw "URI
- * malformed" on a sender-supplied name. (String.prototype.toWellFormed, but the
- * project targets ES2023.)
- */
-const wellFormed = (value: string): string =>
-  value.replace(
-    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
-    "\uFFFD",
-  );
 
 function mapMessage(message: z.infer<typeof messageSchema>): Mail {
   const metadata = headers(message.payload);
@@ -625,7 +616,7 @@ export class GoogleClient {
         const result = z
           .object({ error: z.object({ message: z.string() }) })
           .safeParse(await readJson(response));
-        if (result.success) detail = result.data.error.message.slice(0, 500);
+        if (result.success) detail = clip(result.data.error.message, 500);
       } catch {
         /* Preserve the definite HTTP rejection even if its body is not JSON. */
       }

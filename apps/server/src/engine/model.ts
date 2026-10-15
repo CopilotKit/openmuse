@@ -5,6 +5,7 @@ import { defineTool } from "@copilotkit/runtime/v2";
 import { z } from "zod";
 import type { AgentTask } from "../../../../packages/domain/src/agent.ts";
 import { emailDraftSchema, eventDraftSchema } from "../../../../packages/domain/src/index.ts";
+import { clip } from "../../../../packages/domain/src/text.ts";
 import { computerInstructions, computerTools } from "../computer-tools.ts";
 import { searchDescription, searchInputSchema, searchInstructions } from "../search.ts";
 import type { AgentService } from "./service.ts";
@@ -177,7 +178,7 @@ export async function executeModelTask(
                 kind: "web",
                 title: source.title ?? source.url,
                 url: source.url,
-                excerpt: source.excerpts.join("\n").slice(0, 500),
+                excerpt: clip(source.excerpts.join("\n"), 500),
               });
             }
             task = await ctx.checkpoint({ evidence });
@@ -207,11 +208,11 @@ export async function executeModelTask(
                     kind: "web",
                     title: page.title,
                     url: page.url,
-                    excerpt: page.text.slice(0, 500),
+                    excerpt: clip(page.text, 500),
                   },
                 ],
               });
-              return { ...page, text: page.text.slice(0, 30000) };
+              return { ...page, text: clip(page.text, 30000) };
             },
           ),
         ]
@@ -385,7 +386,7 @@ export async function executeModelTask(
     });
   });
   if (runError) throw new Error(runError);
-  if (text) await ctx.event("step", "Agent update", text.slice(0, 12000));
+  if (text) await ctx.event("step", "Agent update", clip(text, 12000));
   return (
     outcome ?? {
       status: "waiting_input",
