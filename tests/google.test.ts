@@ -121,6 +121,35 @@ test("mail decodes folded adjacent encoded words without inserting header whites
   }
 });
 
+test("mail joins adjacent encoded words that split a multibyte character", async () => {
+  // RFC 2047 §6.2: adjacent encoded words are concatenated before decoding, so a
+  // sender that wraps a long header at the encoded-word length limit may break a
+  // multibyte character across two words. "Visit résumé" split inside each é.
+  const word = (bytes: number[]) => `=?UTF-8?B?${Buffer.from(bytes).toString("base64")}?=`;
+  const visitResume = [..."Visit résumé"].flatMap((char) => [...Buffer.from(char)]);
+  const splitAt = visitResume.indexOf(0xc3) + 1;
+  const subjects = [
+    `${word(visitResume.slice(0, splitAt))} ${word(visitResume.slice(splitAt))}`,
+    `${word(visitResume.slice(0, splitAt))}\r\n ${word(visitResume.slice(splitAt))}`,
+    "=?UTF-8?Q?Visit_r=C3?= =?UTF-8?Q?=A9sum=C3=A9?=",
+  ];
+  for (const value of subjects) {
+    const client = clientWith(() =>
+      json({
+        id: "thread1",
+        messages: [
+          {
+            id: "msg1",
+            threadId: "thread1",
+            payload: { headers: [{ name: "Subject", value }] },
+          },
+        ],
+      }),
+    );
+    assert.equal((await client.getThread("thread1"))[0].subject, "Visit résumé", value);
+  }
+});
+
 test("header decoding preserves spaces encoded inside words and next to plain text", async () => {
   const client = clientWith(() =>
     json({

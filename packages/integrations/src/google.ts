@@ -149,27 +149,52 @@ function decodeHeader(value: string): string {
   // RFC 2047: ignore linear whitespace, including folding, between encoded words.
   return value
     .replace(/(\?=)(?:[ \t]|\r\n[ \t])+(?==\?)/g, "$1")
-    .replace(
-      /=\?([^?]+)\?([bq])\?([^?]*)\?=/gi,
-      (original, charset: string, encoding: string, text: string) => {
+    .replace(/(?:=\?[^?]+\?[bq]\?[^?]*\?=)+/gi, (run) => {
+      // §6.2: adjacent encoded words concatenate before decoding, so a header
+      // wrapped at the encoded-word length limit can split a multibyte
+      // character across words; join same-charset bytes before decoding.
+      const word = /=\?([^?]+)\?([bq])\?([^?]*)\?=/gi;
+      let decoded = "";
+      let pending: Buffer | null = null;
+      let pendingCharset = "";
+      let pendingOriginal = "";
+      const flush = () => {
+        if (pending === null) return;
         try {
-          const bytes =
-            encoding.toLowerCase() === "b"
-              ? Buffer.from(text, "base64")
-              : Buffer.from(
-                  text
-                    .replace(/_/g, " ")
-                    .replace(/=([0-9a-f]{2})/gi, (_, code: string) =>
-                      String.fromCharCode(Number.parseInt(code, 16)),
-                    ),
-                  "latin1",
-                );
-          return new TextDecoder(charset.split("*")[0]).decode(bytes);
+          decoded += new TextDecoder(pendingCharset).decode(pending);
         } catch {
-          return original;
+          decoded += pendingOriginal;
         }
-      },
-    );
+        pending = null;
+        pendingOriginal = "";
+      };
+      for (const match of run.matchAll(word)) {
+        const [original, charset, encoding, text] = match;
+        const normalized = charset.split("*")[0].toLowerCase();
+        const bytes =
+          encoding.toLowerCase() === "b"
+            ? Buffer.from(text, "base64")
+            : Buffer.from(
+                text
+                  .replace(/_/g, " ")
+                  .replace(/=([0-9a-f]{2})/gi, (_, code: string) =>
+                    String.fromCharCode(Number.parseInt(code, 16)),
+                  ),
+                "latin1",
+              );
+        if (pending !== null && normalized === pendingCharset) {
+          pending = Buffer.concat([pending, bytes]);
+          pendingOriginal += original;
+        } else {
+          flush();
+          pending = bytes;
+          pendingCharset = normalized;
+          pendingOriginal = original;
+        }
+      }
+      flush();
+      return decoded;
+    });
 }
 function decodeSnippet(value: string): string {
   const entities: Record<string, string> = {
