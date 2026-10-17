@@ -139,6 +139,19 @@ test("header decoding preserves spaces encoded inside words and next to plain te
   assert.equal((await client.getThread("thread1"))[0].subject, "Re: Visit résumé notes");
 });
 
+test("a numeric character reference to a surrogate stays literal instead of failing the list", async () => {
+  // String.fromCodePoint throws on surrogate code points; a sender can put the
+  // literal text &#xD800; in a snippet, and one such message must not reject
+  // the whole list (Promise.all over per-message parses).
+  const client = clientWith((request) =>
+    new URL(request.url).pathname.endsWith("/messages")
+      ? json({ messages: [{ id: "msg1" }] })
+      : json({ id: "msg1", threadId: "thread1", snippet: "Entity notes: &#xD800; and &#55296;" }),
+  );
+  const [mail] = await client.listMail();
+  assert.equal(mail.body, "Entity notes: &#xD800; and &#55296;");
+});
+
 test("a body charset TextDecoder does not know falls back to UTF-8 instead of failing the list", async () => {
   const charsets: Record<string, string> = { known: "utf-8", unknown: "unknown-8bit" };
   const bodies: Record<string, string> = { known: "Opening hours", unknown: "Café tickets" };

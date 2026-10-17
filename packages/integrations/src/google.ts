@@ -188,7 +188,10 @@ function decodeSnippet(value: string): string {
         entity[1].toLowerCase() === "x"
           ? Number.parseInt(entity.slice(2), 16)
           : Number.parseInt(entity.slice(1), 10);
-      return code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : original;
+      // Surrogates are not scalar values: fromCodePoint throws on them, and one
+      // such reference in a snippet must not reject the whole message list.
+      const scalar = code >= 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff);
+      return scalar ? String.fromCodePoint(code) : original;
     },
   );
 }
