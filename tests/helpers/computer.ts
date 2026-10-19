@@ -59,7 +59,7 @@ export function sandbox(running = true, owner = "owner") {
       RestartPolicy: { Name: "no" },
     },
     Mounts: [{ Type: "volume", Name: identity.volume, Destination: "/workspace", RW: true }],
-    NetworkSettings: { Networks: { none: {} } },
+    NetworkSettings: { Networks: { none: {} } as Record<string, unknown> },
     State: { Running: running },
   };
 }

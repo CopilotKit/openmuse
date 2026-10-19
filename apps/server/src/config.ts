@@ -55,6 +55,7 @@ export interface Config {
   computerImage?: string;
   computerDeploymentId?: string;
   computerProvider?: ComputerProvider;
+  computerNetwork?: ComputerNetwork;
   computerE2bTemplate?: string;
   e2bApiKey?: string;
   allowedOrigins: string[];
@@ -62,6 +63,7 @@ export interface Config {
 }
 
 export type ComputerProvider = "docker" | "e2b-desktop";
+export type ComputerNetwork = "none" | "bridge";
 
 /** Pinned so live rankings do not shift when TypeSafe moves the `jev-latest` alias. */
 export const defaultJevModel = "jev-1.13.0";
@@ -120,6 +122,9 @@ export function readConfig(): Config {
   const computerProvider = process.env.COMPUTER_PROVIDER?.trim() || "docker";
   if (computerProvider !== "docker" && computerProvider !== "e2b-desktop")
     throw new Error("COMPUTER_PROVIDER must be docker or e2b-desktop");
+  const computerNetwork = process.env.COMPUTER_NETWORK?.trim() || "none";
+  if (computerNetwork !== "none" && computerNetwork !== "bridge")
+    throw new Error("COMPUTER_NETWORK must be none or bridge");
   const e2bApiKey = process.env.E2B_API_KEY?.trim();
   if (process.env.COMPUTER_ENABLED === "true" && computerProvider === "e2b-desktop") {
     if (!e2bApiKey)
@@ -161,6 +166,7 @@ export function readConfig(): Config {
     computerImage: process.env.COMPUTER_IMAGE ?? "openmuse-computer:local",
     computerDeploymentId: process.env.COMPUTER_DEPLOYMENT_ID,
     computerProvider,
+    computerNetwork,
     computerE2bTemplate: process.env.COMPUTER_E2B_TEMPLATE?.trim() || "desktop",
     e2bApiKey,
     allowedOrigins: (
