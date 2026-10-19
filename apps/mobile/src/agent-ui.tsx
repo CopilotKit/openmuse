@@ -72,6 +72,21 @@ function errorText(e: unknown) {
 function activeTask(task: AgentTask) {
   return !["succeeded", "failed", "cancelled"].includes(task.status);
 }
+function recoverableDocumentValues(task: AgentTask) {
+  if (task.kind !== "document" || task.status !== "waiting_input") return {};
+  const values = task.input.fields;
+  if (!values || typeof values !== "object" || Array.isArray(values)) return {};
+  const supported = Array.isArray(task.state.missingFields) ? task.state.missingFields : [];
+  const result: Record<string, string | boolean> = {};
+  for (const field of supported) {
+    if (!field || typeof field !== "object" || !("name" in field) || !("type" in field)) continue;
+    const name = String(field.name);
+    const value = (values as Record<string, unknown>)[name];
+    if (field.type === "checkbox" ? typeof value === "boolean" : typeof value === "string")
+      result[name] = value as string | boolean;
+  }
+  return result;
+}
 export function AgentStatus() {
   const { data, error, refresh } = useAgentWorkspace();
   if (data?.worker.running && !error) return null;
@@ -298,6 +313,7 @@ export function TaskDetail({ taskId }: { taskId: string }) {
       .then((result) => {
         if (active) {
           setDetail(result);
+          setFields(recoverableDocumentValues(result.task));
           setError("");
         }
       })
@@ -372,6 +388,21 @@ export function TaskDetail({ taskId }: { taskId: string }) {
           : "",
     )
     .filter(Boolean);
+  const fieldErrors = Array.isArray(task?.state.fieldErrors)
+    ? task.state.fieldErrors
+        .filter(
+          (issue) =>
+            issue &&
+            typeof issue === "object" &&
+            "name" in issue &&
+            "expected" in issue &&
+            "received" in issue,
+        )
+        .map(
+          (issue) =>
+            `${String(issue.name)}: expected ${String(issue.expected)}, received ${String(issue.received)}`,
+        )
+    : [];
   return (
     <Sheet
       title={task?.title || "Task"}
@@ -452,6 +483,7 @@ export function TaskDetail({ taskId }: { taskId: string }) {
           {task.status === "waiting_input" && (
             <Card style={{ backgroundColor: colors.sky, gap: 10 }}>
               <Text style={s.heading}>{task.question || "A detail from you will help"}</Text>
+              <ErrorNotice error={fieldErrors.join("\n")} />
               {fieldNames.map((name) =>
                 missing.some(
                   (f) => typeof f === "object" && f && f.name === name && f.type === "checkbox",
