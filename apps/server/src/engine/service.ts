@@ -1089,11 +1089,14 @@ export class AgentService {
     const currentHash = hash(text);
     const previousHash =
       typeof task.state.lastHash === "string" ? task.state.lastHash : monitor.lastHash;
+    // Collapse whitespace in the watched text the same way as in the page text, so a
+    // trailing space from a phone keyboard or a line break in the value still matches.
+    const wanted = monitor.value.replace(/\s+/g, " ").trim().toLowerCase();
     const matched =
       monitor.condition === "change"
         ? Boolean(previousHash && previousHash !== currentHash)
         : monitor.condition === "contains"
-          ? text.toLowerCase().includes(monitor.value.toLowerCase())
+          ? text.toLowerCase().includes(wanted)
           : this.matchesPrice(text, Number(monitor.value));
     const previouslyMatched = Boolean(task.state.matched);
     // For change watches, keep the page lines and a relative-time-free fingerprint of the whole text.
