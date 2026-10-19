@@ -57,11 +57,14 @@ export interface Config {
   computerProvider?: ComputerProvider;
   computerE2bTemplate?: string;
   e2bApiKey?: string;
+  boxcomputeApiKey?: string;
+  boxcomputeApiUrl?: string;
+  boxcomputeWorkspaceId?: string;
   allowedOrigins: string[];
   trustProxy?: boolean;
 }
 
-export type ComputerProvider = "docker" | "e2b-desktop";
+export type ComputerProvider = "docker" | "e2b-desktop" | "boxcompute";
 
 /** Pinned so live rankings do not shift when TypeSafe moves the `jev-latest` alias. */
 export const defaultJevModel = "jev-1.13.0";
@@ -118,8 +121,12 @@ export function readConfig(): Config {
   if (jevMode === "live" && !typesafeApiKey)
     throw new Error("JEV_MODE=live requires a nonblank TYPESAFE_API_KEY");
   const computerProvider = process.env.COMPUTER_PROVIDER?.trim() || "docker";
-  if (computerProvider !== "docker" && computerProvider !== "e2b-desktop")
-    throw new Error("COMPUTER_PROVIDER must be docker or e2b-desktop");
+  if (
+    computerProvider !== "docker" &&
+    computerProvider !== "e2b-desktop" &&
+    computerProvider !== "boxcompute"
+  )
+    throw new Error("COMPUTER_PROVIDER must be docker, e2b-desktop or boxcompute");
   const e2bApiKey = process.env.E2B_API_KEY?.trim();
   if (process.env.COMPUTER_ENABLED === "true" && computerProvider === "e2b-desktop") {
     if (!e2bApiKey)
@@ -129,6 +136,16 @@ export function readConfig(): Config {
     if (!process.env.COMPUTER_DEPLOYMENT_ID?.trim())
       throw new Error(
         "COMPUTER_PROVIDER=e2b-desktop requires a unique COMPUTER_DEPLOYMENT_ID, e.g. from `openssl rand -hex 12`",
+      );
+  }
+  const boxcomputeApiKey = process.env.BOXCOMPUTE_API_KEY?.trim();
+  if (process.env.COMPUTER_ENABLED === "true" && computerProvider === "boxcompute") {
+    if (!boxcomputeApiKey)
+      throw new Error("COMPUTER_PROVIDER=boxcompute requires a nonblank BOXCOMPUTE_API_KEY");
+    // VMs are matched by metadata across the whole BoxCompute account, like E2B sandboxes.
+    if (!process.env.COMPUTER_DEPLOYMENT_ID?.trim())
+      throw new Error(
+        "COMPUTER_PROVIDER=boxcompute requires a unique COMPUTER_DEPLOYMENT_ID, e.g. from `openssl rand -hex 12`",
       );
   }
   const port = Number(process.env.PORT ?? 8787);
@@ -163,6 +180,9 @@ export function readConfig(): Config {
     computerProvider,
     computerE2bTemplate: process.env.COMPUTER_E2B_TEMPLATE?.trim() || "desktop",
     e2bApiKey,
+    boxcomputeApiKey,
+    boxcomputeApiUrl: process.env.BOXCOMPUTE_API_URL?.trim() || undefined,
+    boxcomputeWorkspaceId: process.env.BOXCOMPUTE_WORKSPACE_ID?.trim() || undefined,
     allowedOrigins: (
       process.env.ALLOWED_ORIGINS ?? "http://localhost:8081,http://127.0.0.1:8081"
     ).split(","),

@@ -27,7 +27,8 @@
     "start:worker": "node dist/apps/server/src/worker-entry.js",
     "dev:browser": "node --env-file=.env --import tsx apps/worker/src/index.ts",
     "test:computer": "tsx --test apps/computer/smoke.test.ts",
-    "test:computer:e2b-desktop": "tsx --test apps/computer/e2b-desktop-smoke.test.ts"
+    "test:computer:e2b-desktop": "tsx --test apps/computer/e2b-desktop-smoke.test.ts",
+    "test:computer:boxcompute": "tsx --test apps/computer/boxcompute-smoke.test.ts"
   },
   "dependencies": {
     "@ag-ui/client": "0.0.59",
