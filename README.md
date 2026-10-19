@@ -38,6 +38,8 @@ The 38-second iPhone and 42-second desktop web demos show the current interface,
 
 The [Jev aquarium-trip demo](docs/demos/jev-generative-ui.md) walks through a fictional school email, clarification choices, sourced exhibit cards, hands-on preference refinement, and a confirmed selection. [Watch the 83-second live Jev recording](assets/demos/2026-09-23/jev-live-web.mp4), where TypeSafe Jev makes the decisions and a scripted agent keeps the trip scenario repeatable. A [scripted-decision sample recording](assets/demos/2026-09-23/jev-web.mp4) is also available.
 
+The independent [Cloudflare price agent example](examples/cloudflare-price-agent/README.md) uses Agents SDK, Browser Run and DeepSeek Flash for saved conversations, browser price checks and Live View. It has its own setup and does not require the OpenMuse server or Docker computer.
+
 ## What it is
 
 OpenMuse is a personal-agent application with an agent computer, visible work, and rich results. It runs its own server, task worker, and browser worker. You can inspect and change the source under the MIT license.

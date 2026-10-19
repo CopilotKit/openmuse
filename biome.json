@@ -6,6 +6,8 @@
       "**",
       "!**/node_modules",
       "!**/.expo",
+      "!**/.wrangler",
+      "!**/worker-configuration.d.ts",
       "!**/dist",
       "!**/ios",
       "!**/android",

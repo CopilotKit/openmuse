@@ -1,0 +1,35 @@
+name: Cloudflare price agent demo
+on:
+  pull_request:
+    paths:
+      - "examples/cloudflare-price-agent/**"
+      - ".github/workflows/cloudflare-price-agent.yml"
+  push:
+    branches: [main]
+    paths:
+      - "examples/cloudflare-price-agent/**"
+      - ".github/workflows/cloudflare-price-agent.yml"
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: examples/cloudflare-price-agent
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Generate Worker bindings
+        run: |
+          printf 'DEEPSEEK_API_KEY="ci-placeholder"\nDEMO_ACCESS_TOKEN="ci-placeholder-at-least-32-characters"\n' > .dev.vars
+          npm run types
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
