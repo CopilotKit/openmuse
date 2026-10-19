@@ -1,5 +1,6 @@
 import { Agent } from "agents";
 import { type BrowserStatus, DemoBrowser } from "./browser";
+import { type BrowserCheckpoint, checkpointInfo, encodeCheckpoint } from "./checkpoint";
 import {
   completion,
   DemoError,
@@ -15,6 +16,7 @@ interface DemoState {
   screenshot: string;
   events: { id: string; type: string; message: string; at: string }[];
   revision: number;
+  checkpointError?: { conversationId: string; message: string } | null;
 }
 
 type Conversation = { id: string; title: string; created_at: string };
@@ -35,6 +37,11 @@ export type DemoAction =
   | { type: "run"; conversationId: string; prompt: string; requestId: string }
   | { type: "stop" }
   | { type: "close" }
+  | {
+      type: "browser";
+      operation: "save" | "save-close" | "reconnect" | "disconnect" | "forget";
+      conversationId: string;
+    }
   | { type: "live"; conversationId: string };
 
 export class PriceAgent extends Agent<Env, DemoState> {
@@ -46,6 +53,7 @@ export class PriceAgent extends Agent<Env, DemoState> {
     revision: 0,
   };
   private controller: AbortController | null = null;
+  private browserBusy = false;
   private browserDriver = new DemoBrowser(
     this.env.BROWSER,
     () => this.state.browser,
@@ -53,6 +61,31 @@ export class PriceAgent extends Agent<Env, DemoState> {
     (screenshot) => this.setState({ ...this.state, screenshot, revision: this.state.revision + 1 }),
     async (sessionId) => {
       await this.schedule(1200, "expireBrowser", { sessionId });
+    },
+    {
+      read: (id) => {
+        const row = this.ctx.storage.sql
+          .exec<{ profile_json: string }>(
+            "SELECT profile_json FROM demo_browser_checkpoints WHERE conversation_id = ?",
+            id,
+          )
+          .toArray()[0];
+        return row ? (JSON.parse(row.profile_json) as BrowserCheckpoint) : null;
+      },
+      write: (id, checkpoint) => {
+        const profile = encodeCheckpoint(checkpoint);
+        this.ctx.storage.sql.exec(
+          "INSERT INTO demo_browser_checkpoints(conversation_id, profile_json, info_json) VALUES (?, ?, ?) ON CONFLICT(conversation_id) DO UPDATE SET profile_json = excluded.profile_json, info_json = excluded.info_json",
+          id,
+          profile,
+          JSON.stringify(checkpointInfo(checkpoint)),
+        );
+        this.setState({ ...this.state, checkpointError: null, revision: this.state.revision + 1 });
+      },
+      failed: (conversationId, message) => {
+        this.setState({ ...this.state, checkpointError: { conversationId, message } });
+        this.event("error", message);
+      },
     },
   );
 
@@ -74,6 +107,9 @@ export class PriceAgent extends Agent<Env, DemoState> {
           break;
         case "close":
           value = await this.closeBrowser();
+          break;
+        case "browser":
+          value = await this.browserOperation(action.conversationId, action.operation);
           break;
         case "live":
           value = await this.liveView(action.conversationId);
@@ -104,6 +140,9 @@ export class PriceAgent extends Agent<Env, DemoState> {
     this.ctx.storage.sql.exec(
       "CREATE INDEX IF NOT EXISTS demo_turns_conversation ON demo_turns(conversation_id, created_at)",
     );
+    this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS demo_browser_checkpoints (
+      conversation_id TEXT PRIMARY KEY, profile_json TEXT NOT NULL, info_json TEXT NOT NULL
+    )`);
     if (this.state.running) {
       const answer = "上一次操作因服务中断而未完成，可以继续追问；未自动重放浏览器操作。";
       this.ctx.storage.sql.exec(
@@ -135,23 +174,29 @@ export class PriceAgent extends Agent<Env, DemoState> {
   }
 
   async createConversation(): Promise<Conversation> {
-    if (this.state.running) throw new DemoError("请先停止当前操作", 409, "run_busy");
+    if (this.state.running || this.browserBusy)
+      throw new DemoError("请先等待或停止当前操作", 409, "run_busy");
     if (this.listConversations().length >= 40)
       throw new DemoError("此 demo 最多保留 40 个对话", 409);
-    await this.browserDriver.close();
-    const conversation = {
-      id: crypto.randomUUID(),
-      title: "新对话",
-      created_at: new Date().toISOString(),
-    };
-    this.ctx.storage.sql.exec(
-      "INSERT INTO demo_conversations(id, title, created_at) VALUES (?, ?, ?)",
-      conversation.id,
-      conversation.title,
-      conversation.created_at,
-    );
-    this.setState({ ...this.state, events: [], screenshot: "" });
-    return conversation;
+    this.browserBusy = true;
+    try {
+      await this.browserDriver.preserveAndClose();
+      const conversation = {
+        id: crypto.randomUUID(),
+        title: "新对话",
+        created_at: new Date().toISOString(),
+      };
+      this.ctx.storage.sql.exec(
+        "INSERT INTO demo_conversations(id, title, created_at) VALUES (?, ?, ?)",
+        conversation.id,
+        conversation.title,
+        conversation.created_at,
+      );
+      this.setState({ ...this.state, events: [], screenshot: "" });
+      return conversation;
+    } finally {
+      this.browserBusy = false;
+    }
   }
 
   private requireConversation(id: string): Conversation {
@@ -172,6 +217,14 @@ export class PriceAgent extends Agent<Env, DemoState> {
           )
           .toArray()
       : [];
+    const saved = conversationId
+      ? this.ctx.storage.sql
+          .exec<{ info_json: string }>(
+            "SELECT info_json FROM demo_browser_checkpoints WHERE conversation_id = ?",
+            conversationId,
+          )
+          .toArray()[0]
+      : null;
     return {
       conversations: this.listConversations(),
       turns: turns.map(({ model_json: _model, prices_json, ...turn }) => ({
@@ -179,6 +232,12 @@ export class PriceAgent extends Agent<Env, DemoState> {
         prices: JSON.parse(prices_json) as Evidence[],
       })),
       running: this.state.running,
+      browserBusy: this.browserBusy,
+      checkpoint: saved ? (JSON.parse(saved.info_json) as ReturnType<typeof checkpointInfo>) : null,
+      checkpointError:
+        this.state.checkpointError?.conversationId === conversationId
+          ? this.state.checkpointError.message
+          : null,
       browser: this.state.browser?.conversationId === conversationId ? this.state.browser : null,
       events: this.state.events,
       revision: this.state.revision,
@@ -224,7 +283,8 @@ export class PriceAgent extends Agent<Env, DemoState> {
       }
       return { id: requestId, status: existing.status, answer: existing.answer, replay: true };
     }
-    if (this.state.running) throw new DemoError("已有操作进行中，请先等待或停止", 409, "run_busy");
+    if (this.state.running || this.browserBusy)
+      throw new DemoError("已有操作进行中，请先等待或停止", 409, "run_busy");
     if (!this.env.DEEPSEEK_API_KEY)
       throw new DemoError("尚未配置模型密钥", 503, "model_unconfigured");
     const previous = this.history(conversationId);
@@ -298,10 +358,33 @@ export class PriceAgent extends Agent<Env, DemoState> {
             }
           } catch (error) {
             if (controller.signal.aborted) throw error;
+            const detail = error instanceof Error ? error : null;
+            const upstreamStatus = detail?.message.match(
+              /(?:code:|status:|response:)\s*(\d{3})/i,
+            )?.[1];
+            const quotaKind = detail?.message.match(
+              /(?:Browser\w*Limit|Browser\w*Exceeded|(?:daily|concurrent|rate|time)[\w ]{0,50}(?:limit|exceeded))/i,
+            )?.[0];
+            console.error(
+              JSON.stringify({
+                event: "browser_operation_error",
+                operation: call.function.name,
+                stage: this.browserDriver.stage,
+                kind: detail?.name ?? "unknown",
+                locations: detail?.stack
+                  ?.match(/(?:worker\.js|browser\.ts|agent\.ts):\d+:\d+/g)
+                  ?.slice(0, 3),
+                upstreamStatus,
+                quotaKind,
+              }),
+            );
+            if (error instanceof DemoError && error.code === "browser_rate_limited") throw error;
             const message =
               error instanceof DemoError
                 ? error.message
-                : "浏览器操作未成功。页面可能无法访问、需要人工操作，或远程浏览器暂不可用。";
+                : upstreamStatus === "429"
+                  ? `云端浏览器达到配额或速率限制${quotaKind ? `（${quotaKind}）` : ""}，请检查账户用量后重试`
+                  : `浏览器操作未成功（${this.browserDriver.stage}），请稍后重试`;
             result = { success: false, error: message };
             this.event("error", message);
           }
@@ -355,6 +438,7 @@ export class PriceAgent extends Agent<Env, DemoState> {
   }
 
   async stop() {
+    if (this.browserBusy) throw new DemoError("浏览器正在保存或连接，请稍后再试", 409, "run_busy");
     this.controller?.abort("用户停止");
     this.event("stop", "正在停止操作并关闭浏览器");
     await this.browserDriver.close();
@@ -362,14 +446,77 @@ export class PriceAgent extends Agent<Env, DemoState> {
   }
 
   async closeBrowser() {
-    if (this.state.running) throw new DemoError("请先停止当前操作", 409);
-    await this.browserDriver.close();
-    this.event("closed", "浏览器已关闭，对话和价格记录仍保留");
-    return { closed: true };
+    if (this.state.running || this.browserBusy) throw new DemoError("请先等待或停止当前操作", 409);
+    this.browserBusy = true;
+    try {
+      await this.browserDriver.close();
+      this.event("closed", "浏览器已关闭，已保存的存档、对话和价格记录仍保留");
+      return { closed: true };
+    } finally {
+      this.browserBusy = false;
+    }
+  }
+
+  async browserOperation(
+    conversationId: string,
+    operation: Extract<DemoAction, { type: "browser" }>["operation"],
+  ) {
+    this.requireConversation(conversationId);
+    if (this.state.running || this.browserBusy)
+      throw new DemoError("请先等待或停止当前操作", 409, "run_busy");
+    this.browserBusy = true;
+    try {
+      if (operation === "reconnect") {
+        const result = await this.browserDriver.reconnect(conversationId);
+        this.event(
+          "restored",
+          result.mode === "restored"
+            ? "已从存档恢复到新浏览器；网站可能要求重新登录"
+            : "已重新连接原浏览器",
+        );
+        return result;
+      }
+      if (operation === "forget") {
+        if (this.state.browser?.conversationId === conversationId)
+          throw new DemoError("请先关闭浏览器，再删除已保存的存档", 409);
+        this.ctx.storage.sql.exec(
+          "DELETE FROM demo_browser_checkpoints WHERE conversation_id = ?",
+          conversationId,
+        );
+        this.setState({ ...this.state, checkpointError: null });
+        this.event("forgotten", "浏览器存档已删除，对话和价格记录仍保留");
+        return { deleted: true };
+      }
+      if (this.state.browser && this.state.browser.conversationId !== conversationId)
+        throw new DemoError("当前浏览器属于另一个对话，请切回该对话操作", 409);
+      if (operation === "disconnect") {
+        const result = await this.browserDriver.disconnect(conversationId);
+        this.event("disconnected", "控制连接已断开，原浏览器可能仍运行并计费；可重连或直接关闭");
+        return result;
+      }
+      const checkpoint = await this.browserDriver.save(conversationId);
+      this.event("saved", "已保存当前页面、Cookie 和当前站点存储");
+      if (operation === "save-close") {
+        try {
+          await this.browserDriver.close();
+        } catch {
+          throw new DemoError(
+            "存档已保存，但尚未确认浏览器关闭成功，请点击直接关闭重试",
+            502,
+            "browser_close_failed",
+          );
+        }
+        this.event("closed", "已保存并关闭浏览器，可点击恢复/重连继续");
+      }
+      return { checkpoint, closed: operation === "save-close" };
+    } finally {
+      this.browserBusy = false;
+    }
   }
 
   async liveView(conversationId: string) {
     this.requireConversation(conversationId);
+    if (this.browserBusy) return { url: null, sessionId: null };
     return {
       url: await this.browserDriver.liveView(conversationId),
       sessionId: this.state.browser?.sessionId ?? null,

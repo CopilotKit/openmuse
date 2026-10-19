@@ -3,9 +3,9 @@
 A private, single-owner demo using **Cloudflare Agents SDK + Browser Run + DeepSeek Flash**. It is independent of the OpenMuse Docker computer and does not deploy E2B or Cloudflare Sandbox containers.
 
 - Multiple saved conversations and follow-up questions, persisted in an Agent's SQLite storage.
-- A browser reused across turns, navigation/search/input tools, and Cloudflare Live View links.
+- A browser reused across turns, navigation/search/input tools, Cloudflare Live View, and per-conversation browser checkpoints.
 - Price cards retain the exact observed text, currency, source URL and observation time. Recording rejects a product name, amount or source absent from the latest page read. This is an evidence check, not a guarantee that two occurrences on a page refer to the same offer.
-- Stop/close controls, a five-minute turn limit, a ten-step agent loop capped at sixteen tool actions, a two-minute browser idle timeout and a twenty-minute scheduled close. Browser expiry loses cookies/tabs; chat history remains.
+- Stop/close controls, a five-minute turn limit, a ten-step agent loop capped at sixteen tool actions, a two-minute browser idle timeout and a twenty-minute scheduled close. A later browser can restore the saved current page, cookies and current-origin web storage; chat history remains.
 - A clearly labelled, fictitious product catalogue at `/demo-catalog` for reproducible browser tests. The UI also offers a real-web search prompt. CAPTCHA/login/access restrictions are reported rather than bypassed.
 
 ## Setup
@@ -46,6 +46,33 @@ Alternatively, keep the token out of the frontend using the loopback proxy. Crea
 
 Run `npm run local` and open `http://127.0.0.1:8791`. `OPENMUSE_CF_SETTINGS` can select another settings file. `OPENMUSE_CF_PORT` changes the local port. The proxy only accepts loopback Host/Origin values, forwards to the configured Worker and adds demo authorization server-side. It respects `https_proxy` for outbound access. It does not execute the model or host a local browser.
 
+## Save, close and reconnect
+
+The browser panel provides explicit controls:
+
+| Control | Behavior |
+| --- | --- |
+| Save | Save the current URL, cookies (including HttpOnly), current-origin localStorage/sessionStorage and scroll position; keep the browser running. |
+| Save and close | Persist first, then close the browser. A failed save keeps the browser open and preserves the previous checkpoint. |
+| Restore / reconnect | Reconnect to the existing browser when it is still alive; otherwise create a new browser and restore this conversation's checkpoint. |
+| Disconnect only | Detach the control connection and the embedded viewer. The browser can remain active and billable. This is not a close operation. |
+| Close directly | Close without capturing new changes; retain the last saved checkpoint. |
+| Delete checkpoint | Delete the stored browser credentials and page state after closing the browser; keep chat and price records. |
+
+Successful agent page reads/actions automatically save a checkpoint. After manual Live View interaction, click **Save** or **Save and close** to capture the latest state. Selecting an old chat alone does not restart its browser. The UI displays the last save time and save failures.
+
+Checkpoints are separate SQLite rows per conversation. Cookie and storage values never enter the synchronized Agent state, the model tool results or public API metadata. Checkpoints may contain website login credentials, remain private to the demo owner, and can be deleted from the UI. The 512 KiB UTF-8 limit rejects a new checkpoint before replacing the old one. Opaque partitioned cookies cause an explicit save failure.
+
+Restoration covers one current page and its origin's web storage. It does not save other tabs, IndexedDB, cache, downloads, browser history or JavaScript memory. A restored page runs again and websites may expire/revoke sessions or ask for login. This is a Browser Run checkpoint, not a Linux sandbox snapshot. A session that has already disappeared without a checkpoint cannot be recovered retroactively.
+
+The explicit live smoke check creates fictional test sessions, exercises the deployed browser and model, and closes its browser on exit. It incurs provider usage and is not run in CI. Start the local proxy first:
+
+```sh
+npm run test:cloud
+```
+
+It uses `/api/health` to find the public fixture URL, verifies same-session reconnect and restoration into a new browser, and checks isolation/deletion. Evidence and its remote-browser screenshot go into ignored `.wrangler/` files. Set `OPENMUSE_DEMO_URL` and `DEMO_ACCESS_TOKEN` to target another private deployment.
+
 ## Boundaries
 
 This is a private demo, not a multitenant service. Navigation rejects IP literals, local/internal hostnames, nonstandard ports and embedded credentials, including browser subrequests. This hostname policy is not DNS pinning or a replacement for Cloudflare's network isolation. No browser receives the DeepSeek key or the Cloudflare account token. Live View URLs are temporary bearer credentials: fetched only after authentication, never included in model messages, persisted or logged.
@@ -54,7 +81,13 @@ Live View embeds when the browser permits it; the same panel always provides a s
 
 The root project's server/mobile/browser worker dependencies are unchanged. This example has its own npm lockfile and CI check; it does not deploy from CI.
 
-## Verified on a deployed Worker
+## Checkpoint validation status
+
+Twenty-two unit tests and fifteen local Miniflare HTTP checks passed. Browser lifecycle tests use a simulated protocol boundary and execute the serialized page callbacks in an isolated JavaScript context. They cover detaching without an implicit viewer reconnect, restoring cookies and both web stores into a fresh browser, expired sessions, recovery cleanup, failed/oversized saves, host-only cookies and conversation isolation. They are not real Chrome acceptance.
+
+The deployed Cloudflare attempt is **blocked**: creating a browser returned HTTP 429, `Rate limit exceeded`, before a checkpoint could be created. The limits endpoint reported zero active sessions, maximum concurrency four, and one allowed acquisition; the provider did not identify the exact restriction. Real cloud save/restore and full chat-interface visual acceptance remain unverified. Re-run `npm run test:cloud` after the Browser Run restriction clears. No billing-plan change was made.
+
+## Initial deployment verification
 
 The following acceptance checks ran against the actual Cloudflare deployment on 2026-10-19, using `deepseek-flash`:
 

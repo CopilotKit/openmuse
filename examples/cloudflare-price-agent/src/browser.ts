@@ -1,4 +1,10 @@
 import puppeteer from "@cloudflare/puppeteer";
+import {
+  type BrowserCheckpoint,
+  checkpointInfo,
+  cookieParameters,
+  restorableCookies,
+} from "./checkpoint";
 import { DemoError, publicUrl, record, text } from "./core";
 
 type BrowserConnection = Awaited<ReturnType<typeof puppeteer.launch>>;
@@ -17,6 +23,8 @@ export interface BrowserStatus {
   url: string;
   title: string;
   startedAt: number;
+  connection?: "connected" | "disconnected";
+  restoredFromCheckpoint?: boolean;
 }
 
 export interface Observation {
@@ -26,41 +34,96 @@ export interface Observation {
   observedAt: string;
   elements: { ref: number; tag: string; label: string; href: string | null }[];
   restarted: boolean;
+  restoredFromCheckpoint: boolean;
 }
 
 export class DemoBrowser {
+  stage = "准备浏览器";
   private connection: BrowserConnection | null = null;
   private page: BrowserPage | null = null;
   private restartNotice = false;
 
   constructor(
-    private readonly binding: Env["BROWSER"],
+    private readonly binding: Pick<Env["BROWSER"], "fetch" | "getSession">,
     private readonly status: () => BrowserStatus | null,
     private readonly update: (status: BrowserStatus | null) => void,
     private readonly screenshot: (image: string) => void,
     private readonly onCreated: (sessionId: string) => Promise<void>,
+    private readonly checkpoints: {
+      read: (conversationId: string) => BrowserCheckpoint | null;
+      write: (conversationId: string, checkpoint: BrowserCheckpoint) => void;
+      failed: (conversationId: string, message: string) => void;
+    },
   ) {}
 
-  async ensure(conversationId: string): Promise<BrowserPage> {
-    let saved = this.status();
-    if (saved && saved.conversationId !== conversationId) {
-      await this.close();
-      saved = null;
-    }
-    if (this.connection?.isConnected() && this.page && !this.page.isClosed()) return this.page;
-    if (saved) {
+  private async connectExisting(conversationId: string): Promise<boolean> {
+    const saved = this.status();
+    if (!saved || saved.conversationId !== conversationId) return false;
+    if (!this.connection?.isConnected()) {
       try {
+        if (!(await this.binding.getSession(saved.sessionId))) {
+          this.page = null;
+          this.update(null);
+          this.restartNotice = true;
+          return false;
+        }
         this.connection = await puppeteer.connect(this.binding, saved.sessionId);
       } catch (error) {
         if (!expired(error))
           throw new DemoError("无法重新连接云端浏览器，请稍后重试", 502, "browser_unavailable");
         this.connection = null;
+        this.page = null;
         this.update(null);
         this.restartNotice = true;
+        return false;
       }
     }
+    if (!this.page || this.page.isClosed()) {
+      const pages = await this.connection.pages();
+      this.page =
+        pages.find((page) => page.url() === saved.url && !page.isClosed()) ??
+        pages.find((page) => !page.isClosed()) ??
+        (await this.connection.newPage());
+      await this.prepare(this.page);
+    }
+    this.update({ ...saved, connection: "connected" });
+    return true;
+  }
+
+  async ensure(conversationId: string, requireSaved = false): Promise<BrowserPage> {
+    this.stage = "连接浏览器";
+    const saved = this.status();
+    if (saved && saved.conversationId !== conversationId) {
+      await this.preserveAndClose();
+    }
+    if (await this.connectExisting(conversationId)) {
+      if (!this.page) throw new DemoError("浏览器页面暂不可用", 502);
+      return this.page;
+    }
+    const checkpoint = this.checkpoints.read(conversationId);
+    if (requireSaved && !checkpoint)
+      throw new DemoError(
+        "此对话没有存活的浏览器或已保存的存档，请先发送浏览任务",
+        404,
+        "checkpoint_not_found",
+      );
     if (!this.connection?.isConnected()) {
-      this.connection = await puppeteer.launch(this.binding, { keep_alive: 120_000 });
+      this.stage = "启动浏览器";
+      try {
+        this.connection = await puppeteer.launch(this.binding, { keep_alive: 120_000 });
+      } catch (error) {
+        if (error instanceof Error && /(?:code:|status:|response:)\s*429\b/i.test(error.message))
+          throw new DemoError(
+            "Cloudflare 拒绝启动浏览器（HTTP 429，配额或速率限制），原存档仍保留，请稍后重试",
+            429,
+            "browser_rate_limited",
+          );
+        throw new DemoError(
+          "无法启动云端浏览器，原存档仍保留，请稍后重试",
+          502,
+          "browser_unavailable",
+        );
+      }
       const sessionId = this.connection.sessionId();
       if (!sessionId) {
         await this.connection.close();
@@ -72,15 +135,37 @@ export class DemoBrowser {
         url: "about:blank",
         title: "新浏览器",
         startedAt: Date.now(),
+        connection: "connected",
       });
       await this.onCreated(sessionId);
     }
     const pages = await this.connection.pages();
     this.page = pages.find((page) => !page.isClosed()) ?? (await this.connection.newPage());
-    await this.page.setViewport({ width: 1280, height: 800 });
-    await this.page.setRequestInterception(true);
-    this.page.removeAllListeners("request");
-    this.page.on("request", (request) => {
+    await this.prepare(this.page);
+    if (checkpoint) {
+      try {
+        await this.restore(checkpoint, this.page);
+        const status = this.status();
+        if (status) this.update({ ...status, restoredFromCheckpoint: true });
+      } catch {
+        // Keep the checkpoint intact, and do not leave a half-restored browser running.
+        await this.close();
+        throw new DemoError(
+          "存档恢复未完成，原存档仍保留，请重试恢复",
+          502,
+          "checkpoint_restore_failed",
+        );
+      }
+    }
+    return this.page;
+  }
+
+  private async prepare(page: BrowserPage) {
+    this.stage = "配置页面";
+    await page.setViewport({ width: 1280, height: 800 });
+    await page.setRequestInterception(true);
+    page.removeAllListeners("request");
+    page.on("request", (request) => {
       try {
         const url = request.url();
         if (/^https?:/i.test(url)) publicUrl(url);
@@ -89,33 +174,167 @@ export class DemoBrowser {
         void request.abort("blockedbyclient").catch(() => {});
       }
     });
-    this.page.on("dialog", (dialog) => {
+    page.removeAllListeners("dialog");
+    page.on("dialog", (dialog) => {
       void dialog.dismiss().catch(() => {});
     });
-    return this.page;
   }
 
-  private async inspect(page: BrowserPage): Promise<Observation> {
+  private async capture(conversationId: string): Promise<BrowserCheckpoint> {
+    if (!(await this.connectExisting(conversationId)) || !this.page)
+      throw new DemoError(
+        "原浏览器已失效，之前的存档仍保留，请点击恢复/重连",
+        409,
+        "browser_expired",
+      );
+    const page = this.page;
+    const url = publicUrl(page.url());
+    const storage = await page.evaluate(() => {
+      const stores: [string, string][][] = [];
+      for (const source of [localStorage, sessionStorage]) {
+        const result: [string, string][] = [];
+        let bytes = 0;
+        for (let i = 0; i < source.length; i++) {
+          const key = source.key(i);
+          if (key === null) continue;
+          const value = source.getItem(key) ?? "";
+          bytes += new TextEncoder().encode(key + value).byteLength;
+          if (bytes > 524_288 || result.length >= 1000) throw new Error("Storage limit");
+          result.push([key, value]);
+        }
+        stores.push(result);
+      }
+      return {
+        origin: location.origin,
+        local: stores[0],
+        session: stores[1],
+        scrollX,
+        scrollY,
+      };
+    });
+    const cdp = await page.createCDPSession();
+    try {
+      const { cookies } = await cdp.send("Storage.getCookies");
+      if (cookies.some((cookie) => cookie.partitionKeyOpaque))
+        throw new DemoError(
+          "存在无法恢复的 opaque 分区 Cookie，未覆盖之前的存档",
+          409,
+          "unsupported_cookie",
+        );
+      const checkpoint: BrowserCheckpoint = {
+        version: 1,
+        savedAt: new Date().toISOString(),
+        url,
+        title: (await page.title()).slice(0, 200),
+        storage,
+        cookies: cookies.map(cookieParameters),
+      };
+      if (page.url() !== url)
+        throw new DemoError("页面在保存期间跳转了，请重新保存", 409, "checkpoint_changed");
+      this.checkpoints.write(conversationId, checkpoint);
+      const current = this.status();
+      if (current?.conversationId === conversationId)
+        this.update({ ...current, url, title: checkpoint.title });
+      return checkpoint;
+    } finally {
+      // Cleanup must not report a persisted checkpoint as an unsuccessful save.
+      await cdp.detach().catch(() => {});
+    }
+  }
+
+  async save(conversationId: string) {
+    try {
+      return checkpointInfo(await this.capture(conversationId));
+    } catch (error) {
+      if (error instanceof DemoError) throw error;
+      throw new DemoError(
+        "读取浏览器状态失败，未覆盖之前的存档，请重试",
+        502,
+        "checkpoint_save_failed",
+      );
+    }
+  }
+
+  private async restore(checkpoint: BrowserCheckpoint, page: BrowserPage) {
+    publicUrl(checkpoint.url);
+    const cdp = await page.createCDPSession();
+    try {
+      await cdp.send("Storage.setCookies", { cookies: restorableCookies(checkpoint.cookies) });
+    } finally {
+      await cdp.detach().catch(() => {});
+    }
+    const script = await page.evaluateOnNewDocument((storage) => {
+      if (window !== window.top || location.origin !== storage.origin) return;
+      localStorage.clear();
+      sessionStorage.clear();
+      for (const [key, value] of storage.local) localStorage.setItem(key, value);
+      for (const [key, value] of storage.session) sessionStorage.setItem(key, value);
+    }, checkpoint.storage);
+    try {
+      await page.goto(checkpoint.url, { waitUntil: "domcontentloaded", timeout: 25_000 });
+      await page.evaluate(
+        ({ scrollX, scrollY }) => window.scrollTo(scrollX, scrollY),
+        checkpoint.storage,
+      );
+    } finally {
+      // Never overwrite later edits or logouts on every navigation.
+      await page.removeScriptToEvaluateOnNewDocument(script.identifier);
+    }
+  }
+
+  async reconnect(conversationId: string) {
+    const previousId = this.status()?.sessionId;
+    const page = await this.ensure(conversationId, true);
+    // A restored page may redirect to login. Preserve the original checkpoint
+    // until an explicit save or a subsequent agent operation.
+    await this.inspect(page, false);
+    return { mode: this.status()?.sessionId === previousId ? "reconnected" : "restored" };
+  }
+
+  async disconnect(conversationId: string) {
+    const saved = this.status();
+    if (!saved || saved.conversationId !== conversationId)
+      throw new DemoError("此对话没有浏览器连接", 409, "browser_not_found");
+    await this.connection?.disconnect();
+    this.connection = null;
+    this.page = null;
+    this.update({ ...saved, connection: "disconnected" });
+    return { disconnected: true, browserMayStillBeRunning: true };
+  }
+
+  async preserveAndClose() {
+    const saved = this.status();
+    if (saved && saved.url !== "about:blank") {
+      try {
+        await this.save(saved.conversationId);
+      } catch (error) {
+        if (!(error instanceof DemoError) || error.code !== "browser_expired") throw error;
+      }
+    }
+    await this.close();
+  }
+
+  private async inspect(page: BrowserPage, saveCheckpoint = true): Promise<Observation> {
+    this.stage = "读取页面";
     const url = page.url();
     if (url !== "about:blank") publicUrl(url);
     const snapshot = await page.evaluate(() => {
-      const visible = (node: Element) => {
-        const box = node.getBoundingClientRect();
-        const style = getComputedStyle(node);
-        return (
-          box.width > 0 &&
-          box.height > 0 &&
-          style.visibility !== "hidden" &&
-          style.display !== "none"
-        );
-      };
       for (const element of document.querySelectorAll("[data-openmuse-ref]")) {
         element.removeAttribute("data-openmuse-ref");
       }
       const elements = [
         ...document.querySelectorAll("a,button,input,textarea,select,[role=button],[role=link]"),
       ]
-        .filter(visible)
+        .filter((node) => {
+          const box = node.getBoundingClientRect();
+          const style = getComputedStyle(node);
+          return (
+            box.width > 0 &&
+            box.height > 0 &&
+            style.visibility !== "hidden" &&
+            style.display !== "none"
+          );
+        })
         .slice(0, 100)
         .map((node, ref) => {
           node.setAttribute("data-openmuse-ref", String(ref));
@@ -151,7 +370,23 @@ export class DemoBrowser {
     }
     const restarted = this.restartNotice;
     this.restartNotice = false;
-    return { ...snapshot, url, observedAt: new Date().toISOString(), restarted };
+    if (saveCheckpoint && url !== "about:blank") {
+      try {
+        await this.save(this.status()?.conversationId ?? "");
+      } catch (error) {
+        this.checkpoints.failed(
+          this.status()?.conversationId ?? "",
+          error instanceof DemoError ? error.message : "自动保存失败，之前的存档仍保留",
+        );
+      }
+    }
+    return {
+      ...snapshot,
+      url,
+      observedAt: new Date().toISOString(),
+      restarted,
+      restoredFromCheckpoint: this.status()?.restoredFromCheckpoint ?? false,
+    };
   }
 
   async read(conversationId: string): Promise<Observation> {
@@ -166,6 +401,7 @@ export class DemoBrowser {
         name === "browser_search"
           ? `https://www.bing.com/search?q=${encodeURIComponent(text(args.query, "搜索词", 1000))}`
           : publicUrl(args.url);
+      this.stage = "打开网页";
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25_000 });
     } else if (name === "browser_read") {
       // Reading also refreshes element references after manual interaction.
@@ -224,7 +460,8 @@ export class DemoBrowser {
 
   async liveView(conversationId: string): Promise<string | null> {
     const saved = this.status();
-    if (!saved || saved.conversationId !== conversationId) return null;
+    if (!saved || saved.conversationId !== conversationId || saved.connection === "disconnected")
+      return null;
     const temporary = !this.connection?.isConnected();
     let connection: BrowserConnection | null = null;
     try {

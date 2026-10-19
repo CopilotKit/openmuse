@@ -1,3 +1,4 @@
+import puppeteer from "@cloudflare/puppeteer";
 import { getAgentByName } from "agents";
 import { type DemoAction, PriceAgent } from "./agent";
 import { authorized, DemoError, escapeHtml, readJson, record, text, uuid } from "./core";
@@ -10,6 +11,31 @@ const fixtureProducts = [
   { id: "headphones-c", name: "演示耳机 C", price: "¥6,500", category: "耳机" },
   { id: "keyboard-a", name: "演示键盘 A", price: "¥7,200", category: "键盘" },
 ];
+
+function checkpointTestPage(url: URL, request: Request): Response {
+  const seed = url.searchParams.has("seed") ? uuid(url.searchParams.get("seed")) : "";
+  const cookie =
+    request.headers
+      .get("cookie")
+      ?.split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith("__Host-openmuse-checkpoint="))
+      ?.split("=")[1] ?? "";
+  return new Response(
+    `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>浏览器存档恢复验证</title><style>body{max-width:850px;margin:60px auto;padding:24px;font:18px/1.9 system-ui;background:#f4f6fa;color:#192235}article{background:white;border:1px solid #ddd;border-radius:14px;padding:24px}code{color:#315ee5}button{padding:10px;font:inherit}</style></head><body><article><h1>浏览器存档恢复验证</h1><p>这是虚构测试数据，用于检查关闭后恢复；不涉及真实账号。</p><p>HttpOnly Cookie：<code>${escapeHtml(seed || cookie || "未设置")}</code></p><p>localStorage：<code id="local"></code></p><p>sessionStorage：<code id="session"></code></p><button type="button" id="clear">清空本页站点存储</button><p><a href="/demo-catalog">返回演示目录</a></p></article><script>const seed=${JSON.stringify(seed)};if(seed){localStorage.setItem('openmuse-checkpoint-marker',seed);sessionStorage.setItem('openmuse-checkpoint-marker',seed);history.replaceState(null,'','/demo-catalog/checkpoint-test');}function show(){document.getElementById('local').textContent=localStorage.getItem('openmuse-checkpoint-marker')||'未设置';document.getElementById('session').textContent=sessionStorage.getItem('openmuse-checkpoint-marker')||'未设置';}document.getElementById('clear').onclick=()=>{localStorage.clear();sessionStorage.clear();show();};show();</script></body></html>`,
+    {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+        ...(seed
+          ? {
+              "Set-Cookie": `__Host-openmuse-checkpoint=${seed}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+            }
+          : {}),
+      },
+    },
+  );
+}
 
 export function fixturePage(url: URL): Response {
   const selected = fixtureProducts.find((item) => url.pathname.endsWith(`/item/${item.id}`));
@@ -44,6 +70,7 @@ export default {
   async fetch(request, env) {
     try {
       const url = new URL(request.url);
+      if (url.pathname === "/demo-catalog/checkpoint-test") return checkpointTestPage(url, request);
       if (url.pathname === "/demo-catalog" || url.pathname.startsWith("/demo-catalog/item/")) {
         return fixturePage(url);
       }
@@ -67,6 +94,17 @@ export default {
             model: env.DEEPSEEK_MODEL,
             modelConfigured: Boolean(env.DEEPSEEK_API_KEY),
             catalogUrl: new URL("/demo-catalog", url).href,
+          }),
+        );
+      }
+      if (url.pathname === "/api/browser/limits" && request.method === "GET") {
+        const limits = await puppeteer.limits(env.BROWSER);
+        return safeResponse(
+          Response.json({
+            activeSessions: limits.activeSessions.length,
+            maxConcurrentSessions: limits.maxConcurrentSessions,
+            allowedBrowserAcquisitions: limits.allowedBrowserAcquisitions,
+            timeUntilNextAllowedBrowserAcquisition: limits.timeUntilNextAllowedBrowserAcquisition,
           }),
         );
       }
@@ -103,6 +141,18 @@ export default {
       } else if (url.pathname === "/api/browser/close" && request.method === "POST") {
         await readJson(request, 1024);
         action = { type: "close" };
+      } else if (
+        request.method === "POST" &&
+        ["save", "save-close", "reconnect", "disconnect", "forget"].some(
+          (operation) => url.pathname === `/api/browser/${operation}`,
+        )
+      ) {
+        const input = record(await readJson(request, 1024));
+        const operation = url.pathname.split("/").at(-1) as Extract<
+          DemoAction,
+          { type: "browser" }
+        >["operation"];
+        action = { type: "browser", operation, conversationId: uuid(input.conversationId) };
       } else if (url.pathname === "/api/browser/live" && request.method === "GET") {
         action = { type: "live", conversationId: uuid(url.searchParams.get("conversationId")) };
       } else {

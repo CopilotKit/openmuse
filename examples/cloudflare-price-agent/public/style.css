@@ -307,6 +307,32 @@ h2 {
   font-size: 11px;
   padding: 6px 9px;
 }
+.checkpoint-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+.checkpoint-actions button {
+  font-size: 12px;
+}
+.checkpoint-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 29px;
+  margin-bottom: 9px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.checkpoint-line button {
+  padding: 3px 6px;
+  font-size: 10px;
+}
+.checkpoint-line .save-error {
+  color: #b33a45;
+}
 .browser-url {
   color: #6f7c91;
   border: 1px solid var(--line);

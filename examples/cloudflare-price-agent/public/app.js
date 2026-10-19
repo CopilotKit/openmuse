@@ -9,6 +9,8 @@ let viewSession = "";
 let refreshing = false;
 let loadingView = false;
 let catalogUrl = "";
+let browserActionBusy = false;
+let viewEpoch = 0;
 
 const labels = {
   browser_search: "搜索网页",
@@ -146,21 +148,50 @@ function setBusy(value) {
   busy = value;
   $("send").disabled = value || sending;
   $("new-chat").disabled = value || sending;
-  $("stop").hidden = !value;
+  $("stop").hidden = !value || browserActionBusy || Boolean(snapshot?.browserBusy);
   $("close-browser").disabled = value;
-  $("run-note").textContent = value ? "正在操作，可以随时停止" : "支持继续追问与比较";
+  $("run-note").textContent =
+    browserActionBusy || snapshot?.browserBusy
+      ? "正在保存或连接浏览器"
+      : value
+        ? "正在操作，可以随时停止"
+        : "支持继续追问与比较";
+}
+
+function clearViewer() {
+  viewEpoch++;
+  viewSession = "";
+  $("live-frame").removeAttribute("src");
+  $("live-frame").hidden = true;
+  $("screenshot").hidden = true;
+  $("viewer-empty").hidden = false;
+  $("open-live").hidden = true;
+  $("open-live").removeAttribute("href");
 }
 
 async function loadLive(force = false) {
-  if (loadingView) return;
+  if (
+    loadingView ||
+    browserActionBusy ||
+    snapshot?.browserBusy ||
+    snapshot?.browser?.connection === "disconnected"
+  )
+    return;
   if (!snapshot?.browser || !conversationId) return;
   if (!force && viewSession === snapshot.browser.sessionId) return;
   loadingView = true;
   const requestedConversation = conversationId;
+  const epoch = viewEpoch;
   try {
     const live = await api(`/api/browser/live?conversationId=${conversationId}`);
     if (!live.url) return;
-    if (conversationId !== requestedConversation || snapshot?.browser?.sessionId !== live.sessionId)
+    if (
+      epoch !== viewEpoch ||
+      browserActionBusy ||
+      snapshot?.browser?.connection === "disconnected" ||
+      conversationId !== requestedConversation ||
+      snapshot?.browser?.sessionId !== live.sessionId
+    )
       return;
     const url = new URL(live.url);
     if (url.origin !== "https://live.browser.run")
@@ -173,6 +204,7 @@ async function loadLive(force = false) {
     $("open-live").hidden = false;
     viewSession = live.sessionId;
   } catch (cause) {
+    if (epoch !== viewEpoch || browserActionBusy) return;
     $("browser-status").textContent = "实时连接暂不可用，展示最近画面";
     if (snapshot.screenshot) {
       $("screenshot").src = `data:image/jpeg;base64,${snapshot.screenshot}`;
@@ -192,7 +224,7 @@ function render(data) {
   $("workspace").hidden = false;
   $("login").hidden = true;
   $("connection").textContent = "已连接 Cloudflare";
-  setBusy(Boolean(data.running));
+  setBusy(Boolean(data.running) || data.browserBusy || browserActionBusy);
   const items = data.conversations.map((item) => {
     const button = element(
       "button",
@@ -204,7 +236,7 @@ function render(data) {
       conversationId = item.id;
       localStorage.setItem("price-agent-conversation", conversationId);
       lastRender = "";
-      viewSession = "";
+      clearViewer();
       await refresh();
     };
     return button;
@@ -276,20 +308,42 @@ function render(data) {
     /^执行 (\w+)$/,
     (_, name) => labels[name] || "执行操作",
   );
-  $("browser-status").textContent = data.browser
-    ? "云端浏览器运行中，可查看或手动操作"
-    : "浏览器已关闭";
-  $("browser-url").textContent = data.browser?.url || "发送任务后，助手会按需打开云端浏览器。";
-  $("refresh-view").disabled = !data.browser;
+  const disconnected = data.browser?.connection === "disconnected";
+  $("browser-status").textContent = disconnected
+    ? "控制连接已断开，浏览器可能仍计费"
+    : data.browser
+      ? "云端浏览器运行中，可查看或手动操作"
+      : data.checkpoint
+        ? "浏览器已关闭，可从存档恢复"
+        : "浏览器已关闭";
+  $("browser-url").textContent =
+    data.browser?.url || data.checkpoint?.url || "发送任务后，助手会按需打开云端浏览器。";
+  $("refresh-view").disabled = !data.browser || disconnected || busy;
   $("close-browser").disabled = !data.browser || busy;
-  if (!data.browser) {
-    viewSession = "";
-    $("live-frame").removeAttribute("src");
-    $("live-frame").hidden = true;
-    $("screenshot").hidden = true;
-    $("viewer-empty").hidden = false;
-    $("open-live").hidden = true;
-    $("open-live").removeAttribute("href");
+  $("save-browser").disabled = !data.browser || disconnected || busy;
+  $("save-close-browser").disabled = !data.browser || disconnected || busy;
+  $("disconnect-browser").disabled = !data.browser || disconnected || busy;
+  $("restore-browser").disabled = (!data.browser && !data.checkpoint) || busy;
+  $("forget-checkpoint").hidden = !data.checkpoint;
+  $("forget-checkpoint").disabled = Boolean(data.browser) || busy;
+  $("checkpoint-status").className = data.checkpointError ? "save-error" : "";
+  $("checkpoint-status").textContent =
+    data.checkpointError ||
+    (data.checkpoint
+      ? `已保存 ${new Date(data.checkpoint.savedAt).toLocaleString()} · 当前页面与站点状态`
+      : "尚无存档；助手浏览后会自动保存，手动操作后请点击保存");
+  if (!data.browser || disconnected || browserActionBusy) {
+    clearViewer();
+    $("viewer-title").textContent = disconnected
+      ? "已断开浏览器控制连接"
+      : data.checkpoint
+        ? "浏览器状态已保存"
+        : "看助手一步步完成查价";
+    $("viewer-note").textContent = disconnected
+      ? "点击恢复 / 重连可连接原会话；要释放浏览器资源，请使用直接关闭或重连后保存并关闭。"
+      : data.checkpoint
+        ? "点击恢复 / 重连，重新打开保存的页面与站点状态。网站可能要求重新登录。"
+        : "发送任务后会按需打开浏览器；可在这里查看或手动操作。";
   } else {
     void loadLive();
   }
@@ -348,6 +402,7 @@ $("new-chat").onclick = async () => {
     conversationId = conversation.id;
     localStorage.setItem("price-agent-conversation", conversationId);
     lastRender = "";
+    clearViewer();
     error("");
     await refresh();
   } catch (cause) {
@@ -362,13 +417,41 @@ $("stop").onclick = async () => {
     error(cause.message);
   }
 };
-$("close-browser").onclick = async () => {
+async function browserOperation(operation) {
+  if (busy || sending || browserActionBusy || !conversationId) return;
+  browserActionBusy = true;
+  setBusy(true);
+  error("");
+  if (operation !== "save") clearViewer();
   try {
-    await api("/api/browser/close", { method: "POST", body: "{}" });
-    await refresh();
+    await api(`/api/browser/${operation}`, {
+      method: "POST",
+      body: JSON.stringify({ conversationId }),
+    });
   } catch (cause) {
     error(cause.message);
+  } finally {
+    browserActionBusy = false;
+    await refresh();
   }
+}
+$("close-browser").onclick = () => {
+  void browserOperation("close");
+};
+$("save-browser").onclick = () => {
+  void browserOperation("save");
+};
+$("save-close-browser").onclick = () => {
+  void browserOperation("save-close");
+};
+$("restore-browser").onclick = () => {
+  void browserOperation("reconnect");
+};
+$("disconnect-browser").onclick = () => {
+  void browserOperation("disconnect");
+};
+$("forget-checkpoint").onclick = () => {
+  void browserOperation("forget");
 };
 $("refresh-view").onclick = () => {
   void loadLive(true);
