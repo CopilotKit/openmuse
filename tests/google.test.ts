@@ -958,6 +958,75 @@ test("GET reads retry on HTTP 429 rate limit with Retry-After header and succeed
   assert.equal(calendars.length, 1);
 });
 
+test("GET reads honor Retry-After dates and cap provider delays", async () => {
+  for (const header of ["120", "Fri, 01 Jan 2100 00:00:00 GMT"]) {
+    let attempts = 0;
+    const sleeps: number[] = [];
+    const client = clientWith(
+      () => {
+        attempts++;
+        if (attempts === 1) {
+          return new Response(JSON.stringify({ error: { message: "Slow down" } }), {
+            status: 429,
+            headers: { "Retry-After": header },
+          });
+        }
+        return json({ items: [] });
+      },
+      async (ms) => {
+        sleeps.push(ms);
+      },
+    );
+    assert.deepEqual(await client.listCalendars(), []);
+    assert.equal(attempts, 2);
+    assert.deepEqual(sleeps, [30_000]);
+  }
+});
+
+test("GET reads fall back to jittered backoff for invalid Retry-After", async () => {
+  let attempts = 0;
+  const sleeps: number[] = [];
+  const client = clientWith(
+    () => {
+      attempts++;
+      if (attempts === 1) {
+        return new Response(JSON.stringify({ error: { message: "Slow down" } }), {
+          status: 429,
+          headers: { "Retry-After": "not-a-date" },
+        });
+      }
+      return json({ items: [] });
+    },
+    async (ms) => {
+      sleeps.push(ms);
+    },
+  );
+  assert.deepEqual(await client.listCalendars(), []);
+  assert.equal(attempts, 2);
+  assert.equal(sleeps.length, 1);
+  assertJitteredDelay(sleeps[0], DEFAULT_RETRY_DELAY_MS);
+});
+
+test("GET network failures stop at the retry limit without a final sleep", async () => {
+  let attempts = 0;
+  const sleeps: number[] = [];
+  const client = clientWith(
+    () => {
+      attempts++;
+      throw new TypeError("network socket disconnected");
+    },
+    async (ms) => {
+      sleeps.push(ms);
+    },
+  );
+  await assert.rejects(client.listCalendars(), /Could not reach Google/);
+  assert.equal(attempts, 1 + MAX_READ_RETRIES);
+  assert.equal(sleeps.length, MAX_READ_RETRIES);
+  for (const [attempt, delay] of sleeps.entries()) {
+    assertJitteredDelay(delay, DEFAULT_RETRY_DELAY_MS * 2 ** attempt);
+  }
+});
+
 test("GET reads retry Google 403 rate-limit reasons with jittered backoff", async () => {
   for (const reason of ["rateLimitExceeded", "userRateLimitExceeded"]) {
     let attempts = 0;
