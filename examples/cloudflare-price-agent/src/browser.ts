@@ -5,7 +5,7 @@ import {
   cookieParameters,
   restorableCookies,
 } from "./checkpoint";
-import { DemoError, publicUrl, record, text } from "./core";
+import { browserRequestUrl, DemoError, publicUrl, record, requireBrowserTool, text } from "./core";
 
 type BrowserConnection = Awaited<ReturnType<typeof puppeteer.launch>>;
 type BrowserPage = Awaited<ReturnType<BrowserConnection["newPage"]>>;
@@ -167,8 +167,7 @@ export class DemoBrowser {
     page.removeAllListeners("request");
     page.on("request", (request) => {
       try {
-        const url = request.url();
-        if (/^https?:/i.test(url)) publicUrl(url);
+        browserRequestUrl(request.url(), request.isNavigationRequest());
         void request.continue().catch(() => {});
       } catch {
         void request.abort("blockedbyclient").catch(() => {});
@@ -394,16 +393,22 @@ export class DemoBrowser {
   }
 
   async action(conversationId: string, name: string, input: unknown): Promise<Observation> {
+    requireBrowserTool(name);
     const args = record(input);
+    const destination =
+      name === "browser_search"
+        ? `https://www.bing.com/search?q=${encodeURIComponent(text(args.query, "搜索词", 1000))}`
+        : name === "browser_navigate"
+          ? publicUrl(args.url)
+          : null;
     const page = await this.ensure(conversationId);
-    if (name === "browser_search" || name === "browser_navigate") {
-      const url =
-        name === "browser_search"
-          ? `https://www.bing.com/search?q=${encodeURIComponent(text(args.query, "搜索词", 1000))}`
-          : publicUrl(args.url);
+    if (destination) {
       this.stage = "打开网页";
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25_000 });
-    } else if (name === "browser_read") {
+      await page.goto(destination, { waitUntil: "domcontentloaded", timeout: 25_000 });
+    } else {
+      if (page.url() !== "about:blank") publicUrl(page.url());
+    }
+    if (destination || name === "browser_read") {
       // Reading also refreshes element references after manual interaction.
     } else if (name === "browser_click" || name === "browser_type") {
       if (!Number.isInteger(args.ref) || Number(args.ref) < 0 || Number(args.ref) > 99) {
@@ -415,9 +420,15 @@ export class DemoBrowser {
       try {
         const info = await element.evaluate((node) => ({
           label: (node.textContent || node.getAttribute("aria-label") || "").trim(),
-          type: node.getAttribute("type"),
+          type: node.getAttribute("type")?.toLowerCase(),
           tag: node.tagName.toLowerCase(),
+          href: node.tagName.toLowerCase() === "a" ? node.getAttribute("href") : null,
+          download: node.hasAttribute("download"),
         }));
+        if (info.type === "file" || info.download) {
+          throw new DemoError("此助手不提供文件上传或下载操作", 403, "blocked_file_operation");
+        }
+        if (info.href) publicUrl(new URL(info.href, page.url()).href);
         if (name === "browser_type") {
           if (
             !["input", "textarea"].includes(info.tag) ||

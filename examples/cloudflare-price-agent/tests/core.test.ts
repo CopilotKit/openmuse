@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   authorized,
+  browserRequestUrl,
   completion,
   DemoError,
   type ModelMessage,
   publicUrl,
   readJson,
+  requireBrowserTool,
+  toolDefinitions,
   verifyEvidence,
 } from "../src/core";
 
@@ -50,6 +53,68 @@ test("browser navigation rejects local destinations, alternate IP forms, credent
   ])
     assert.throws(() => publicUrl(url), DemoError, url);
   assert.equal(publicUrl("https://shop.com/item?q=1"), "https://shop.com/item?q=1");
+});
+
+test("browser request policy permits inline subresources but rejects local and internal schemes", () => {
+  assert.equal(
+    browserRequestUrl("https://shop.com/image.png", false),
+    "https://shop.com/image.png",
+  );
+  assert.equal(
+    browserRequestUrl("data:image/png;base64,AA==", false),
+    "data:image/png;base64,AA==",
+  );
+  assert.equal(
+    browserRequestUrl("blob:https://shop.com/asset", false),
+    "blob:https://shop.com/asset",
+  );
+  assert.equal(browserRequestUrl("about:blank", true), "about:blank");
+  for (const url of [
+    "file:///etc/passwd",
+    "chrome://settings/",
+    "chrome-extension://id/page.html",
+    "devtools://devtools/bundled/inspector.html",
+    "javascript:alert(1)",
+    "ftp://shop.com/file",
+    "http://localhost/",
+  ]) {
+    for (const navigation of [true, false]) {
+      assert.throws(() => browserRequestUrl(url, navigation), DemoError, url);
+    }
+  }
+  for (const url of ["data:text/html,private", "blob:https://shop.com/page"])
+    assert.throws(() => browserRequestUrl(url, true), DemoError);
+});
+
+test("only registered browser actions and price evidence are exposed to the model", () => {
+  const expected = [
+    "browser_search",
+    "browser_navigate",
+    "browser_read",
+    "browser_click",
+    "browser_type",
+    "browser_key",
+    "browser_scroll",
+    "record_price",
+  ];
+  assert.deepEqual(
+    toolDefinitions.map((tool) => tool.function.name),
+    expected,
+  );
+  for (const name of expected.slice(0, -1)) assert.doesNotThrow(() => requireBrowserTool(name));
+  for (const name of [
+    "read_file",
+    "list_files",
+    "exec",
+    "shell",
+    "browser_evaluate",
+    "browser_read_file",
+    "record_price",
+  ])
+    assert.throws(
+      () => requireBrowserTool(name),
+      (error: unknown) => error instanceof DemoError && error.code === "blocked_tool",
+    );
 });
 
 const observation = {

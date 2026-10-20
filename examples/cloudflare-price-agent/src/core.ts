@@ -104,6 +104,13 @@ export function publicUrl(raw: unknown): string {
   return url.href;
 }
 
+export function browserRequestUrl(raw: string, navigation: boolean): string {
+  // Inline images and worker resources are common page dependencies. They are
+  // not destinations the agent may navigate to or use to inspect local files.
+  if (raw === "about:blank" || (!navigation && /^(?:data|blob):/i.test(raw))) return raw;
+  return publicUrl(raw);
+}
+
 export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => {
     const entities: Record<string, string> = {
@@ -234,6 +241,16 @@ export const toolDefinitions = definitions.map(([name, description, properties, 
   },
 }));
 
+export function requireBrowserTool(name: string): void {
+  if (!name.startsWith("browser_") || !definitions.some(([known]) => known === name)) {
+    throw new DemoError(
+      "此助手仅提供已注册的浏览器操作，不提供文件或命令工具",
+      403,
+      "blocked_tool",
+    );
+  }
+}
+
 export async function completion(
   apiKey: string,
   model: string,
@@ -290,6 +307,9 @@ export async function completion(
 }
 
 export const SYSTEM_PROMPT = `你是中文查价助手。通过实际浏览器打开网页、搜索、点击并核对商品价格。
+能力范围仅限公开网页的搜索、打开、读取页面内容、点击、普通文本输入、滚动和价格记录。
+没有文件读写、目录浏览、命令执行、桌面控制或任意代码执行工具。不要尝试打开 file:、chrome: 等本地或内部页面，不上传或下载文件。
+遇到超出浏览器范围的请求，明确说明能力限制；不要把查看本机文件等请求转换成浏览器导航，也不要声称执行过此类操作。
 必须支持追问，继续使用当前对话与浏览器；浏览器若重建，要说明登录和标签页状态可能已丢失。
 工具返回 restoredFromCheckpoint 为 true 时，表示已从保存的 Cookie、当前页面和站点存储恢复；仍须以网页显示判断是否已登录，不得保证登录永久有效。
 价格必须来自本轮或上下文实际读取的网页，附准确商品型号、币种、来源链接和税费/运费条件。

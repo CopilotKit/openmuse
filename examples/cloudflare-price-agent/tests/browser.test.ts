@@ -33,6 +33,10 @@ class Page {
   scripts = new Map<string, { source: string; args: unknown[] }>();
   context = createContext({});
   failNavigation = false;
+  listeners = new Map<string, (...args: never[]) => unknown>();
+  elementNode: { tagName: string; textContent: string; attributes: Record<string, string> } | null =
+    null;
+  elementClicks = 0;
   scroll = { x: 0, y: 0 };
   constructor(readonly browser: Browser) {}
   url() {
@@ -43,8 +47,12 @@ class Page {
   }
   async setViewport() {}
   async setRequestInterception() {}
-  removeAllListeners() {}
-  on() {}
+  removeAllListeners(event: string) {
+    this.listeners.delete(event);
+  }
+  on(event: string, listener: (...args: never[]) => unknown) {
+    this.listeners.set(event, listener);
+  }
   async title() {
     return "Checkpoint fixture";
   }
@@ -52,6 +60,25 @@ class Page {
     return "ZmFrZS1pbWFnZQ==";
   }
   async waitForNetworkIdle() {}
+  async $(selector: string) {
+    if (selector !== '[data-openmuse-ref="0"]' || !this.elementNode) return null;
+    const node = this.elementNode;
+    return {
+      evaluate: async (fn: (...args: never[]) => unknown) =>
+        this.execute(fn.toString(), [
+          {
+            tagName: node.tagName,
+            textContent: node.textContent,
+            getAttribute: (name: string) => node.attributes[name] ?? null,
+            hasAttribute: (name: string) => name in node.attributes,
+          },
+        ]),
+      click: async () => {
+        this.elementClicks++;
+      },
+      dispose: async () => {},
+    };
+  }
   async goto(address: string) {
     if (this.failNavigation) throw new Error("Navigation failed");
     const url = new URL(address);
@@ -228,6 +255,78 @@ async function seed(t: TestContext) {
   await h.driver.save("chat-a");
   return h;
 }
+
+test("unknown tools and non-web navigation cannot launch a browser", async (t) => {
+  const h = harness(t);
+  for (const name of ["read_file", "exec", "browser_evaluate", "browser_read_file"]) {
+    await assert.rejects(
+      h.driver.action("chat-a", name, { path: "/etc/passwd" }),
+      (error: unknown) => error instanceof DemoError && error.code === "blocked_tool",
+    );
+  }
+  for (const url of ["file:///etc/passwd", "chrome://settings/", "http://localhost/"]) {
+    await assert.rejects(h.driver.action("chat-a", "browser_navigate", { url }), DemoError);
+  }
+  assert.equal(h.browsers.length, 0);
+  assert.equal(h.state.browser, null);
+});
+
+test("installed request handler blocks file and internal requests while retaining web dependencies", async (t) => {
+  const h = await seed(t);
+  const handler = h.current().page.listeners.get("request");
+  assert.ok(handler);
+  for (const [url, navigation, expected] of [
+    ["https://shop.com/image.png", false, "continue"],
+    ["data:image/png;base64,AA==", false, "continue"],
+    ["blob:https://shop.com/asset", false, "continue"],
+    ["file:///etc/passwd", true, "abort"],
+    ["chrome://settings/", true, "abort"],
+    ["data:text/html,private", true, "abort"],
+    ["http://localhost/", false, "abort"],
+  ] as const) {
+    let outcome = "";
+    Reflect.apply(handler, null, [
+      {
+        url: () => url,
+        isNavigationRequest: () => navigation,
+        continue: async () => {
+          outcome = "continue";
+        },
+        abort: async () => {
+          outcome = "abort";
+        },
+      },
+    ]);
+    assert.equal(outcome, expected, url);
+  }
+});
+
+test("a page manually changed to a local file cannot be read or acted on by the agent", async (t) => {
+  const h = await seed(t);
+  h.current().page.address = "file:///etc/passwd";
+  await assert.rejects(h.driver.read("chat-a"), DemoError);
+  await assert.rejects(h.driver.action("chat-a", "browser_click", { ref: 0 }), DemoError);
+  await assert.rejects(h.driver.save("chat-a"), DemoError);
+});
+
+test("agent clicks reject file pickers, download links and non-web links before clicking", async (t) => {
+  const h = await seed(t);
+  const page = h.current().page;
+  for (const [tagName, attributes] of [
+    ["INPUT", { type: "FILE" }],
+    ["A", { href: "https://shop.com/report", download: "report.pdf" }],
+    ["A", { href: "file:///etc/passwd" }],
+    ["A", { href: "chrome://settings/" }],
+    ["A", { href: "javascript:alert(1)" }],
+  ] as [string, Record<string, string>][]) {
+    page.elementNode = { tagName, attributes, textContent: "Open" };
+    await assert.rejects(h.driver.action("chat-a", "browser_click", { ref: 0 }), DemoError);
+    assert.equal(page.elementClicks, 0);
+  }
+  page.elementNode = { tagName: "A", attributes: { href: "/item/b" }, textContent: "Product" };
+  await h.driver.action("chat-a", "browser_click", { ref: 0 });
+  assert.equal(page.elementClicks, 1, "Ordinary web links remain usable");
+});
 
 test("disconnect detaches control, viewer polling stays detached, reconnect retains the original session", async (t) => {
   const h = await seed(t);

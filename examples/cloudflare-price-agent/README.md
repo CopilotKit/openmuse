@@ -8,6 +8,16 @@ A private, single-owner demo using **Cloudflare Agents SDK + Browser Run + DeepS
 - Stop/close controls, a five-minute turn limit, a ten-step agent loop capped at sixteen tool actions, a two-minute browser idle timeout and a twenty-minute scheduled close. A later browser can restore the saved current page, cookies and current-origin web storage; chat history remains.
 - A clearly labelled, fictitious product catalogue at `/demo-catalog` for reproducible browser tests. The UI also offers a real-web search prompt. CAPTCHA/login/access restrictions are reported rather than bypassed.
 
+## Architecture and browser-only scope
+
+Open [the architecture diagram](docs/architecture.html) as a standalone HTML file. It maps the deployed modules, the model/tool loop, the separate Live View connection, and alternative browser integrations.
+
+The current deployment runs the Agents SDK and our model/tool loop in a Cloudflare Worker’s SQLite Durable Object. `@cloudflare/puppeteer` runs there as a controller; Chrome runs separately in Browser Run. DeepSeek receives messages and tool definitions over HTTPS and returns tool names/arguments. Our Durable Object executes those tools. The optional local Node proxy only forwards authenticated HTTP requests: it does not host the agent, call the model, or run browser tools. This example does not use the OpenMuse Docker computer SDK.
+
+Only seven browser actions and `record_price` are exposed to the model. There are no filesystem, directory, shell, desktop-control or arbitrary JavaScript tools. Unknown tool names and invalid navigation URLs are rejected before launching a browser. Intercepted requests reject local/internal protocols; `data:` and `blob:` are retained only as page subresources. Agent interactions validate the current page and reject file inputs, explicit download links and links to non-web schemes. The policy is enforced by the dispatcher and URL checks in addition to the model instructions.
+
+Reading a website’s visible text is part of browser use. Saving/restoring the browser’s cookies and current-origin web storage is internal session management, not a general file API. This restriction applies to the agent tools; authenticated Live View still provides manual interaction. Interception is not an OS filesystem sandbox or DNS pinning, and does not establish that every browser-originated download is blocked. No arbitrary local file or command endpoint is provided.
+
 ## Setup
 
 Node.js 22 or newer and a Cloudflare account with Workers, SQLite Durable Objects and Browser Run access are required. The model is an external DeepSeek API call; Workers AI is not used.
@@ -86,6 +96,14 @@ The root project's server/mobile/browser worker dependencies are unchanged. This
 Twenty-two unit tests and fifteen local Miniflare HTTP checks passed. Browser lifecycle tests use a simulated protocol boundary and execute the serialized page callbacks in an isolated JavaScript context. They cover detaching without an implicit viewer reconnect, restoring cookies and both web stores into a fresh browser, expired sessions, recovery cleanup, failed/oversized saves, host-only cookies and conversation isolation. They are not real Chrome acceptance.
 
 The deployed Cloudflare attempt is **blocked**: creating a browser returned HTTP 429, `Rate limit exceeded`, before a checkpoint could be created. The limits endpoint reported zero active sessions, maximum concurrency four, and one allowed acquisition; the provider did not identify the exact restriction. Real cloud save/restore and full chat-interface visual acceptance remain unverified. Re-run `npm run test:cloud` after the Browser Run restriction clears. No billing-plan change was made.
+
+## Browser-only validation (2026-10-20)
+
+The browser-only revision passed TypeScript checking, all **28 unit tests**, a Worker deployment dry run, and root Biome checking of 189 files. The additional policy tests cover rejecting unknown tools and local navigation before browser creation, intercepted request protocols, refusing to inspect a manually changed local page, and rejecting file controls/download links/non-web links before clicking. These use the simulated browser adapter, not actual Chrome.
+
+The revision is deployed. A real DeepSeek turn refused a request to list server files/read `file:///etc/passwd`, and the deployed Agent did not launch a browser. The next public demo-catalogue navigation was **blocked by Cloudflare HTTP 429** during browser creation. Real browser behavior under the new policy therefore remains unverified; no browser was left running by this check. This refusal check does not replace the dispatcher policy tests.
+
+The standalone architecture HTML passed HTTP and interactive step/highlight checks. Neither that HTML nor the full chat UI received visual browser acceptance. The main OpenMuse server/mobile/container suites were not run for this independent example.
 
 ## Initial deployment verification
 
