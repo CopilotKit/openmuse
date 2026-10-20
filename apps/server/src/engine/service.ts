@@ -45,6 +45,7 @@ import {
 import { LostLeaseError, type TaskContext, TaskWorker } from "./worker.ts";
 
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
+const documentFieldsSchema = z.record(z.string(), z.union([z.string(), z.boolean()]));
 /** A change watch's last saved page: its hash, relative-time-free fingerprint and lines. */
 type MonitorPage = { id: string; hash?: string; timelessHash?: string; lines: string[] };
 const date = () => new Date().toISOString();
@@ -341,6 +342,16 @@ export class AgentService {
     const task = await this.getTask(owner, id);
     if (task.status !== "waiting_input")
       throw new AppError("This task is not waiting for input", 409);
+    const existingFields =
+      task.kind === "document" ? documentFieldsSchema.safeParse(task.input.fields) : undefined;
+    const nextFields = fields
+      ? { ...(existingFields?.success ? existingFields.data : {}), ...fields }
+      : undefined;
+    const nextState: Record<string, unknown> = { ...task.state, answer };
+    if (task.kind === "document") {
+      delete nextState.missingFields;
+      delete nextState.fieldErrors;
+    }
     const next = await this.db.compareAndSwap<AgentTask>(
       owner,
       "tasks",
@@ -349,8 +360,8 @@ export class AgentService {
       {
         status: "queued",
         question: null,
-        input: { ...task.input, ...(fields ? { fields } : {}) },
-        state: { ...task.state, answer },
+        input: { ...task.input, ...(nextFields ? { fields: nextFields } : {}) },
+        state: nextState,
         updatedAt: date(),
       },
     );
@@ -994,27 +1005,48 @@ export class AgentService {
       });
       await ctx.event("step", "Found the document", file.name);
     }
-    const fields = z
-      .record(z.string(), z.union([z.string(), z.boolean()]))
-      .optional()
-      .parse(task.input.fields);
+    const fields = documentFieldsSchema.optional().parse(task.input.fields);
+    const file = await this.files.get(owner, source.fileId);
+    const supportedFields = file.fields?.filter((field) => field.type !== "unsupported") ?? [];
+    if (!supportedFields.length)
+      throw new Error("This PDF has no supported fillable fields. Open it in Files to review it.");
     if (!fields || !Object.keys(fields).length) {
-      const file = await this.files.get(owner, source.fileId);
-      const names = file.fields
-        ?.filter((f) => f.type !== "unsupported")
-        .map((f) => f.name)
-        .join(", ");
-      if (!names)
-        throw new Error(
-          "This PDF has no supported fillable fields. Open it in Files to review it.",
-        );
+      const names = supportedFields.map((field) => field.name).join(", ");
       return {
         status: "waiting_input",
         question: `Enter the form values you want to use. Supported fields: ${names}. The original PDF will stay intact.`,
         state: {
           ...task.state,
           source,
-          missingFields: file.fields?.filter((f) => f.type !== "unsupported"),
+          missingFields: supportedFields,
+        },
+      };
+    }
+    const supportedByName = new Map(supportedFields.map((field) => [field.name, field]));
+    const acceptedFields: Record<string, string | boolean> = {};
+    const fieldErrors: { name: string; expected: string; received: string }[] = [];
+    for (const [name, value] of Object.entries(fields)) {
+      const field = supportedByName.get(name);
+      const expected = field?.type === "checkbox" ? "boolean" : "string";
+      if (!field)
+        fieldErrors.push({ name, expected: "a supported PDF field", received: typeof value });
+      else if (typeof value !== expected)
+        fieldErrors.push({ name, expected, received: typeof value });
+      else acceptedFields[name] = value;
+    }
+    if (fieldErrors.length) {
+      const details = fieldErrors
+        .map(({ name, expected, received }) => `${name} needs ${expected}, received ${received}`)
+        .join("; ");
+      return {
+        status: "waiting_input",
+        question: `Correct the form values before filling the PDF. ${details}. The original PDF and valid values will stay intact.`,
+        input: { ...task.input, fields: acceptedFields },
+        state: {
+          ...task.state,
+          source,
+          missingFields: supportedFields,
+          fieldErrors,
         },
       };
     }
