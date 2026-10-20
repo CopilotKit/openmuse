@@ -5,7 +5,9 @@ import {
   type DockerResult,
   type DockerRunner,
 } from "./computer.ts";
-import { desktopCommand, type E2BDesktopComputer } from "./computer-e2b-desktop.ts";
+import type { BoxComputeComputer } from "./computer-boxcompute.ts";
+import { desktopCommand } from "./computer-desktop.ts";
+import type { E2BDesktopComputer } from "./computer-e2b-desktop.ts";
 import type { ComputerProvider, Config } from "./config.ts";
 import { AppError } from "./errors.ts";
 
@@ -367,6 +369,38 @@ export class DesktopComputerBackend implements ComputerBackend {
             verified,
           },
         ),
+      stop: () => this.stop(owner),
+    };
+  }
+}
+
+export class BoxComputeComputerBackend implements ComputerBackend {
+  readonly provider = "boxcompute";
+  readonly receipts = "computer-boxcompute-commands";
+  readonly network = "enabled";
+  constructor(
+    private readonly config: Config,
+    private readonly vm: BoxComputeComputer,
+  ) {}
+  private labels(owner: string) {
+    return computerIdentity(this.config, owner).labels;
+  }
+  state(owner: string) {
+    return this.vm.state(this.labels(owner));
+  }
+  start(owner: string) {
+    return this.vm.start(this.labels(owner));
+  }
+  stop(owner: string) {
+    return this.vm.stop(this.labels(owner));
+  }
+  async running(owner: string): Promise<ComputerSession> {
+    const labels = this.labels(owner);
+    const verified = await this.vm.inspect(labels);
+    if (verified?.state !== "running") throw stopped();
+    return {
+      exec: (command, cwd, signal) => this.vm.run(labels, command, { cwd, signal, verified }),
+      file: (input) => this.vm.file(labels, input, verified),
       stop: () => this.stop(owner),
     };
   }

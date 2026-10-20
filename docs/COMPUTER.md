@@ -86,6 +86,39 @@ With this provider the agent gets one more tool, `use_desktop`, in chat and in d
 
 When the agent uses `use_desktop`, the chat shows a **Desktop** card for each step with what it did. A persistent viewer after the tool cards embeds the live desktop, so new steps preserve the VNC connection. The per-step cards show their action labels. On web the viewer embeds the same stream as the Desktop tab. On iOS and Android it shows the latest screenshot and an **Open desktop** button. When the computer is stopped, the card says it is offline and offers **Start computer**. **Open in Desktop tab** opens the computer sheet on its Desktop tab.
 
+### Run the computer on a BoxCompute VM (optional)
+
+Each owner's computer can also be a [BoxCompute](https://boxcompute.ai) VM: an Ubuntu VM with a minimal Wayland desktop (sway, with no panel or app menu), Google Chrome, Python 3 and git, created through BoxCompute's public API. As with E2B, the API host needs no Docker engine, and you can watch and control the desktop from the app.
+
+```dotenv
+COMPUTER_ENABLED=true
+COMPUTER_PROVIDER=boxcompute
+BOXCOMPUTE_API_KEY=bc_live_...   # API and task worker only; never passed into the VM
+COMPUTER_DEPLOYMENT_ID=...       # required and unique per install, e.g. `openssl rand -hex 12`
+# BOXCOMPUTE_WORKSPACE_ID=ws_... # optional; default: a workspace named OpenMuse, created if missing
+# BOXCOMPUTE_API_URL=https://api.boxcompute.ai  # default
+```
+
+Create the key under **API keys** in the BoxCompute console. A console key has full sandbox access, which covers the provider and the live smoke test. The provider uses `sandbox:read`, `sandbox:create` and `sandbox:execute`, plus `workspace:create` unless you set `BOXCOMPUTE_WORKSPACE_ID`; the smoke test also uses `sandbox:delete` to clean up.
+
+Open **Computer → Start computer**. The first start creates the VM, which takes about a minute, and starts its desktop; later starts resume it. The **Desktop** tab and the chat card work as for E2B. The stream is a BoxCompute viewer link, a random hostname serving a noVNC page. Treat it as a bearer secret: anyone holding it can watch and control the desktop until it expires, an hour after the app last asked for it and at most 24 hours after it was made, or until the key is revoked. Asking again while the Desktop tab is open keeps the same link.
+
+How it maps to the Docker contract:
+
+- **One VM per owner and deployment**, found by VM metadata across your whole BoxCompute account, which is why `COMPUTER_DEPLOYMENT_ID` is required here too. The app refuses to attach to a VM whose metadata it did not set, or that is not a large, network-enabled VM (the desktop needs its 3 GiB of memory).
+- **`/workspace` persists; processes do not.** Stop stops the VM: every command and desktop app ends, and its disk, `/workspace` included, is kept. BoxCompute stops a VM the same way after 30 minutes without API activity; commands, file operations and desktop actions count, and an open Desktop tab keeps it awake. The VM is created with `autoResume` off, so a command, file call or desktop action never wakes a stopped VM: only Start does. A stopped VM keeps its disk, and counts toward your account's storage, until you delete it in BoxCompute.
+- **Commands** run as root in `/workspace`, with the same 30-second wrapper, exit code 124 on timeout and 128 KB output cap. The command reaches the VM in an environment variable rather than in argv, because BoxCompute limits one argument to 8 KB. File operations use BoxCompute's file API with `files.py`'s limits, symlink refusals and response shape, so no request crosses on stdin; a file above 8 MB is written in parts beside it, joined in the VM and renamed into place.
+- **GUI apps from the terminal.** `chrome https://copilotkit.ai >/dev/null 2>&1 &` opens Chrome on the desktop with the image's reviewed browser sandbox. The same output handling as E2B applies, so a backgrounded app does not keep the command open.
+- **Command history is per provider.**
+
+#### The agent drives the BoxCompute desktop
+
+`use_desktop` is the same tool with the same actions. Each one becomes one BoxCompute desktop call whose response also carries the PNG screenshot taken half a second after it, so an action costs one round trip. The screenshot is a PNG because BoxCompute's VM image does not capture JPEG; models are charged by image dimensions, so it costs no more tokens than E2B's JPEG. BoxCompute sends the input as a VNC viewer's keyboard and pointer events.
+
+- **Keys.** `key` accepts xdotool names and combos and maps them to BoxCompute's keys: Return, Tab, Escape, BackSpace, Delete, Insert, Home, End, Page_Up, Page_Down, the arrows, space, F1 to F12 and printable characters, with the modifiers ctrl, alt, shift and super. A sequence such as `ctrl+l Return` is sent as one call per combo. A key BoxCompute has no name for is refused before anything is sent.
+- **Text.** The VM's keyboard is US ASCII, so `type` accepts printable ASCII, newline and tab, and refuses other text before typing any of it. The agent is told to write such text to a file with a command instead.
+- **Uncertain input.** When BoxCompute reports that an input's outcome is unknown, the response is lost, or a later combo fails after an earlier one ran, the receipt is `interrupted`, a fresh screenshot is taken, and the input is never sent again, as with E2B.
+
 ## Work with files
 
 - **Computer → Files** lists the persistent `/workspace` directory. Create folders, add text files, edit them, and save.
@@ -110,5 +143,14 @@ The E2B desktop provider differs from Docker in these ways:
 - **Files live with E2B.** Workspace files are stored with E2B, outside your host. Your E2B plan's runtime limits apply.
 
 The E2B API key stays on the API host.
+
+The BoxCompute provider differs from Docker in these ways:
+
+- **Network access is on**, for the desktop's browser, with the same consequences as for E2B: commands can reach the internet, and the app does not review that outbound path.
+- **Isolation comes from the VM.** Each owner gets a dedicated VM. Inside it there is no read-only root filesystem, capability drop or pids limit, and commands run as root.
+- **Ports stay inside the VM.** BoxCompute exposes no listening port unless a preview link is created for it, and this provider creates none. The desktop viewer link reaches only the desktop's VNC server.
+- **Files live with BoxCompute.** Workspace files are stored on the VM's disk at BoxCompute, outside your host. Your account's VM and storage limits apply.
+
+The BoxCompute API key stays on the API host.
 
 This is a self-hosted, single-owner computer environment. Docker isolation does not provide a dedicated operating-system VM or a hostile-tenant security guarantee. The optional Colima VM provides the Linux host on macOS; the application still manages a Docker container within it.

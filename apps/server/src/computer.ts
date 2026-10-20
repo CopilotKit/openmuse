@@ -9,16 +9,19 @@ import type {
   ComputerSnapshot,
 } from "../../../packages/domain/src/computer.ts";
 import {
+  BoxComputeComputerBackend,
   type ComputerBackend,
   DesktopComputerBackend,
   DockerComputer,
 } from "./computer-backend.ts";
+import { BoxComputeComputer } from "./computer-boxcompute.ts";
 import {
+  type ComputerDesktop,
   describeDesktopAction,
   desktopActionSchema,
-  E2BDesktopComputer,
   resolution,
-} from "./computer-e2b-desktop.ts";
+} from "./computer-desktop.ts";
+import { E2BDesktopComputer } from "./computer-e2b-desktop.ts";
 import type { Config } from "./config.ts";
 import type { Store } from "./db.ts";
 import { AppError } from "./errors.ts";
@@ -184,19 +187,26 @@ type Lease = {
 };
 export class ComputerService {
   private readonly backend: ComputerBackend;
+  // Set only for a desktop provider; the Docker paths below never use it.
+  private readonly desktop: ComputerDesktop | undefined;
   constructor(
     readonly db: Store,
     readonly config: Config,
     docker: DockerRunner = runDocker,
-    // Set only for COMPUTER_PROVIDER=e2b-desktop; the Docker paths below never use it.
-    private readonly desktop: E2BDesktopComputer | undefined = config.computerProvider ===
+    desktop: E2BDesktopComputer | BoxComputeComputer | undefined = config.computerProvider ===
     "e2b-desktop"
       ? new E2BDesktopComputer(config)
-      : undefined,
+      : config.computerProvider === "boxcompute"
+        ? new BoxComputeComputer(config)
+        : undefined,
   ) {
-    this.backend = desktop
-      ? new DesktopComputerBackend(config, desktop)
-      : new DockerComputer(config, docker);
+    this.desktop = desktop;
+    this.backend =
+      desktop instanceof BoxComputeComputer
+        ? new BoxComputeComputerBackend(config, desktop)
+        : desktop
+          ? new DesktopComputerBackend(config, desktop)
+          : new DockerComputer(config, docker);
   }
   // Receipts are kept per provider, so Docker history never shows up on the desktop.
   private get receipts() {
@@ -204,6 +214,10 @@ export class ComputerService {
   }
   get provider() {
     return this.backend.provider;
+  }
+  /** Whether this provider has a graphical desktop (use_desktop, Desktop tab, chat card). */
+  get hasDesktop() {
+    return this.desktop !== undefined;
   }
   private labels(owner: string) {
     return computerIdentity(this.config, owner).labels;
@@ -315,6 +329,7 @@ export class ComputerService {
     const base = {
       enabled: Boolean(this.config.computerEnabled),
       provider: this.provider,
+      desktop: this.hasDesktop,
       workspacePath: "/workspace" as const,
       network: this.backend.network,
       commands: await this.commands(owner),
@@ -326,7 +341,9 @@ export class ComputerService {
         message:
           this.provider === "e2b-desktop"
             ? "Enable the E2B desktop computer on the server to use its desktop, terminal and workspace files."
-            : "Enable the Docker computer on the server to use its terminal and workspace files.",
+            : this.provider === "boxcompute"
+              ? "Enable the BoxCompute computer on the server to use its desktop, terminal and workspace files."
+              : "Enable the Docker computer on the server to use its terminal and workspace files.",
       };
     try {
       return { ...base, status: (await this.isRunning(owner)) ? "running" : "stopped" };
@@ -606,10 +623,13 @@ export class ComputerService {
   private desktopOnly() {
     this.enabled();
     if (!this.desktop)
-      throw new AppError("This computer has no desktop. Set COMPUTER_PROVIDER=e2b-desktop.", 404);
+      throw new AppError(
+        "This computer has no desktop. Set COMPUTER_PROVIDER=e2b-desktop or boxcompute.",
+        404,
+      );
     return this.desktop;
   }
-  /** Desktop stream URL for the owner's running E2B desktop (e2b-desktop provider only).
+  /** Desktop stream URL for the owner's running desktop (desktop providers only).
    * The first connection takes the lifecycle lease so it cannot race startup or Stop.
    * Cached viewers only check the stream and never block commands or actions. */
   async desktopUrl(owner: string) {
