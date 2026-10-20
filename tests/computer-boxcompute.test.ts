@@ -29,7 +29,7 @@ const config: Config = {
   boxcomputeApiKey: apiKey,
   computerDeploymentId: "boxcompute-test",
 };
-const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 const ok = (stdout = "", exitCode = 0): BoxComputeExecution => ({
   stdout,
   stderr: "",
@@ -211,14 +211,14 @@ function fake(
       const scripted = await options.act?.(action, acts++);
       if (scripted) return scripted;
       return screenshot
-        ? { screenshot: { mimeType: "image/jpeg", data: Buffer.from(jpeg).toString("base64") } }
+        ? { screenshot: { mimeType: "image/png", data: Buffer.from(png).toString("base64") } }
         : {};
     },
     async screenshot(id) {
       if (vm(id).state !== "running")
         throw new BoxComputeApiError(409, "DESKTOP_UNAVAILABLE", "The VM is not running.");
       calls.screenshot++;
-      return jpeg;
+      return png;
     },
     async viewer(id) {
       vm(id);
@@ -375,6 +375,25 @@ test("commands carry the command in the environment, under the 30 second wrapper
   assert.equal(request.cwd, "/workspace/project");
   assert.equal(request.timeoutSeconds, 35);
   assert.ok(request.maxOutputBytes <= 1024 * 1024);
+});
+
+test("a runaway command keeps its overflow notice even when stdout fills the shared cap", async () => {
+  const notice = "Output exceeded the limit; the command was stopped.\n";
+  const f = fake({
+    vms: [{}],
+    execute: () => ({
+      stdout: "y\n".repeat(80 * 1024),
+      stderr: notice,
+      exitCode: 124,
+      timedOut: false,
+      stdoutTruncated: false,
+      stderrTruncated: false,
+    }),
+  });
+  const { computer, owner } = service(f);
+  const receipt = await computer.execute(owner, { command: "yes", cwd: "/workspace" });
+  assert.match(receipt.stderr, /Output exceeded the limit/);
+  assert.equal(receipt.truncated, true);
 });
 
 test("the in-box wrapper reads the command from the environment and does not wait for GUI apps", {
@@ -595,7 +614,7 @@ test("use_desktop sends one action with its screenshot in the same call and keep
     { action: { type: "click", x: 640, y: 400, button: "left", clicks: 1 }, screenshot: true },
   ]);
   assert.equal(f.calls.screenshot, 0, "the action's own response carried the frame");
-  assert.equal(result[1].source?.value, Buffer.from(jpeg).toString("base64"));
+  assert.equal(result[1].source?.value, Buffer.from(png).toString("base64"));
   const multi = await useDesktop(
     computer,
     owner,
@@ -739,6 +758,115 @@ test("the HTTP client sends the key only in its header and names its failures", 
     blockNetwork: false,
     autoResume: false,
   });
+});
+
+test("the HTTP client reads BoxCompute's real response shapes", async () => {
+  const executed = {
+    stdout: "out",
+    stderr: "",
+    exitCode: 0,
+    timedOut: false,
+    stdoutTruncated: false,
+    stderrTruncated: false,
+  };
+  const driver = boxcomputeDriver(config, (async () =>
+    Response.json({ result: executed })) as unknown as typeof fetch);
+  assert.deepEqual(
+    await driver.execute("sbx_1", {
+      argv: ["true"],
+      cwd: "/workspace",
+      env: {},
+      timeoutSeconds: 35,
+      maxOutputBytes: 1024,
+    }),
+    executed,
+  );
+});
+
+test("reads and file uploads ride out a dropped connection or gateway error; commands are never resent", async () => {
+  const waits: number[] = [];
+  const replies: Array<Response | Error> = [
+    new TypeError("fetch failed"),
+    new Response("bad gateway", { status: 502 }),
+    Response.json({ sandbox: { id: "sbx_1", state: "running" } }),
+    new Response("bad gateway", { status: 502 }),
+    new Response("unavailable", { status: 503 }),
+    new Response(null, { status: 204 }),
+  ];
+  const methods: string[] = [];
+  const driver = boxcomputeDriver(
+    config,
+    (async (_url: URL, init: RequestInit) => {
+      methods.push(String(init.method));
+      const reply = replies.shift();
+      if (reply instanceof Error) throw reply;
+      return reply as Response;
+    }) as unknown as typeof fetch,
+    async (ms) => {
+      waits.push(ms);
+    },
+  );
+  assert.equal((await driver.get("sbx_1")).state, "running");
+  assert.deepEqual(methods, ["GET", "GET", "GET"]);
+  assert.deepEqual(waits, [1_000, 3_000]);
+  await assert.rejects(
+    driver.execute("sbx_1", {
+      argv: ["true"],
+      cwd: "/workspace",
+      env: {},
+      timeoutSeconds: 35,
+      maxOutputBytes: 1024,
+    }),
+    (error: BoxComputeApiError) => error.status === 502,
+  );
+  assert.deepEqual(methods, ["GET", "GET", "GET", "POST"], "a command is sent once");
+  await driver.writeFile("sbx_1", "/workspace/a.txt", new Uint8Array([1]));
+  assert.deepEqual(methods.slice(4), ["PUT", "PUT"], "a whole-file upload is resent");
+});
+
+test("Stop retries while BoxCompute says the VM is busy, and only then", async () => {
+  const busy = () =>
+    Response.json(
+      {
+        code: "SANDBOX_UNAVAILABLE",
+        error: "The VM is still stopping or in use. Try again in a moment.",
+      },
+      { status: 409 },
+    );
+  const stopped = () => Response.json({ sandbox: { id: "sbx_1", state: "cold" }, stopped: true });
+  const run = async (responses: Response[]) => {
+    let calls = 0;
+    const waits: number[] = [];
+    const driver = boxcomputeDriver(
+      config,
+      (async () => {
+        calls++;
+        return responses.shift() as Response;
+      }) as unknown as typeof fetch,
+      async (ms) => {
+        waits.push(ms);
+      },
+    );
+    const outcome = await driver.stop("sbx_1").then(
+      () => "stopped",
+      (error: BoxComputeApiError) => error.code,
+    );
+    return { outcome, calls, waits };
+  };
+  assert.deepEqual(await run([busy(), busy(), stopped()]), {
+    outcome: "stopped",
+    calls: 3,
+    waits: [500, 1_000],
+  });
+  const refused = await run([
+    Response.json({ code: "INSUFFICIENT_SCOPE", error: "no" }, { status: 403 }),
+  ]);
+  assert.deepEqual(refused, { outcome: "INSUFFICIENT_SCOPE", calls: 1, waits: [] });
+  const exhausted = await run(Array.from({ length: 30 }, busy));
+  assert.equal(exhausted.outcome, "SANDBOX_UNAVAILABLE");
+  assert.equal(exhausted.calls, 22);
+  const waited = exhausted.waits.reduce((sum, ms) => sum + ms, 0);
+  assert.ok(waited >= 60_000 && waited <= 95_000, String(waited));
 });
 
 test("BoxCompute receipts are kept apart from Docker and E2B receipts", async () => {

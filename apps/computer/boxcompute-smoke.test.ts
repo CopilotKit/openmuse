@@ -20,11 +20,22 @@ const apiUrl = (process.env.BOXCOMPUTE_API_URL?.trim() || "https://api.boxcomput
   /\/+$/,
   "",
 );
-const boxcompute = (path: string, init: RequestInit = {}) =>
-  fetch(`${apiUrl}/api/v2${path}`, {
-    ...init,
-    headers: { authorization: `Bearer ${apiKey}`, ...(init.headers as Record<string, string>) },
-  });
+// Listing, deleting and a read-only probe, all safe to repeat, so a connection
+// dropped while BoxCompute deploys is retried rather than leaving a VM behind.
+const boxcompute = async (path: string, init: RequestInit = {}) => {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const response = await fetch(`${apiUrl}/api/v2${path}`, {
+        ...init,
+        headers: { authorization: `Bearer ${apiKey}`, ...(init.headers as Record<string, string>) },
+      });
+      if (response.status < 502 || attempt === 5) return response;
+    } catch (error) {
+      if (!(error instanceof TypeError) || attempt === 5) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+  }
+};
 
 test("real BoxCompute VM runs commands, opens Chrome, streams, acts, persists files and stops active work", {
   timeout: 900000,
@@ -62,6 +73,7 @@ test("real BoxCompute VM runs commands, opens Chrome, streams, acts, persists fi
       (vm) => vm.id,
     );
   };
+  let failure: unknown;
   try {
     const session = await server.auth.session();
     const headers = {
@@ -79,16 +91,17 @@ test("real BoxCompute VM runs commands, opens Chrome, streams, acts, persists fi
       return result;
     };
     const post = (path: string, body: unknown = {}) => call(path, body);
-    // A desktop action, then the JPEG screenshot it kept for the chat card.
+    // A desktop action, then the PNG screenshot it kept for the chat card.
     const act = async (action: Record<string, unknown>) => {
       const result = await post("/desktop/actions", action);
       assert.equal(result.receipt.status, "succeeded", JSON.stringify(result));
       assert.deepEqual([result.width, result.height], [1280, 800]);
       const response = await server.app.request("/api/computer/desktop/screenshot", { headers });
-      assert.equal(response.headers.get("content-type"), "image/jpeg");
+      assert.equal(response.headers.get("content-type"), "image/png");
       const bytes = new Uint8Array(await response.arrayBuffer());
-      assert.deepEqual([...bytes.subarray(0, 3)], [0xff, 0xd8, 0xff]);
-      assert.ok(bytes.length > 5000 && bytes.length < 1024 * 1024, String(bytes.length));
+      assert.deepEqual([...bytes.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
+      // An empty sway desktop compresses to a few KB; Chrome pages are larger.
+      assert.ok(bytes.length > 1000 && bytes.length < 8 * 1024 * 1024, String(bytes.length));
       return bytes;
     };
     const creating = Date.now();
@@ -128,18 +141,20 @@ test("real BoxCompute VM runs commands, opens Chrome, streams, acts, persists fi
     });
     assert.equal(escaped.status, 422);
     // Typed input reaches a focused page: a local page posts every keystroke back
-    // to a tiny server, which appends it to a file in /workspace.
+    // to a tiny server, which writes it to a file in /workspace. The input fills the
+    // page (Chrome for Testing shows a banner above it) and the page is sent as HTML,
+    // which Chrome does not sniff from a bare <input>.
     await post("/files/write", {
       path: "/workspace/typing.py",
       text: [
         "import http.server, pathlib",
-        "PAGE = b'<input autofocus oninput=\"fetch(`/k?`+encodeURIComponent(this.value))\">'",
+        'PAGE = b\'<!doctype html><input autofocus style="position:fixed;inset:0;width:100%;height:100%;font-size:40px" oninput="fetch(`/k?`+encodeURIComponent(this.value))">\'',
         "class H(http.server.BaseHTTPRequestHandler):",
         "    def do_GET(self):",
         "        if self.path.startswith('/k?'):",
         "            from urllib.parse import unquote",
         "            pathlib.Path('/workspace/typed.txt').write_text(unquote(self.path[3:]))",
-        "        self.send_response(200); self.end_headers(); self.wfile.write(PAGE)",
+        "        self.send_response(200); self.send_header('Content-Type', 'text/html'); self.end_headers(); self.wfile.write(PAGE)",
         "    def log_message(self, *a): pass",
         "http.server.HTTPServer(('127.0.0.1', 8765), H).serve_forever()",
       ].join("\n"),
@@ -154,11 +169,12 @@ test("real BoxCompute VM runs commands, opens Chrome, streams, acts, persists fi
     assert.ok(Date.now() - before < 15000, "the GUI app held the command open");
     await new Promise((resolve) => setTimeout(resolve, 6000));
     assert.equal(
-      (await post("/commands", { command: "pgrep -f chrome-for-testing >/dev/null" })).status,
+      // [c] keeps pgrep -f from matching the wrapper's own command line.
+      (await post("/commands", { command: "pgrep -f '[c]hrome-for-testing' >/dev/null" })).status,
       "succeeded",
     );
     const typeIntoPage = async (text: string) => {
-      await act({ action: "left_click", coordinate: [640, 140] });
+      await act({ action: "left_click", coordinate: [640, 480] });
       await act({ action: "key", text: "ctrl+a BackSpace" });
       await act({ action: "type", text });
       const typed = await post("/files/read", { path: "/workspace/typed.txt" });
@@ -218,7 +234,7 @@ test("real BoxCompute VM runs commands, opens Chrome, streams, acts, persists fi
     );
     // Stop ends processes: the old browser and server are gone, the desktop is back.
     assert.equal(
-      (await post("/commands", { command: "pgrep -f chrome-for-testing" })).status,
+      (await post("/commands", { command: "pgrep -f '[c]hrome-for-testing'" })).status,
       "failed",
     );
     await act({ action: "screenshot" });
@@ -232,17 +248,24 @@ test("real BoxCompute VM runs commands, opens Chrome, streams, acts, persists fi
     const pending = server.computer.execute(owner, {
       command: "printf ready > /workspace/.smoke-running; sleep 25",
     });
+    // Probe through BoxCompute directly, as the E2B test does through its SDK: the
+    // app's own file calls would wait on the lease the running command holds.
+    const [vm] = await vmIds();
     const deadline = Date.now() + 20000;
     while (true) {
-      const probe = await server.computer
-        .read(owner, "/workspace/.smoke-running")
+      const probe = await boxcompute(`/sandboxes/${vm}/execute`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ argv: ["cat", "/workspace/.smoke-running"], timeoutSeconds: 10 }),
+      })
+        .then((response) => (response.ok ? response.json() : undefined))
         .catch(() => undefined);
-      if (probe?.text === "ready") break;
+      if (probe?.result?.stdout === "ready") break;
       assert.ok(Date.now() < deadline, "command process failed to begin");
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    await server.computer.stop(owner).catch(() => {});
-    assert.equal((await pending).status === "succeeded", false);
+    await server.computer.stop(owner);
+    assert.equal((await pending).status, "interrupted");
     assert.equal((await server.computer.snapshot(owner)).status, "stopped");
     // A stopped computer refuses commands and desktop actions instead of resuming.
     const refused = await server.app.request("/api/computer/desktop/actions", {
@@ -252,13 +275,23 @@ test("real BoxCompute VM runs commands, opens Chrome, streams, acts, persists fi
     });
     assert.equal(refused.status, 409);
     assert.equal((await server.computer.snapshot(owner)).status, "stopped");
+  } catch (error) {
+    failure = error;
+    throw error;
   } finally {
-    const ids = await vmIds();
-    const deleted = await Promise.all(
-      ids.map(async (id) => (await boxcompute(`/sandboxes/${id}`, { method: "DELETE" })).ok),
-    );
+    // Never let a cleanup error hide the failure above.
+    const deleted = await vmIds()
+      .then((ids) =>
+        Promise.all(
+          ids.map(async (id) => (await boxcompute(`/sandboxes/${id}`, { method: "DELETE" })).ok),
+        ),
+      )
+      .catch((error: unknown) => {
+        console.error("smoke VM cleanup failed; delete the deployment's VMs by hand", error);
+        return [false];
+      });
     await db.close();
     await rm(directory, { recursive: true, force: true });
-    assert.ok(deleted.every(Boolean), "smoke VM cleanup failed");
+    if (!failure) assert.ok(deleted.every(Boolean), "smoke VM cleanup failed");
   }
 });

@@ -113,7 +113,7 @@ How it maps to the Docker contract:
 
 #### The agent drives the BoxCompute desktop
 
-`use_desktop` is the same tool with the same actions. Each one becomes one BoxCompute desktop call whose response also carries the JPEG screenshot taken half a second after it, so an action costs one round trip. BoxCompute sends the input as a VNC viewer's keyboard and pointer events.
+`use_desktop` is the same tool with the same actions. Each one becomes one BoxCompute desktop call whose response also carries the PNG screenshot taken half a second after it, so an action costs one round trip. The screenshot is a PNG because BoxCompute's VM image does not capture JPEG; models are charged by image dimensions, so it costs no more tokens than E2B's JPEG. BoxCompute sends the input as a VNC viewer's keyboard and pointer events.
 
 - **Keys.** `key` accepts xdotool names and combos and maps them to BoxCompute's keys: Return, Tab, Escape, BackSpace, Delete, Insert, Home, End, Page_Up, Page_Down, the arrows, space, F1 to F12 and printable characters, with the modifiers ctrl, alt, shift and super. A sequence such as `ctrl+l Return` is sent as one call per combo. A key BoxCompute has no name for is refused before anything is sent.
 - **Text.** The VM's keyboard is US ASCII, so `type` accepts printable ASCII, newline and tab, and refuses other text before typing any of it. The agent is told to write such text to a file with a command instead.

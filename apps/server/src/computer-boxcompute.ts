@@ -33,9 +33,22 @@ const pdfLimit = 10 * 1024 * 1024;
 // BoxCompute's per-request file body limit; larger PDFs are written in parts.
 const fileChunk = 8 * 1024 * 1024;
 const listLimit = 1000;
+// Stop answers 409 SANDBOX_UNAVAILABLE ("try again shortly") while a call that
+// just finished is still recording its activity, and until an accepted stop has
+// settled: the VM reports stopped only once its processes have wound down, which
+// took longer than 18 seconds after a busy command in testing. About 90 seconds.
+const stopRetryMs = [500, 1_000, 2_000, 3_000, ...Array<number>(17).fill(5_000)];
+// Reads, and file uploads (a PUT replaces the whole file, so resending it is
+// harmless), are retried through a lost connection or a gateway error, as while
+// BoxCompute deploys. Commands, input and other changes are never resent.
+const readRetryMs = [1_000, 3_000, 6_000];
+const transient = (status: number) => status === 502 || status === 503 || status === 504;
 const workspaceName = "OpenMuse";
 const vmName = "OpenMuse computer";
 const settleMs = 500;
+// BoxCompute's VM image captures PNG only: its grim is built without JPEG. Models
+// are charged by image dimensions, so the larger file costs no extra tokens.
+const screenshotFormat = "png";
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
 export class BoxComputeApiError extends Error {
@@ -132,7 +145,11 @@ export interface BoxComputeDriver {
 }
 
 /** The HTTP client. `fetcher` is injected so tests never reach the network. */
-export function boxcomputeDriver(config: Config, fetcher: typeof fetch = fetch): BoxComputeDriver {
+export function boxcomputeDriver(
+  config: Config,
+  fetcher: typeof fetch = fetch,
+  wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+): BoxComputeDriver {
   const base = `${(config.boxcomputeApiUrl ?? "https://api.boxcompute.ai").replace(/\/+$/, "")}/api/v2`;
   const call = async (
     method: string,
@@ -154,17 +171,36 @@ export function boxcomputeDriver(config: Config, fetcher: typeof fetch = fetch):
     if (options.json !== undefined) headers["content-type"] = "application/json";
     if (options.bytes) headers["content-type"] = "application/octet-stream";
     if (options.idempotencyKey) headers["idempotency-key"] = options.idempotencyKey;
-    const timeout = AbortSignal.timeout(options.timeoutMs ?? controlMs);
-    const response = await fetcher(url, {
-      method,
-      headers,
-      body:
-        options.json !== undefined
-          ? JSON.stringify(options.json)
-          : (options.bytes as BodyInit | undefined),
-      signal: options.signal ? AbortSignal.any([timeout, options.signal]) : timeout,
-      redirect: "error",
-    });
+    const send = () => {
+      const timeout = AbortSignal.timeout(options.timeoutMs ?? controlMs);
+      return fetcher(url, {
+        method,
+        headers,
+        body:
+          options.json !== undefined
+            ? JSON.stringify(options.json)
+            : (options.bytes as BodyInit | undefined),
+        signal: options.signal ? AbortSignal.any([timeout, options.signal]) : timeout,
+        redirect: "error",
+      });
+    };
+    let response: Response | undefined;
+    const repeatable = method === "GET" || method === "PUT";
+    for (const delay of repeatable ? [...readRetryMs, null] : [null]) {
+      try {
+        response = await send();
+      } catch (error) {
+        // A timeout or the caller's abort is an answer; only a dropped connection is retried.
+        const lost = error instanceof TypeError && !options.signal?.aborted;
+        if (!lost || delay === null) throw error;
+        await wait(delay);
+        continue;
+      }
+      if (!transient(response.status) || delay === null) break;
+      await response.body?.cancel();
+      await wait(delay);
+    }
+    if (!response) throw new Error("unreachable");
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as {
         code?: unknown;
@@ -213,7 +249,19 @@ export function boxcomputeDriver(config: Config, fetcher: typeof fetch = fetch):
       return (await json<{ sandbox: BoxComputeSandbox }>(response)).sandbox;
     },
     async stop(id) {
-      await call("POST", `${sandbox(id)}/stop`, { json: {}, timeoutMs: 60_000 });
+      for (const delay of [...stopRetryMs, null]) {
+        try {
+          await call("POST", `${sandbox(id)}/stop`, { json: {}, timeoutMs: 60_000 });
+          return;
+        } catch (error) {
+          const busy =
+            error instanceof BoxComputeApiError &&
+            error.status === 409 &&
+            error.code === "SANDBOX_UNAVAILABLE";
+          if (!busy || delay === null) throw error;
+          await wait(delay);
+        }
+      }
     },
     async startDesktop(id) {
       await call("POST", `${sandbox(id)}/desktop/start`, { json: {}, timeoutMs: desktopMs });
@@ -224,7 +272,7 @@ export function boxcomputeDriver(config: Config, fetcher: typeof fetch = fetch):
         timeoutMs: (request.timeoutSeconds + 15) * 1000,
         signal,
       });
-      return json<BoxComputeExecution>(response);
+      return (await json<{ result: BoxComputeExecution }>(response)).result;
     },
     async stat(id, path) {
       try {
@@ -268,14 +316,14 @@ export function boxcomputeDriver(config: Config, fetcher: typeof fetch = fetch):
     },
     async act(id, action, screenshot) {
       const response = await call("POST", `${sandbox(id)}/desktop/actions`, {
-        json: { action, ...(screenshot ? { screenshot: "jpeg", settleMs } : {}) },
+        json: { action, ...(screenshot ? { screenshot: screenshotFormat, settleMs } : {}) },
         timeoutMs: 60_000,
       });
       return json<{ screenshot?: { mimeType: string; data: string } | null }>(response);
     },
     async screenshot(id) {
       const response = await call("GET", `${sandbox(id)}/desktop/screenshot`, {
-        query: { format: "jpeg" },
+        query: { format: screenshotFormat },
         timeoutMs: 60_000,
       });
       return new Uint8Array(await response.arrayBuffer());
@@ -543,7 +591,7 @@ export class BoxComputeComputer implements ComputerDesktop {
   ): Promise<DesktopShot> {
     const vm = await this.attach(labels);
     const inputs = boxcomputeInputs(action);
-    const screen = { mimeType: "image/jpeg" as const, width: resolution[0], height: resolution[1] };
+    const screen = { mimeType: "image/png" as const, width: resolution[0], height: resolution[1] };
     const frame = async () => this.control(() => this.driver.screenshot(vm.id));
     if (!inputs.length) {
       if (action.action === "wait") await sleep((action.duration ?? 1) * 1000);
@@ -638,8 +686,10 @@ export class BoxComputeComputer implements ComputerDesktop {
         },
         options.signal,
       );
-      output.stdout(executed.stdout);
+      // stderr first: the cap is shared, and the wrapper's overflow notice is on
+      // stderr while stdout alone can fill the cap.
       output.stderr(executed.stderr);
+      output.stdout(executed.stdout);
       result.exitCode = executed.exitCode;
       result.timedOut = executed.timedOut;
       if (executed.stdoutTruncated || executed.stderrTruncated) result.truncated = true;
