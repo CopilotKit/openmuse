@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "openmuse-price-agent-demo",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "send_metrics": false,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "browser": { "binding": "BROWSER" },
+  "durable_objects": {
+    "bindings": [{ "name": "PRICE_AGENT", "class_name": "PriceAgent" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PriceAgent"] }],
+  "vars": { "DEEPSEEK_MODEL": "deepseek-flash" },
+  "observability": { "enabled": true, "head_sampling_rate": 0.1 }
+}

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Cloudflare 查价助手</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <header class="top">
+      <div><span class="brand">◈</span><strong>Cloudflare 查价助手</strong><span class="badge">私有 Demo</span></div>
+      <div id="connection" class="connection">正在连接…</div>
+    </header>
+    <section id="login" class="login" hidden>
+      <h1>打开你的查价助手</h1>
+      <p>请输入此 demo 的访问口令。通过本地入口打开时，会自动连接。</p>
+      <form id="login-form"><label>访问口令<input id="access-token" type="password" autocomplete="off" required /></label><button type="submit">连接</button></form>
+      <p id="login-error" role="alert"></p>
+    </section>
+    <main id="workspace" class="workspace" hidden>
+      <aside class="sidebar">
+        <button type="button" id="new-chat" class="primary">＋ 新对话</button>
+        <h2>已保存的对话</h2>
+        <div id="conversations" class="conversations"></div>
+        <div class="side-note">对话与价格记录会保留。助手操作后自动保存浏览器状态；手动操作后请点击保存。离开前可保存并关闭。</div>
+      </aside>
+      <section class="chat">
+        <div class="section-head"><h1>想查什么价格？</h1><span id="model" class="muted"></span></div>
+        <div id="messages" class="messages" aria-live="polite"></div>
+        <div class="examples"><button type="button" id="example-demo">演示目录查价</button><button type="button" id="example-public">搜索真实网页</button><button type="button" id="continue">继续当前页面</button></div>
+        <div id="progress" class="progress" role="status">准备就绪</div>
+        <form id="chat-form" class="composer"><label class="sr-only" for="prompt">消息</label><textarea id="prompt" rows="3" placeholder="例如：搜索某款耳机在日本的价格，核对型号、币种和来源网址。" required maxlength="4000"></textarea><div class="composer-actions"><span id="run-note" class="muted">支持继续追问与比较</span><button id="stop" type="button" class="danger" hidden>停止</button><button id="send" type="submit" class="primary">发送 ↗</button></div></form>
+        <div id="error" class="error" role="alert" hidden></div>
+      </section>
+      <section class="browser-panel">
+        <div class="section-head"><div><h2>浏览器</h2><span id="browser-status" class="muted">尚未打开</span></div><div class="browser-actions"><button type="button" id="refresh-view">刷新画面</button><a href="https://live.browser.run/" id="open-live" class="button" target="_blank" rel="noreferrer noopener" hidden>单独打开 ↗</a><button type="button" id="close-browser" title="关闭浏览器，保留之前的存档；不采集新的页面状态">直接关闭</button></div></div>
+        <div class="checkpoint-actions"><button type="button" id="save-browser">保存</button><button type="button" id="save-close-browser" class="primary">保存并关闭</button><button type="button" id="restore-browser">恢复 / 重连</button><button type="button" id="disconnect-browser" title="断开控制连接，浏览器可能继续计费">仅断开连接</button></div>
+        <div class="checkpoint-line"><span id="checkpoint-status">尚无浏览器存档</span><button type="button" id="forget-checkpoint" hidden>删除存档</button></div>
+        <div id="browser-url" class="browser-url">发送任务后，助手会按需打开云端浏览器。</div>
+        <div class="viewer"><div id="viewer-empty" class="viewer-empty"><div class="orb">◈</div><h3 id="viewer-title">看助手一步步完成查价</h3><p id="viewer-note">打开页面、输入关键词、核对商品与价格。需要登录或人工操作时，可以在实时浏览器中接管。</p></div><iframe id="live-frame" title="云端实时浏览器" referrerpolicy="no-referrer" hidden></iframe><img id="screenshot" alt="助手最近一次操作后的浏览器截图" hidden /></div>
+        <div class="view-note">存档保存当前页面网址、Cookie、当前站点的 localStorage / sessionStorage 和滚动位置。网站可能要求重新登录；其他标签页、下载文件与页面内存不在存档中。仅断开连接仍可能计费。</div>
+        <div class="evidence-head"><h2>页面价格记录</h2><span id="price-count" class="muted">0 条</span></div><div id="prices" class="prices"><p class="muted">记录会包含页面原价、币种、链接和采集时间。</p></div>
+        <details class="activity"><summary>查看操作记录</summary><div id="events"></div></details>
+      </section>
+    </main>
+  </body>
+</html>

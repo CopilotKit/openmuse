@@ -1,0 +1,27 @@
+{
+  "name": "openmuse-cloudflare-price-agent-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8792",
+    "types": "wrangler types",
+    "check": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "test:cloud": "node scripts/checkpoint-smoke.mjs",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "deploy": "wrangler deploy",
+    "local": "node scripts/local-proxy.mjs"
+  },
+  "dependencies": {
+    "@cloudflare/puppeteer": "1.4.0",
+    "agents": "0.28.1",
+    "undici": "^7.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "~5.9.2",
+    "wrangler": "4.151.2"
+  }
+}

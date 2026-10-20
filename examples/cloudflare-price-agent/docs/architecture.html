@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>浏览器 Agent · 当前模块架构与接入方式</title>
+<style>
+:root{font:14px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;color:#20304a;background:#eef2f8}*{box-sizing:border-box}body{max-width:1400px;margin:0 auto;padding:28px 24px 48px}h1,h2,h3,p{margin:0}h1{font-size:27px;letter-spacing:-.6px}h2{font-size:17px;margin-bottom:12px}h3{font-size:14px}.muted{color:#63738a}.small{font-size:12px}.top{display:flex;justify-content:space-between;align-items:start;gap:20px}.badge{font-size:12px;background:#dde9fc;color:#2d5a9c;padding:5px 9px;border-radius:7px;white-space:nowrap}.lead{margin-top:8px;color:#51637d}.banner{background:#e4edfc;border:1px solid #c7d8f4;border-left:4px solid #3973ce;border-radius:9px;padding:15px 18px;margin:20px 0 16px}.panel{background:#fff;border:1px solid #d7dfeb;border-radius:12px;padding:18px;margin-bottom:16px}.grid{display:grid;grid-template-columns:1.35fr 1fr;gap:16px;align-items:start}a{color:#275fbc;text-underline-offset:3px}code{font:12px/1.5 ui-monospace,SFMono-Regular,monospace;background:#f1f4f9;padding:2px 4px;border-radius:4px;overflow-wrap:anywhere}.scroll{overflow-x:auto}.diagram{display:block;width:100%;min-width:920px;height:auto}svg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}svg .zone{fill:#f4f7fc;stroke:#d0d9e8;stroke-width:1.4}svg .cf-zone{fill:#fdf8f1;stroke:#e9ceaa;stroke-width:1.5}svg .node rect{fill:#fff;stroke:#bdcde3;stroke-width:1.5;transition:fill .2s,stroke .2s}svg .node .name{fill:#203b61;font-size:15px;font-weight:650}svg .node .detail{fill:#61738c;font-size:12px}svg .active rect{fill:#fff1d9;stroke:#d18a22;stroke-width:3}svg .edge{fill:none;stroke:#6888b5;stroke-width:1.8;marker-end:url(#arrow)}svg .live-edge{fill:none;stroke:#7f719b;stroke-width:1.7;stroke-dasharray:6 4;marker-end:url(#live-arrow)}svg .edge-label{fill:#60718c;font-size:11px}svg .zone-label{fill:#55708f;font-size:13px;font-weight:650}svg .cf-label{fill:#92612c}.steps{display:flex;flex-wrap:wrap;gap:7px;margin-top:5px}button{cursor:pointer;font:inherit;font-size:12px;border:1px solid #c5d3e6;background:#f5f8fd;color:#385d90;border-radius:7px;padding:7px 11px}button[aria-pressed=true]{background:#275fbc;border-color:#275fbc;color:white}button:focus-visible{outline:2px solid #e39a33;outline-offset:2px}.explain{background:#f2f6fd;border:1px solid #dce6f4;padding:12px 14px;border-radius:8px;margin-top:10px;min-height:66px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.card{background:#f5f7fb;border:1px solid #e0e6ef;border-radius:9px;padding:13px}.card h3{margin-bottom:5px}.card strong{color:#285b9a}.note{font-size:12px;color:#63738a;margin-top:10px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:10px 8px;text-align:left;vertical-align:top;border-bottom:1px solid #e6ebf2}th{background:#f3f6fb;color:#53667f}td:first-child{font-weight:600}.current td{background:#f0f6ff}tbody tr:last-child td{border:0}.mini-flow{background:#f3f6fb;border-radius:8px;padding:12px;font-size:13px;margin:10px 0;color:#2a4a76;line-height:2}.allowed,.denied{padding:10px 12px;border:1px solid #d8e5df;border-radius:8px;background:#f3f9f5;margin-top:10px}.denied{border-color:#ebd8c7;background:#fff7ef}.allowed h3{color:#377156}.denied h3{color:#8c613a}.stack>*+*{margin-top:9px}.source{font-size:12px;line-height:1.9}.footer{font-size:12px;color:#63738a;margin-top:6px}.status{display:inline-block;font-size:11px;border-radius:4px;padding:2px 5px;background:#e0edff;color:#315e9b}.status.alt{background:#f1f2f5;color:#6c7483}@media(max-width:950px){.grid{grid-template-columns:1fr}.cards{grid-template-columns:1fr}.top{display:block}.badge{display:inline-block;margin-top:10px}}@media(max-width:550px){body{padding:18px 12px}.panel{padding:13px}h1{font-size:22px}}
+</style>
+</head>
+<body>
+<header class="top"><div><h1>浏览器 Agent · 当前模块架构</h1><p class="lead">对应 examples/cloudflare-price-agent 源码；区分“控制器在哪里运行”和“浏览器如何接入”。</p></div><span class="badge">代码核对：2026-10-20</span></header>
+<div class="banner"><strong>当前：Agents SDK 和工具执行代码都在 Cloudflare；Chrome 在 Browser Run。本地 Node 只做请求转发。</strong><p>DeepSeek 负责返回下一步工具调用；我们写的 Agent 循环负责真正执行。这个 Cloudflare demo 使用 Cloudflare 的 SDK，未接入之前 Docker demo 的 OpenMuse 电脑控制 SDK。</p></div>
+<section class="panel"><h2>实际调用链：从用户一句话，到云端浏览器操作</h2>
+<div class="scroll"><svg class="diagram" viewBox="0 0 1260 625" role="img" aria-labelledby="diagram-title diagram-desc">
+<title id="diagram-title">当前 Cloudflare 浏览器 Agent 架构</title><desc id="diagram-desc">用户网页可经本地转发代理访问 Worker API。Worker 通过 RPC 调用 PriceAgent Durable Object，Agent 调用外部 DeepSeek，收到工具调用后通过 Puppeteer 与 Browser Run 交互。SQLite 保存对话和浏览器存档。Live View 单独连接用户网页和云端浏览器。</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#6888b5"/></marker><marker id="live-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#7f719b"/></marker></defs>
+<rect class="zone" x="15" y="15" width="245" height="450" rx="12"/><text class="zone-label" x="32" y="43">用户电脑 · 只有页面和可选代理</text>
+<rect class="cf-zone" x="285" y="15" width="720" height="450" rx="12"/><text class="zone-label cf-label" x="302" y="43">Cloudflare · Worker / Durable Object / Browser Run</text>
+<rect class="zone" x="530" y="80" width="220" height="305" rx="10"/><text class="zone-label" x="546" y="103">PriceAgent Durable Object</text>
+<g class="node" data-module="ui"><rect x="35" y="85" width="205" height="95" rx="9"/><text class="name" x="50" y="113">HTML / JS 对话界面</text><text class="detail" x="50" y="137">输入任务、看历史与执行状态</text><text class="detail" x="50" y="158">每 2 秒轮询 /api/state</text></g>
+<g class="node" data-module="proxy"><rect x="35" y="225" width="205" height="95" rx="9"/><text class="name" x="50" y="252">本地 Node 转发代理</text><text class="detail" x="50" y="276">127.0.0.1:8791 · 可选</text><text class="detail" x="50" y="297">添加访问口令后转发 HTTPS</text></g>
+<g class="node" data-module="api"><rect x="315" y="155" width="180" height="110" rx="9"/><text class="name" x="330" y="184">Worker API</text><text class="detail" x="330" y="208">src/index.ts</text><text class="detail" x="330" y="229">鉴权、路由、参数校验</text><text class="detail" x="330" y="250">getAgentByName + RPC</text></g>
+<g class="node" data-module="agent"><rect x="545" y="117" width="190" height="80" rx="8"/><text class="name" x="557" y="142">Agent 多轮执行循环</text><text class="detail" x="557" y="164">agents SDK + src/agent.ts</text><text class="detail" x="557" y="184">调用模型、分发工具、停止任务</text></g>
+<g class="node" data-module="tools"><rect x="545" y="219" width="190" height="79" rx="8"/><text class="name" x="557" y="244">浏览器工具执行器</text><text class="detail" x="557" y="266">src/browser.ts</text><text class="detail" x="557" y="286">@cloudflare/puppeteer</text></g>
+<g class="node" data-module="storage"><rect x="545" y="320" width="190" height="50" rx="8"/><text class="name" x="557" y="341">DO 内置 SQLite</text><text class="detail" x="557" y="360">对话、价格证据、浏览器存档</text></g>
+<g class="node" data-module="browser"><rect x="785" y="140" width="195" height="130" rx="9"/><text class="name" x="800" y="171">Browser Run</text><text class="detail" x="800" y="196">真正运行的远程 Chrome</text><text class="detail" x="800" y="217">网页、DOM、Cookie、标签页</text><text class="detail" x="800" y="247">浏览器进程不在 Worker 内</text></g>
+<g class="node" data-module="web"><rect x="1040" y="140" width="200" height="100" rx="9"/><text class="name" x="1055" y="170">公开网站</text><text class="detail" x="1055" y="195">Bing / 商家 / 目标网页</text><text class="detail" x="1055" y="218">互联网请求由云端 Chrome 发出</text></g>
+<g class="node" data-module="live"><rect x="785" y="330" width="195" height="85" rx="9"/><text class="name" x="800" y="357">Cloudflare Live View</text><text class="detail" x="800" y="380">临时签名链接 · live.browser.run</text><text class="detail" x="800" y="401">网页画面与人工交互</text></g>
+<g class="node" data-module="viewer"><rect x="35" y="365" width="205" height="75" rx="9"/><text class="name" x="50" y="393">同一前端的实时画面</text><text class="detail" x="50" y="418">iframe 直接连接 Live View</text></g>
+<g class="node" data-module="model"><rect x="545" y="510" width="220" height="85" rx="9"/><text class="name" x="560" y="540">DeepSeek API · 外部模型</text><text class="detail" x="560" y="564">deepseek-flash · 不在 Worker 内</text><text class="detail" x="560" y="584">返回回答或 tool_calls JSON</text></g>
+<path class="edge" d="M137 180V225"/><path class="edge" d="M240 272H276V210H315"/><text class="edge-label" x="264" y="292">HTTPS</text>
+<path class="edge" d="M495 210H516V157H545"/><text class="edge-label" x="500" y="148">RPC</text>
+<path class="edge" d="M640 197V219"/><path class="edge" d="M640 298V320"/>
+<path class="edge" d="M735 258H759V210H785"/><text class="edge-label" x="751" y="293">BROWSER binding / CDP</text>
+<path class="edge" d="M980 188H1040"/><text class="edge-label" x="987" y="178">HTTPS</text>
+<path class="edge" d="M545 176H510V551H545"/><text class="edge-label" x="304" y="500">HTTPS：messages + tools → 模型</text><text class="edge-label" x="304" y="521">← 回答 / 工具名 + 参数</text>
+<path class="live-edge" d="M882 270V330"/><path class="live-edge" d="M785 405H752V425H240"/><text class="edge-label" x="345" y="416">独立的画面 / 交互链路，不经过模型</text>
+<text class="edge-label" x="32" y="486">也可直接打开 workers.dev 网页，跳过本地代理。</text><text class="edge-label" x="32" y="507">关闭本地代理，不会自动关闭云端浏览器。</text>
+</svg></div>
+<nav class="steps" aria-label="逐步查看 Agent 调用链">
+<button type="button" data-step="all" aria-pressed="true">完整架构</button><button type="button" data-step="request" aria-pressed="false">① 用户请求</button><button type="button" data-step="model" aria-pressed="false">② 调用模型</button><button type="button" data-step="dispatch" aria-pressed="false">③ 分发工具</button><button type="button" data-step="execute" aria-pressed="false">④ 操作浏览器</button><button type="button" data-step="result" aria-pressed="false">⑤ 保存与返回</button><button type="button" data-step="live" aria-pressed="false">实时画面</button>
+</nav><p id="step-explanation" class="explain" aria-live="polite">橙色高亮可逐步查看一次工具调用。Agent 代码、模型推理服务、Chrome 进程是三个不同的运行位置。</p>
+</section>
+<div class="grid"><div>
+<section class="panel"><h2>三个 SDK / 模块，各自负责什么？</h2><div class="cards">
+<article class="card"><h3>Cloudflare Agents SDK</h3><p><strong>有状态运行框架</strong></p><p class="small">PriceAgent 继承 Agent；提供持久状态、SQLite、RPC 与调度。对话循环和工具定义由本项目代码实现。</p></article>
+<article class="card"><h3>@cloudflare/puppeteer</h3><p><strong>浏览器控制客户端</strong></p><p class="small">控制代码运行在 DO；通过 BROWSER binding 启动/连接远程 Chrome，执行导航、点击、DOM 读取与截图。</p></article>
+<article class="card"><h3>之前的 OpenMuse 电脑 SDK</h3><p><strong>当前 Cloudflare demo 未用</strong></p><p class="small">之前 Docker 方案的电脑控制入口属于另一条链路，不能因为仓库叫 OpenMuse 就认为这里提供了完整 Linux 控制。</p></article>
+</div></section>
+<section class="panel"><h2>一次工具调用到底发生了什么？</h2><div class="mini-flow">用户：“搜索某商品价格” → DO 把历史消息和工具清单发给 DeepSeek → 模型返回 <code>browser_search({query: ...})</code> → DO 校验并执行 → Puppeteer 操作云端 Chrome → 返回页面正文和元素 ref → DO 把结果作为 tool 消息交回模型 → 模型继续操作或回答。</div><p>模型拿到的是网页观察结果和允许的工具定义。模型不会直接登录 Worker、获得浏览器 CDP 连接或执行我们的 TypeScript 代码。</p><p class="note">截图在工具操作后更新；Live View 是另一条实时链路。只有截图更新，不能据此认定实时画面连接正常。</p></section>
+<section class="panel"><h2>“使用方式很多”需要分成两个维度看</h2><div class="scroll"><table><thead><tr><th>控制器部署方式</th><th>Agent / tools 在哪</th><th>Chrome 在哪</th><th>当前状态</th></tr></thead><tbody>
+<tr class="current"><td>云端 Agent + 云端浏览器</td><td>Worker 的 DO</td><td>Cloudflare Browser Run</td><td><span class="status">本 demo 当前方式</span></td></tr>
+<tr><td>本地 Agent + 云端浏览器</td><td>本地 Node / 自有服务器</td><td>Cloudflare Browser Run</td><td><span class="status alt">可选架构，未实现</span></td></tr>
+<tr><td>Agent + 自建 Docker 浏览器</td><td>本地或自己的后端</td><td>自己的 Docker / Linux</td><td><span class="status alt">之前的独立 demo</span></td></tr>
+</tbody></table></div><p class="note">本地打开 HTML，不能说明 Agent 在本地。本地 Agent 也可以控制远程浏览器；决定运行位置的是控制器进程。</p>
+<div class="scroll" style="margin-top:12px"><table><thead><tr><th>浏览器接入接口</th><th>适用情况</th><th>与本 demo 的关系</th></tr></thead><tbody>
+<tr><td>Workers binding + SDK</td><td>Worker 里的 Puppeteer / Playwright 控制器</td><td>当前使用的 BROWSER binding</td></tr>
+<tr><td>CDP / WebSocket</td><td>持续会话、多步操作；本地或云端控制器均可连接</td><td>可用于把控制器迁回本地；浏览器仍在云端 [1]</td></tr>
+<tr><td>Quick Actions / REST</td><td>一次性抓正文、截图、提取网页等</td><td>当前 Agent 没走这条；不等同于持续多轮操作会话 [2]</td></tr>
+<tr><td>MCP 工具接口</td><td>给支持 MCP 的 Agent 包装浏览器能力</td><td>是工具接入协议；不自动决定 Agent 或浏览器运行位置 [3]</td></tr>
+</tbody></table></div></section>
+</div><aside>
+<section class="panel"><h2>按你的用例：对外只提供浏览器</h2><p>保留对话、多轮浏览、实时查看、人工接管、浏览器存档 / 恢复；Agent 使用范围集中在网页。</p><div class="allowed"><h3>模型工具允许</h3><p class="small">搜索、打开 HTTP(S) 网页、读取网页可见正文、点击、普通文本输入、Enter / Tab / Escape、滚动，以及记录网页价格证据。</p></div><div class="denied"><h3>模型工具未提供</h3><p class="small">读取本机/服务器文件、列目录、Shell / 终端命令、安装软件、Linux 桌面控制、任意 JavaScript 执行、文件上传下载 API。</p></div><p class="note">读取网页内容是浏览器使用的一部分；Cookie / localStorage 的保存是内部会话管理，不是给 Agent 开放通用文件系统。</p></section>
+<section class="panel"><h2>当前权限边界落实在哪里？</h2><div class="stack small">
+<p><strong>工具注册：</strong><code>src/core.ts</code> 只向模型发送 7 个浏览器动作和 1 个证据工具。</p>
+<p><strong>工具分发：</strong><code>DemoBrowser.action()</code> 在启动浏览器前拒绝未注册工具、文件协议及无效导航。</p>
+<p><strong>页面操作：</strong>校验当前页面网址；拒绝文件输入框、显式 download 链接和非网页协议链接。</p>
+<p><strong>请求拦截：</strong>HTTP(S) 走公开域名检查；data/blob 只作为内嵌资源；拦截到的本地/内部协议请求被拒绝。</p>
+<p><strong>后端：</strong>没有文件或命令 API，未绑定 Sandbox / Containers，也没有连接 Docker。</p>
+</div><p class="note">以上是应用的 Agent 工具策略。人工 Live View 仍是远程浏览器交互；请求拦截不是操作系统隔离或 DNS 固定，也不能证明所有浏览器自主下载都被阻止。</p></section>
+<section class="panel"><h2>去源码看这几处就够了</h2><table><thead><tr><th>文件</th><th>看什么</th></tr></thead><tbody>
+<tr><td>wrangler.jsonc</td><td>Worker、BROWSER、PRICE_AGENT / SQLite 绑定</td></tr>
+<tr><td>src/index.ts</td><td>API 鉴权 → getAgentByName → invoke</td></tr>
+<tr><td>src/agent.ts</td><td>Agent 类、历史消息、模型 / 工具循环</td></tr>
+<tr><td>src/core.ts</td><td>工具 schema、DeepSeek HTTPS 请求、系统指令</td></tr>
+<tr><td>src/browser.ts</td><td>云端 Chrome、DOM / 点击 / 截图、Live View</td></tr>
+<tr><td>src/checkpoint.ts</td><td>Cookie、站点存储与存档边界</td></tr>
+<tr><td>public/app.js</td><td>网页聊天、状态轮询、Live View iframe</td></tr>
+<tr><td>scripts/local-proxy.mjs</td><td>本地只转发 HTTP、补 demo 鉴权</td></tr>
+</tbody></table></section>
+<section class="panel"><h2>运行事实与限制</h2><div class="stack small"><p>架构来自源码与已部署入口，不代表本地代理承担了模型推理或浏览器操作。</p><p>目前是单 owner 私有 demo：一个访问口令对应一个 DO，多对话存于其 SQLite。没有实现 2000 用户的独立租户鉴权与调度。</p><p>本次云端模型拒绝了读取服务器文件的请求，且没有启动 Chrome；随后普通网页浏览在创建浏览器时仍返回 HTTP 429。权限单元测试 28 项通过，真实浏览器的新策略行为和完整 UI 视觉验收仍未完成。</p><p>实时展示的是云端 Chrome 页面，不是完整 Linux 桌面。</p></div></section>
+</aside></div>
+<section class="panel source"><h2>官方接入方式参考</h2><p>[1] <a href="https://developers.cloudflare.com/browser-run/cdp/" target="_blank" rel="noreferrer">Browser Run CDP：可从本地、外部服务器或 CI 连接</a> · [2] <a href="https://developers.cloudflare.com/browser-run/quick-actions/" target="_blank" rel="noreferrer">Quick Actions：REST / Worker binding 与持续会话的区别</a> · [3] <a href="https://developers.cloudflare.com/browser-run/cdp/mcp-clients/" target="_blank" rel="noreferrer">MCP 客户端接入 CDP</a></p><p><a href="https://developers.cloudflare.com/agents/runtime/lifecycle/agent-class/" target="_blank" rel="noreferrer">Agents SDK 与 Durable Object 的关系</a> · <a href="https://developers.cloudflare.com/browser-run/features/live-view/" target="_blank" rel="noreferrer">Live View</a></p></section>
+<footer class="footer">本页为可独立打开的静态 HTML，不加载外部脚本，不包含访问口令、模型密钥、Cloudflare 账户令牌或真实 Live View 签名链接。</footer>
+<script>
+const steps={
+ all:{modules:[],text:'橙色高亮可逐步查看一次工具调用。Agent 代码、模型推理服务、Chrome 进程是三个不同的运行位置。'},
+ request:{modules:['ui','proxy','api','agent'],text:'① 网页将用户任务发给 Worker；本地代理只添加 demo 访问口令并转发。Worker 鉴权后，以 RPC 调用 PriceAgent。直接访问 workers.dev 时可跳过本地代理。'},
+ model:{modules:['agent','storage','model'],text:'② DO 读取历史消息，调用外部 DeepSeek API。请求带上 messages 和允许的工具 schema；DeepSeek 返回回答，或带工具名 / 参数的 tool_calls。'},
+ dispatch:{modules:['model','agent','tools'],text:'③ Agent 循环接收 tool_calls，解析参数后执行本项目定义的浏览器工具。未知工具名先被拒绝。模型返回 JSON，不会直接运行工具。'},
+ execute:{modules:['tools','browser','web'],text:'④ 云端 DO 内的 Puppeteer 控制客户端，经 BROWSER binding 与云端 Chrome 通信。Chrome 再访问目标网站。控制器进程与浏览器进程分开。'},
+ result:{modules:['browser','tools','agent','storage','model','ui'],text:'⑤ 浏览器工具返回页面观察和截图；DO 保存状态、对话、证据与存档，再把工具结果交回模型。循环继续，直到模型回答、停止或达到预算；前端通过轮询取得状态。'},
+ live:{modules:['browser','live','viewer'],text:'Live View 单独传送画面和人工交互：Worker 在鉴权后发放临时链接，用户网页里的 iframe 直接连接 live.browser.run。画面不经过 DeepSeek，也不需要本地代理持续转发视频。'}
+};
+function selectStep(key){const step=steps[key];document.querySelectorAll('[data-module]').forEach(node=>{node.classList.toggle('active',step.modules.includes(node.dataset.module));});document.querySelectorAll('[data-step]').forEach(button=>{button.setAttribute('aria-pressed',String(button.dataset.step===key));});document.getElementById('step-explanation').textContent=step.text;}
+document.querySelectorAll('[data-step]').forEach(button=>{button.addEventListener('click',()=>selectStep(button.dataset.step));});
+</script>
+</body>
+</html>
