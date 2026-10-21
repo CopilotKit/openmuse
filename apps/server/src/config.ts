@@ -56,6 +56,8 @@ export interface Config {
   computerDeploymentId?: string;
   computerProvider?: ComputerProvider;
   computerNetwork?: ComputerNetwork;
+  computerPidsLimit?: number;
+  computerInit?: boolean;
   computerE2bTemplate?: string;
   e2bApiKey?: string;
   allowedOrigins: string[];
@@ -125,6 +127,9 @@ export function readConfig(): Config {
   const computerNetwork = process.env.COMPUTER_NETWORK?.trim() || "none";
   if (computerNetwork !== "none" && computerNetwork !== "bridge")
     throw new Error("COMPUTER_NETWORK must be none or bridge");
+  const computerPidsLimit = Number(process.env.COMPUTER_PIDS_LIMIT ?? 128);
+  if (!Number.isInteger(computerPidsLimit) || computerPidsLimit < 128 || computerPidsLimit > 1024)
+    throw new Error("COMPUTER_PIDS_LIMIT must be an integer between 128 and 1024");
   const e2bApiKey = process.env.E2B_API_KEY?.trim();
   if (process.env.COMPUTER_ENABLED === "true" && computerProvider === "e2b-desktop") {
     if (!e2bApiKey)
@@ -167,6 +172,8 @@ export function readConfig(): Config {
     computerDeploymentId: process.env.COMPUTER_DEPLOYMENT_ID,
     computerProvider,
     computerNetwork,
+    computerPidsLimit,
+    computerInit: process.env.COMPUTER_INIT === "true",
     computerE2bTemplate: process.env.COMPUTER_E2B_TEMPLATE?.trim() || "desktop",
     e2bApiKey,
     allowedOrigins: (

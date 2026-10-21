@@ -197,6 +197,40 @@ test("bridge opt-in refuses mismatched networks, extra networks and unsafe conta
   }
 });
 
+test("configured process budgets and init are applied without relaxing other isolation", async () => {
+  const inspect = sandbox();
+  inspect.HostConfig.PidsLimit = 512;
+  inspect.HostConfig.Init = true;
+  const options = { missing: true, inspect };
+  const f = fixture(options);
+  const service = new ComputerService(
+    db,
+    { ...config, computerPidsLimit: 512, computerInit: true },
+    (args, opts) => {
+      if (args[0] === "container" && args[1] === "create") options.missing = false;
+      return f.runner(args, opts);
+    },
+  );
+  assert.equal((await service.start("owner")).status, "running");
+  const creation = f.calls.find((call) => call.args[1] === "create");
+  assert.ok(creation);
+  assert.equal(creation.args[creation.args.indexOf("--pids-limit") + 1], "512");
+  assert.ok(creation.args.includes("--init"));
+  assert.ok(creation.args.includes("--read-only"));
+  assert.ok(creation.args.includes("no-new-privileges"));
+  assert.ok(!creation.args.includes("--publish"));
+  await assert.rejects(
+    new ComputerService(db, config, f.runner).execute("owner", { command: "true" }),
+    /isolation/,
+  );
+  inspect.HostConfig.PidsLimit = 513;
+  await assert.rejects(service.execute("owner", { command: "true" }), /isolation/);
+  inspect.HostConfig.PidsLimit = 512;
+  inspect.HostConfig.Init = false;
+  await assert.rejects(service.execute("owner", { command: "true" }), /isolation/);
+  assert.ok(!f.calls.some((call) => call.args[0] === "exec"));
+});
+
 test("Stop interrupts an active command and its final output cannot overwrite the interrupted receipt", async () => {
   let finish: ((result: DockerResult) => void) | undefined;
   let signalStarted: (() => void) | undefined;

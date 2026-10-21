@@ -48,6 +48,7 @@ export function sandbox(running = true, owner = "owner") {
       Memory: 536870912,
       MemorySwap: 536870912,
       PidsLimit: 128,
+      Init: false,
       NanoCpus: 1000000000,
       Binds: null,
       Devices: [],

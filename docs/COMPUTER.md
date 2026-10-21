@@ -21,6 +21,13 @@ Open **Computer → Terminal → Start computer**. Run `pwd` or `python3 --versi
 
 If Docker is unavailable, the app reports the connection error. There is no fallback that executes commands on the API host.
 
+For desktop workloads that need more processes, set `COMPUTER_PIDS_LIMIT=512`
+(default 128, bounded to 128–1024). `COMPUTER_INIT=true` adds Docker's init process
+to reap orphaned children. Existing containers must be recreated to enable init;
+preserve their named `/workspace` volume. These options do not change filesystem,
+network, memory, CPU, or ownership checks. Task-specific process cleanup remains
+the caller's responsibility.
+
 ### Enable Docker outbound networking (optional)
 
 Docker commands run without network access by default. To allow downloads and HTTP/API requests, set this on the API and any task worker, then restart them:
