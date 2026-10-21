@@ -47,7 +47,6 @@ const inspectionSchema = z.object({
     Memory: z.number(),
     MemorySwap: z.number(),
     PidsLimit: z.number().nullable(),
-    Init: z.boolean().nullable().optional(),
     NanoCpus: z.number(),
     Binds: z.array(z.string()).nullable(),
     Devices: z.array(z.unknown()).nullable(),
@@ -80,12 +79,6 @@ export class DockerComputer implements ComputerBackend {
     private readonly config: Config,
     private readonly docker: DockerRunner,
   ) {}
-  private pidsLimit() {
-    const limit = this.config.computerPidsLimit ?? 128;
-    if (!Number.isInteger(limit) || limit < 128 || limit > 1024)
-      throw new AppError("COMPUTER_PIDS_LIMIT must be an integer between 128 and 1024", 503);
-    return limit;
-  }
   private image() {
     const image = this.config.computerImage ?? "openmuse-computer:local";
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{0,250}$/.test(image))
@@ -147,8 +140,7 @@ export class DockerComputer implements ComputerBackend {
       h.MemorySwap === h.Memory &&
       h.PidsLimit !== null &&
       h.PidsLimit > 0 &&
-      h.PidsLimit <= this.pidsLimit() &&
-      (!this.config.computerInit || h.Init === true) &&
+      h.PidsLimit <= 128 &&
       h.NanoCpus > 0 &&
       h.NanoCpus <= 1000000000 &&
       empty(h.Binds) &&
@@ -256,8 +248,7 @@ export class DockerComputer implements ComputerBackend {
       "--cpus",
       "1",
       "--pids-limit",
-      String(this.pidsLimit()),
-      ...(this.config.computerInit ? ["--init"] : []),
+      "128",
       "--restart",
       "no",
       "--tmpfs",

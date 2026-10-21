@@ -173,27 +173,3 @@ test("Docker networking requires an explicit bridge opt-in and rejects other mod
     assert.throws(() => readConfig(), /COMPUTER_NETWORK must be none or bridge/);
   }
 });
-
-test("Docker process budgets are bounded and init is opt-in", (t) => {
-  const previous = { ...process.env };
-  t.after(() => {
-    process.env = previous;
-  });
-  process.env.WORKSPACE_MODE = "sample";
-  process.env.AGENT_BACKEND = "model";
-  process.env.HOST = "127.0.0.1";
-  process.env.CPK_INTELLIGENCE_API_KEY = "test-project-key-never-sent";
-  delete process.env.COMPUTER_NETWORK;
-  delete process.env.COMPUTER_PIDS_LIMIT;
-  delete process.env.COMPUTER_INIT;
-  assert.equal(readConfig().computerPidsLimit, 128);
-  assert.equal(readConfig().computerInit, false);
-  process.env.COMPUTER_PIDS_LIMIT = "512";
-  process.env.COMPUTER_INIT = "true";
-  assert.equal(readConfig().computerPidsLimit, 512);
-  assert.equal(readConfig().computerInit, true);
-  for (const value of ["0", "-1", "127", "1025", "1.5", "NaN", ""]) {
-    process.env.COMPUTER_PIDS_LIMIT = value;
-    assert.throws(() => readConfig(), /COMPUTER_PIDS_LIMIT/);
-  }
-});
