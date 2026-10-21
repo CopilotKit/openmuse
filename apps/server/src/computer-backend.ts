@@ -72,7 +72,9 @@ type Inspection = z.infer<typeof inspectionSchema>;
 export class DockerComputer implements ComputerBackend {
   readonly provider = "docker";
   readonly receipts = "computer-commands";
-  readonly network = "disabled";
+  get network() {
+    return this.config.computerNetwork === "bridge" ? "enabled" : "disabled";
+  }
   constructor(
     private readonly config: Config,
     private readonly docker: DockerRunner,
@@ -132,7 +134,7 @@ export class DockerComputer implements ComputerBackend {
       empty(h.CapAdd) &&
       h.SecurityOpt?.length === 1 &&
       h.SecurityOpt.includes("no-new-privileges") &&
-      h.NetworkMode === "none" &&
+      h.NetworkMode === (this.config.computerNetwork ?? "none") &&
       h.Memory > 0 &&
       h.Memory <= 536870912 &&
       h.MemorySwap === h.Memory &&
@@ -155,7 +157,8 @@ export class DockerComputer implements ComputerBackend {
       c.Mounts[0].Name === identity.volume &&
       c.Mounts[0].Destination === "/workspace" &&
       c.Mounts[0].RW &&
-      Object.keys(c.NetworkSettings.Networks).every((network) => network === "none");
+      Object.keys(c.NetworkSettings.Networks).length === 1 &&
+      Object.hasOwn(c.NetworkSettings.Networks, this.config.computerNetwork ?? "none");
     if (!safe)
       throw new AppError(
         "Computer ownership or isolation does not match this deployment; refusing to attach",
@@ -235,7 +238,7 @@ export class DockerComputer implements ComputerBackend {
       "--security-opt",
       "no-new-privileges",
       "--network",
-      "none",
+      this.config.computerNetwork ?? "none",
       "--ipc",
       "private",
       "--memory",

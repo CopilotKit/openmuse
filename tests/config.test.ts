@@ -151,3 +151,25 @@ test("computer provider defaults to Docker and e2b-desktop requires a server-sid
     }
   }
 });
+
+test("Docker networking requires an explicit bridge opt-in and rejects other modes", (t) => {
+  const previous = { ...process.env };
+  t.after(() => {
+    process.env = previous;
+  });
+  process.env.WORKSPACE_MODE = "sample";
+  process.env.AGENT_BACKEND = "model";
+  process.env.HOST = "127.0.0.1";
+  process.env.CPK_INTELLIGENCE_API_KEY = "test-project-key-never-sent";
+  process.env.COMPUTER_PROVIDER = "docker";
+  delete process.env.COMPUTER_NETWORK;
+  assert.equal(readConfig().computerNetwork, "none");
+  process.env.COMPUTER_NETWORK = " bridge ";
+  assert.equal(readConfig().computerNetwork, "bridge");
+  process.env.COMPUTER_NETWORK = "none";
+  assert.equal(readConfig().computerNetwork, "none");
+  for (const value of ["host", "container:other", "custom-network", "true"]) {
+    process.env.COMPUTER_NETWORK = value;
+    assert.throws(() => readConfig(), /COMPUTER_NETWORK must be none or bridge/);
+  }
+});

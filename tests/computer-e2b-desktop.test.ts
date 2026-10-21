@@ -530,6 +530,10 @@ test("the desktop stream URL is reused while serving and needs a running compute
 test("agent instructions stay provider-neutral and mention the desktop only when it exists", () => {
   assert.match(computerInstructions(), /Docker Linux container/);
   assert.doesNotMatch(computerInstructions(), /desktop tab/i);
+  assert.match(computerInstructions(), /Network access is disabled/);
+  const onlineDocker = computerInstructions("docker", "bridge");
+  assert.match(onlineDocker, /Outbound network access is enabled/);
+  assert.doesNotMatch(onlineDocker, /Network access is disabled|use_desktop/);
   const desktop = computerInstructions("e2b-desktop");
   assert.match(desktop, /graphical Xfce desktop/);
   assert.match(desktop, /Desktop tab/);
