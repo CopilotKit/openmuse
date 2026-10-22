@@ -34,7 +34,7 @@ import { backgroundFailure } from "../log.ts";
 import { SearchService } from "../search.ts";
 import type { WorkspaceService } from "../workspace.ts";
 import { analyzeSpending } from "./finance.ts";
-import { executeModelTask } from "./model.ts";
+import { executeModelTask, taskAnswers } from "./model.ts";
 import {
   countPageDiff,
   describePageDiff,
@@ -341,6 +341,12 @@ export class AgentService {
     const task = await this.getTask(owner, id);
     if (task.status !== "waiting_input")
       throw new AppError("This task is not waiting for input", 409);
+    // Each run starts fresh, so keep every reply with its question, not just the latest.
+    const { answer: _latest, ...state } = task.state;
+    const answers = [
+      ...taskAnswers(task.state),
+      { ...(task.question ? { question: task.question } : {}), answer },
+    ];
     const next = await this.db.compareAndSwap<AgentTask>(
       owner,
       "tasks",
@@ -350,7 +356,7 @@ export class AgentService {
         status: "queued",
         question: null,
         input: { ...task.input, ...(fields ? { fields } : {}) },
-        state: { ...task.state, answer },
+        state: { ...state, answers },
         updatedAt: date(),
       },
     );
