@@ -2,6 +2,7 @@ import { ExternalLink } from "lucide-react-native";
 import { memo, useEffect, useState } from "react";
 import { ActivityIndicator, AppState, Linking, Platform, View } from "react-native";
 import BrowserConsole from "./BrowserConsole";
+import { t } from "./strings";
 import { Button, colors, ErrorNotice } from "./ui";
 import { useWorkspace } from "./workspace";
 
@@ -94,7 +95,7 @@ export const DesktopStream = memo(function DesktopStream({
       <ErrorNotice error={error} />
       {embedded && !url && !error && <ActivityIndicator color={colors.blueDark} />}
       {!!url && embed && Platform.OS === "web" && (
-        <BrowserConsole url={url} title="Computer desktop" sandboxed />
+        <BrowserConsole url={url} title={t("computerDesktop")} sandboxed />
       )}
       {running && (!embedded || !!url) && (
         <Button
@@ -103,7 +104,7 @@ export const DesktopStream = memo(function DesktopStream({
           disabled={opening}
           onPress={() => void open()}
         >
-          {opening ? "Opening…" : "Open desktop"}
+          {opening ? t("opening") : t("openDesktop")}
         </Button>
       )}
     </View>

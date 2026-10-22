@@ -7,6 +7,7 @@ import {
   jevToolResultSchema,
   parseJevAction,
 } from "../../../packages/domain/src/jev";
+import { t } from "./strings";
 
 export function parseJevResult(value: unknown): JevToolResult | null {
   let result = value;
@@ -100,7 +101,7 @@ export function retryChoiceAvailable(
 }
 
 export function selectionText(panel: JevPanel, optionId: string): string {
-  if (!panel.options.some((option) => option.id === optionId)) throw new Error("Unknown choice");
+  if (!panel.options.some((option) => option.id === optionId)) throw new Error(t("unknownChoice"));
   return encodeJevAction({
     panelId: panel.id,
     threadId: panel.threadId,
@@ -148,11 +149,11 @@ function panelForAction(messages: readonly unknown[], action: JevAction): JevPan
 export function displayJevUserMessage(text: string, precedingMessages: readonly unknown[]): string {
   if (!text.startsWith(jevActionPrefix)) return text;
   const action = actionFromText(text);
-  if (!action) return "Choice unavailable";
+  if (!action) return t("choiceUnavailable");
   const option = panelForAction(precedingMessages, action)?.options.find(
     (candidate) => candidate.id === action.optionId,
   );
-  return option ? `Selected: ${option.label}` : "Choice unavailable";
+  return option ? t("selectedLabel", { label: option.label }) : t("choiceUnavailable");
 }
 
 export function confirmedJevSelection(

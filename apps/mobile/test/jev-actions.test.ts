@@ -74,7 +74,7 @@ test("finds AG-UI function tool calls as rendered by CopilotKit", () => {
   assert.equal(latestJevPanelId(messages, "thread-1"), "panel-1");
   assert.equal(
     displayJevUserMessage(selectionText(panel, "explore"), messages),
-    "Selected: Explore exhibits",
+    "已选择：Explore exhibits",
   );
 });
 
@@ -146,7 +146,7 @@ test("selection uses the bounded server action format and rejects unknown option
     selectionText(panel, "explore"),
     '[OpenMuse choice] {"panelId":"panel-1","threadId":"thread-1","candidateSetVersion":1,"optionId":"explore"}',
   );
-  assert.throws(() => selectionText(panel, "unknown"), /Unknown choice/);
+  assert.throws(() => selectionText(panel, "unknown"), /未知的选择/);
 });
 
 test("the transcript shows the trusted option label instead of the action payload", () => {
@@ -155,10 +155,10 @@ test("the transcript shows the trusted option label instead of the action payloa
     { role: "assistant", toolCalls: [{ id: "tool-1", name: "present_choices" }] },
     { role: "tool", toolCallId: "tool-1", content: JSON.stringify({ panel }) },
   ];
-  assert.equal(displayJevUserMessage(action, history), "Selected: Explore exhibits");
+  assert.equal(displayJevUserMessage(action, history), "已选择：Explore exhibits");
   assert.equal(displayJevUserMessage("Hello", history), "Hello");
-  assert.equal(displayJevUserMessage("[OpenMuse choice] {broken", history), "Choice unavailable");
-  assert.equal(displayJevUserMessage(action, []), "Choice unavailable");
+  assert.equal(displayJevUserMessage("[OpenMuse choice] {broken", history), "选择不可用");
+  assert.equal(displayJevUserMessage(action, []), "选择不可用");
 });
 
 test("a replayed choice is confirmed only after a server continuation", () => {

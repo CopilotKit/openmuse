@@ -1,0 +1,753 @@
+{
+  "repo": "1123786563/openmuse",
+  "parent": 1,
+  "issues": {
+    "B01": {
+      "number": 2,
+      "id": 5814845149,
+      "url": "https://github.com/1123786563/openmuse/issues/2"
+    },
+    "B02": {
+      "number": 3,
+      "id": 5814845915,
+      "url": "https://github.com/1123786563/openmuse/issues/3"
+    },
+    "B03": {
+      "number": 4,
+      "id": 5814846215,
+      "url": "https://github.com/1123786563/openmuse/issues/4"
+    },
+    "I01": {
+      "number": 5,
+      "id": 5814846666,
+      "url": "https://github.com/1123786563/openmuse/issues/5"
+    },
+    "I02": {
+      "number": 6,
+      "id": 5814847177,
+      "url": "https://github.com/1123786563/openmuse/issues/6"
+    },
+    "I03": {
+      "number": 7,
+      "id": 5814847659,
+      "url": "https://github.com/1123786563/openmuse/issues/7"
+    },
+    "I04": {
+      "number": 8,
+      "id": 5814848057,
+      "url": "https://github.com/1123786563/openmuse/issues/8"
+    },
+    "I05": {
+      "number": 9,
+      "id": 5814848492,
+      "url": "https://github.com/1123786563/openmuse/issues/9"
+    },
+    "I06": {
+      "number": 10,
+      "id": 5814848955,
+      "url": "https://github.com/1123786563/openmuse/issues/10"
+    },
+    "I07": {
+      "number": 11,
+      "id": 5814849286,
+      "url": "https://github.com/1123786563/openmuse/issues/11"
+    },
+    "I08": {
+      "number": 12,
+      "id": 5814849808,
+      "url": "https://github.com/1123786563/openmuse/issues/12"
+    },
+    "I09": {
+      "number": 13,
+      "id": 5814850159,
+      "url": "https://github.com/1123786563/openmuse/issues/13"
+    },
+    "C01": {
+      "number": 14,
+      "id": 5814850594,
+      "url": "https://github.com/1123786563/openmuse/issues/14"
+    },
+    "C02": {
+      "number": 15,
+      "id": 5814851095,
+      "url": "https://github.com/1123786563/openmuse/issues/15"
+    },
+    "C03": {
+      "number": 16,
+      "id": 5814851511,
+      "url": "https://github.com/1123786563/openmuse/issues/16"
+    },
+    "C04": {
+      "number": 17,
+      "id": 5814852009,
+      "url": "https://github.com/1123786563/openmuse/issues/17"
+    },
+    "C05": {
+      "number": 18,
+      "id": 5814852369,
+      "url": "https://github.com/1123786563/openmuse/issues/18"
+    },
+    "C06": {
+      "number": 19,
+      "id": 5814852753,
+      "url": "https://github.com/1123786563/openmuse/issues/19"
+    },
+    "C08": {
+      "number": 20,
+      "id": 5814853221,
+      "url": "https://github.com/1123786563/openmuse/issues/20"
+    },
+    "C09": {
+      "number": 21,
+      "id": 5814853622,
+      "url": "https://github.com/1123786563/openmuse/issues/21"
+    },
+    "K01": {
+      "number": 22,
+      "id": 5814854030,
+      "url": "https://github.com/1123786563/openmuse/issues/22"
+    },
+    "K02": {
+      "number": 23,
+      "id": 5814854428,
+      "url": "https://github.com/1123786563/openmuse/issues/23"
+    },
+    "K03": {
+      "number": 24,
+      "id": 5814854797,
+      "url": "https://github.com/1123786563/openmuse/issues/24"
+    },
+    "K04": {
+      "number": 25,
+      "id": 5814855433,
+      "url": "https://github.com/1123786563/openmuse/issues/25"
+    },
+    "G01": {
+      "number": 26,
+      "id": 5814855938,
+      "url": "https://github.com/1123786563/openmuse/issues/26"
+    },
+    "G02": {
+      "number": 27,
+      "id": 5814856273,
+      "url": "https://github.com/1123786563/openmuse/issues/27"
+    },
+    "G03": {
+      "number": 28,
+      "id": 5814856704,
+      "url": "https://github.com/1123786563/openmuse/issues/28"
+    },
+    "G04": {
+      "number": 29,
+      "id": 5814857097,
+      "url": "https://github.com/1123786563/openmuse/issues/29"
+    },
+    "G05": {
+      "number": 30,
+      "id": 5814857456,
+      "url": "https://github.com/1123786563/openmuse/issues/30"
+    },
+    "G06": {
+      "number": 31,
+      "id": 5814857974,
+      "url": "https://github.com/1123786563/openmuse/issues/31"
+    },
+    "M01": {
+      "number": 32,
+      "id": 5814858328,
+      "url": "https://github.com/1123786563/openmuse/issues/32"
+    },
+    "M02": {
+      "number": 33,
+      "id": 5814858796,
+      "url": "https://github.com/1123786563/openmuse/issues/33"
+    },
+    "M03": {
+      "number": 34,
+      "id": 5814859197,
+      "url": "https://github.com/1123786563/openmuse/issues/34"
+    },
+    "M04": {
+      "number": 35,
+      "id": 5814859528,
+      "url": "https://github.com/1123786563/openmuse/issues/35"
+    },
+    "A01": {
+      "number": 36,
+      "id": 5814859957,
+      "url": "https://github.com/1123786563/openmuse/issues/36"
+    },
+    "A02": {
+      "number": 37,
+      "id": 5814860354,
+      "url": "https://github.com/1123786563/openmuse/issues/37"
+    },
+    "A03": {
+      "number": 38,
+      "id": 5814860843,
+      "url": "https://github.com/1123786563/openmuse/issues/38"
+    },
+    "F01": {
+      "number": 39,
+      "id": 5814861182,
+      "url": "https://github.com/1123786563/openmuse/issues/39"
+    },
+    "F02": {
+      "number": 40,
+      "id": 5814861643,
+      "url": "https://github.com/1123786563/openmuse/issues/40"
+    },
+    "F03": {
+      "number": 41,
+      "id": 5814862105,
+      "url": "https://github.com/1123786563/openmuse/issues/41"
+    },
+    "F04": {
+      "number": 42,
+      "id": 5814862577,
+      "url": "https://github.com/1123786563/openmuse/issues/42"
+    },
+    "F10": {
+      "number": 43,
+      "id": 5814862960,
+      "url": "https://github.com/1123786563/openmuse/issues/43"
+    },
+    "F05": {
+      "number": 44,
+      "id": 5814863428,
+      "url": "https://github.com/1123786563/openmuse/issues/44"
+    },
+    "F06": {
+      "number": 45,
+      "id": 5814863963,
+      "url": "https://github.com/1123786563/openmuse/issues/45"
+    },
+    "F07": {
+      "number": 46,
+      "id": 5814864343,
+      "url": "https://github.com/1123786563/openmuse/issues/46"
+    },
+    "F08": {
+      "number": 47,
+      "id": 5814864690,
+      "url": "https://github.com/1123786563/openmuse/issues/47"
+    },
+    "F09": {
+      "number": 48,
+      "id": 5814865075,
+      "url": "https://github.com/1123786563/openmuse/issues/48"
+    },
+    "R01": {
+      "number": 49,
+      "id": 5814865437,
+      "url": "https://github.com/1123786563/openmuse/issues/49"
+    },
+    "R02": {
+      "number": 50,
+      "id": 5814865808,
+      "url": "https://github.com/1123786563/openmuse/issues/50"
+    },
+    "R03": {
+      "number": 51,
+      "id": 5814866206,
+      "url": "https://github.com/1123786563/openmuse/issues/51"
+    },
+    "R04": {
+      "number": 52,
+      "id": 5814866643,
+      "url": "https://github.com/1123786563/openmuse/issues/52"
+    },
+    "R05": {
+      "number": 53,
+      "id": 5814867117,
+      "url": "https://github.com/1123786563/openmuse/issues/53"
+    },
+    "R06": {
+      "number": 54,
+      "id": 5814867567,
+      "url": "https://github.com/1123786563/openmuse/issues/54"
+    },
+    "R07": {
+      "number": 55,
+      "id": 5814867967,
+      "url": "https://github.com/1123786563/openmuse/issues/55"
+    },
+    "R08": {
+      "number": 56,
+      "id": 5814868333,
+      "url": "https://github.com/1123786563/openmuse/issues/56"
+    },
+    "T01": {
+      "number": 57,
+      "id": 5814868704,
+      "url": "https://github.com/1123786563/openmuse/issues/57"
+    },
+    "T02": {
+      "number": 58,
+      "id": 5814868998,
+      "url": "https://github.com/1123786563/openmuse/issues/58"
+    },
+    "C07": {
+      "number": 59,
+      "id": 5814869372,
+      "url": "https://github.com/1123786563/openmuse/issues/59"
+    },
+    "T03": {
+      "number": 60,
+      "id": 5814869774,
+      "url": "https://github.com/1123786563/openmuse/issues/60"
+    },
+    "T04": {
+      "number": 61,
+      "id": 5814870163,
+      "url": "https://github.com/1123786563/openmuse/issues/61"
+    },
+    "T05": {
+      "number": 62,
+      "id": 5814870603,
+      "url": "https://github.com/1123786563/openmuse/issues/62"
+    },
+    "T06": {
+      "number": 63,
+      "id": 5814871023,
+      "url": "https://github.com/1123786563/openmuse/issues/63"
+    },
+    "T07": {
+      "number": 64,
+      "id": 5814871439,
+      "url": "https://github.com/1123786563/openmuse/issues/64"
+    },
+    "T08": {
+      "number": 65,
+      "id": 5814871808,
+      "url": "https://github.com/1123786563/openmuse/issues/65"
+    },
+    "T09": {
+      "number": 66,
+      "id": 5814872179,
+      "url": "https://github.com/1123786563/openmuse/issues/66"
+    },
+    "T10": {
+      "number": 67,
+      "id": 5814872552,
+      "url": "https://github.com/1123786563/openmuse/issues/67"
+    },
+    "T11": {
+      "number": 68,
+      "id": 5814872919,
+      "url": "https://github.com/1123786563/openmuse/issues/68"
+    },
+    "T12": {
+      "number": 69,
+      "id": 5814873336,
+      "url": "https://github.com/1123786563/openmuse/issues/69"
+    },
+    "T13": {
+      "number": 70,
+      "id": 5814873764,
+      "url": "https://github.com/1123786563/openmuse/issues/70"
+    },
+    "T14": {
+      "number": 71,
+      "id": 5814874132,
+      "url": "https://github.com/1123786563/openmuse/issues/71"
+    },
+    "T15": {
+      "number": 72,
+      "id": 5814874520,
+      "url": "https://github.com/1123786563/openmuse/issues/72"
+    },
+    "T16": {
+      "number": 73,
+      "id": 5814874909,
+      "url": "https://github.com/1123786563/openmuse/issues/73"
+    },
+    "P01": {
+      "number": 74,
+      "id": 5814875281,
+      "url": "https://github.com/1123786563/openmuse/issues/74"
+    },
+    "P02": {
+      "number": 75,
+      "id": 5814875756,
+      "url": "https://github.com/1123786563/openmuse/issues/75"
+    },
+    "P03": {
+      "number": 76,
+      "id": 5814876173,
+      "url": "https://github.com/1123786563/openmuse/issues/76"
+    },
+    "V01": {
+      "number": 77,
+      "id": 5814876619,
+      "url": "https://github.com/1123786563/openmuse/issues/77"
+    },
+    "V02": {
+      "number": 78,
+      "id": 5814877113,
+      "url": "https://github.com/1123786563/openmuse/issues/78"
+    },
+    "D01": {
+      "number": 79,
+      "id": 5814877455,
+      "url": "https://github.com/1123786563/openmuse/issues/79"
+    },
+    "D02": {
+      "number": 80,
+      "id": 5814877885,
+      "url": "https://github.com/1123786563/openmuse/issues/80"
+    },
+    "D03": {
+      "number": 81,
+      "id": 5814878524,
+      "url": "https://github.com/1123786563/openmuse/issues/81"
+    },
+    "D04": {
+      "number": 82,
+      "id": 5814878976,
+      "url": "https://github.com/1123786563/openmuse/issues/82"
+    },
+    "D05": {
+      "number": 83,
+      "id": 5814879366,
+      "url": "https://github.com/1123786563/openmuse/issues/83"
+    },
+    "D06": {
+      "number": 84,
+      "id": 5814885043,
+      "url": "https://github.com/1123786563/openmuse/issues/84"
+    },
+    "D07": {
+      "number": 85,
+      "id": 5814885490,
+      "url": "https://github.com/1123786563/openmuse/issues/85"
+    },
+    "D08": {
+      "number": 86,
+      "id": 5814885914,
+      "url": "https://github.com/1123786563/openmuse/issues/86"
+    },
+    "D09": {
+      "number": 87,
+      "id": 5814886279,
+      "url": "https://github.com/1123786563/openmuse/issues/87"
+    },
+    "O01": {
+      "number": 88,
+      "id": 5814886716,
+      "url": "https://github.com/1123786563/openmuse/issues/88"
+    },
+    "O02": {
+      "number": 89,
+      "id": 5814887132,
+      "url": "https://github.com/1123786563/openmuse/issues/89"
+    },
+    "O03": {
+      "number": 90,
+      "id": 5814887606,
+      "url": "https://github.com/1123786563/openmuse/issues/90"
+    },
+    "O04": {
+      "number": 91,
+      "id": 5814887973,
+      "url": "https://github.com/1123786563/openmuse/issues/91"
+    },
+    "O05": {
+      "number": 92,
+      "id": 5814888384,
+      "url": "https://github.com/1123786563/openmuse/issues/92"
+    },
+    "B04": {
+      "number": 93,
+      "id": 5814888764,
+      "url": "https://github.com/1123786563/openmuse/issues/93"
+    }
+  },
+  "subissues": [
+    "B01",
+    "B02",
+    "B03",
+    "I01",
+    "I02",
+    "I03",
+    "I04",
+    "I05",
+    "I06",
+    "I07",
+    "I08",
+    "I09",
+    "C01",
+    "C02",
+    "C03",
+    "C04",
+    "C05",
+    "C06",
+    "C08",
+    "C09",
+    "K01",
+    "K02",
+    "K03",
+    "K04",
+    "G01",
+    "G02",
+    "G03",
+    "G04",
+    "G05",
+    "G06",
+    "M01",
+    "M02",
+    "M03",
+    "M04",
+    "A01",
+    "A02",
+    "A03",
+    "F01",
+    "F02",
+    "F03",
+    "F04",
+    "F10",
+    "F05",
+    "F06",
+    "F07",
+    "F08",
+    "F09",
+    "R01",
+    "R02",
+    "R03",
+    "R04",
+    "R05",
+    "R06",
+    "R07",
+    "R08",
+    "T01",
+    "T02",
+    "C07",
+    "T03",
+    "T04",
+    "T05",
+    "T06",
+    "T07",
+    "T08",
+    "T09",
+    "T10",
+    "T11",
+    "T12",
+    "T13",
+    "T14",
+    "T15",
+    "T16",
+    "P01",
+    "P02",
+    "P03",
+    "V01",
+    "V02",
+    "D01",
+    "D02",
+    "D03",
+    "D04",
+    "D05",
+    "D06",
+    "D07",
+    "D08",
+    "D09",
+    "O01",
+    "O02",
+    "O03",
+    "O04",
+    "O05",
+    "B04"
+  ],
+  "dependencies": [
+    "B02<-B01",
+    "B03<-B02",
+    "I01<-B02",
+    "I02<-I01",
+    "I03<-I02",
+    "I04<-B03",
+    "I04<-I03",
+    "I05<-B03",
+    "I05<-I03",
+    "I06<-I03",
+    "I07<-I04",
+    "I08<-I05",
+    "I09<-I02",
+    "C01<-I03",
+    "C02<-C01",
+    "C03<-C02",
+    "C04<-C01",
+    "C05<-C01",
+    "C06<-C01",
+    "C08<-I04",
+    "C08<-C02",
+    "C08<-C03",
+    "C08<-C04",
+    "C08<-C05",
+    "C08<-C06",
+    "C09<-I05",
+    "C09<-C02",
+    "C09<-C03",
+    "C09<-C04",
+    "C09<-C05",
+    "C09<-C06",
+    "K01<-I02",
+    "K02<-K01",
+    "K03<-K01",
+    "K04<-K02",
+    "K04<-K03",
+    "G01<-I03",
+    "G02<-G01",
+    "G03<-G01",
+    "G04<-G01",
+    "G04<-G03",
+    "G05<-G01",
+    "G05<-G03",
+    "G06<-G03",
+    "G06<-G04",
+    "G06<-G05",
+    "M01<-G01",
+    "M02<-M01",
+    "M03<-M01",
+    "M04<-M03",
+    "A01<-G03",
+    "A02<-A01",
+    "A03<-A01",
+    "F01<-I03",
+    "F02<-F01",
+    "F03<-F02",
+    "F04<-F02",
+    "F04<-I04",
+    "F10<-F02",
+    "F10<-I05",
+    "F05<-F02",
+    "F06<-F05",
+    "F07<-F06",
+    "F07<-F04",
+    "F08<-F06",
+    "F08<-F10",
+    "F09<-F06",
+    "F09<-K01",
+    "R01<-G01",
+    "R02<-R01",
+    "R02<-M03",
+    "R03<-R02",
+    "R03<-G05",
+    "R04<-R02",
+    "R05<-R01",
+    "R05<-A03",
+    "R06<-R05",
+    "R07<-R05",
+    "R08<-R06",
+    "R08<-R07",
+    "R08<-R04",
+    "T01<-I03",
+    "T02<-T01",
+    "T02<-C01",
+    "C07<-C01",
+    "C07<-T02",
+    "T03<-T02",
+    "T04<-T02",
+    "T05<-T02",
+    "T06<-T03",
+    "T07<-T02",
+    "T08<-T03",
+    "T08<-T07",
+    "T09<-T03",
+    "T09<-T07",
+    "T10<-T02",
+    "T11<-T10",
+    "T11<-T07",
+    "T12<-T03",
+    "T12<-T11",
+    "T13<-F02",
+    "T13<-T03",
+    "T14<-M04",
+    "T14<-F02",
+    "T15<-T08",
+    "T15<-F06",
+    "T15<-T14",
+    "T16<-T15",
+    "T16<-R04",
+    "P01<-I03",
+    "P01<-C01",
+    "P02<-I03",
+    "P02<-C01",
+    "P02<-T01",
+    "P03<-I03",
+    "P03<-C01",
+    "V01<-K03",
+    "V01<-R03",
+    "V01<-R04",
+    "V01<-R06",
+    "V01<-R08",
+    "V02<-V01",
+    "V02<-T12",
+    "D01<-I02",
+    "D02<-D01",
+    "D02<-T08",
+    "D02<-T11",
+    "D02<-R04",
+    "D02<-R08",
+    "D03<-D01",
+    "D03<-G05",
+    "D03<-F02",
+    "D04<-D02",
+    "D04<-D03",
+    "D04<-C03",
+    "D04<-K03",
+    "D04<-F09",
+    "D04<-T09",
+    "D04<-T11",
+    "D04<-T12",
+    "D04<-T13",
+    "D04<-T16",
+    "D04<-P01",
+    "D04<-P02",
+    "D04<-P03",
+    "D04<-V02",
+    "D05<-D04",
+    "D06<-D04",
+    "D06<-D05",
+    "D07<-D04",
+    "D07<-D05",
+    "D08<-D06",
+    "D08<-D07",
+    "D09<-D08",
+    "O01<-B03",
+    "O02<-O01",
+    "O02<-G03",
+    "O03<-O02",
+    "O03<-K03",
+    "O04<-O02",
+    "O04<-T11",
+    "O05<-O03",
+    "O05<-O04",
+    "O05<-R04",
+    "O05<-R08",
+    "O05<-D09",
+    "B04<-B01",
+    "B04<-B03",
+    "B04<-I07",
+    "B04<-I08",
+    "B04<-C07",
+    "B04<-C08",
+    "B04<-C09",
+    "B04<-K04",
+    "B04<-G06",
+    "B04<-M04",
+    "B04<-A03",
+    "B04<-F04",
+    "B04<-F10",
+    "B04<-F07",
+    "B04<-F08",
+    "B04<-R08",
+    "B04<-T16",
+    "B04<-P03",
+    "B04<-V02"
+  ],
+  "release_gate": {
+    "number": 94,
+    "id": 5815042006,
+    "url": "https://github.com/1123786563/openmuse/issues/94",
+    "subissue": true
+  }
+}

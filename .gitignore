@@ -11,3 +11,7 @@ apps/mobile/android/
 .DS_Store
 *.tsbuildinfo
 artifacts/
+
+# Added by CopilotKit CLI: credential files, which must never be committed.
+.env.*
+!.env.example

@@ -35,6 +35,7 @@ import type {
 } from "../../../packages/domain/src/agent";
 import { useAgentWorkspace } from "./agent-workspace";
 import { ActivityScreen, ConnectionsScreen } from "./screens";
+import { statusLabel, t } from "./strings";
 import {
   Button,
   Card,
@@ -53,9 +54,6 @@ import {
 } from "./ui";
 import { useWorkspace } from "./workspace";
 
-export function statusLabel(value: string) {
-  return value.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
-}
 function stamp(value?: string) {
   return value
     ? new Date(value).toLocaleString(undefined, {
@@ -64,7 +62,7 @@ function stamp(value?: string) {
         hour: "numeric",
         minute: "2-digit",
       })
-    : "Not checked yet";
+    : t("notCheckedYet");
 }
 function errorText(e: unknown) {
   return e instanceof Error ? e.message : String(e);
@@ -77,16 +75,14 @@ export function AgentStatus() {
   if (data?.worker.running && !error) return null;
   return (
     <View style={{ gap: 8 }}>
-      <ErrorNotice error={error ? `Agent updates unavailable. ${error}` : ""} />
+      <ErrorNotice error={error ? t("agentUpdatesUnavailable", { error }) : ""} />
       {!!error && (
         <Button small onPress={() => void refresh().catch(() => {})}>
-          Reconnect agent
+          {t("reconnectAgent")}
         </Button>
       )}
       {!data && !error && <ActivityIndicator color={colors.blueDark} />}
-      {data && !data.worker.running && (
-        <Text style={s.small}>Worker is offline. Saved work will continue when it reconnects.</Text>
-      )}
+      {data && !data.worker.running && <Text style={s.small}>{t("workerOffline")}</Text>}
     </View>
   );
 }
@@ -106,7 +102,7 @@ export function TaskCard({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Open task: ${task.title}`}
+      accessibilityLabel={t("openTask", { title: task.title })}
       onPress={() => {
         onOpen?.();
         open({ type: "task", taskId: task.id });
@@ -133,7 +129,7 @@ export function TaskCard({
             <Text style={s.heading}>{task.title}</Text>
             <Text style={s.small}>
               {statusLabel(task.status)}
-              {task.plan.length ? ` · ${done}/${task.plan.length} steps` : ""}
+              {task.plan.length ? t("taskSteps", { done, total: task.plan.length }) : ""}
             </Text>
           </View>
           <ChevronRight size={17} color={colors.muted} />
@@ -157,7 +153,7 @@ export function TaskCard({
         )}
         {waiting && (
           <Text style={[s.small, { color: colors.blueDark, fontWeight: "600" }]}>
-            {task.status === "waiting_approval" ? "Review requested" : "Your input is needed"}
+            {task.status === "waiting_approval" ? t("reviewRequested") : t("inputNeeded")}
           </Text>
         )}
       </Card>
@@ -192,9 +188,15 @@ export function AgentActivityScreen() {
     <View style={{ gap: 20 }}>
       <AgentStatus />
       <View style={[s.row, { gap: 8 }]}>
-        {["All", "In progress", "Finished"].map((item) => (
-          <Button key={item} small primary={filter === item} onPress={() => setFilter(item)}>
-            {item}
+        {(
+          [
+            ["All", t("filterAll")],
+            ["In progress", t("filterInProgress")],
+            ["Finished", t("filterFinished")],
+          ] as const
+        ).map(([value, label]) => (
+          <Button key={value} small primary={filter === value} onPress={() => setFilter(value)}>
+            {label}
           </Button>
         ))}
       </View>
@@ -204,11 +206,11 @@ export function AgentActivityScreen() {
       {!tasks.length && (
         <Empty
           icon={ListChecks}
-          title="A place for the work"
-          detail="Delegate a task in Chat. Its plan, progress and results stay here."
+          title={t("agentActivityEmptyTitle")}
+          detail={t("agentActivityEmptyDetail")}
         />
       )}
-      <SectionHeading title="Reviews & receipts" />
+      <SectionHeading title={t("reviewsReceipts")} />
       <ActivityScreen />
     </View>
   );
@@ -234,7 +236,7 @@ export function EvidenceList({ items }: { items: Evidence[] }) {
                 void Linking.openURL(item.url || "").catch((e) => setError(errorText(e)))
               }
             >
-              Open source
+              {t("openSource")}
             </Button>
           )}
           {item.kind === "mail" && workspace.mail.some((mail) => mail.id === item.id) && (
@@ -245,7 +247,7 @@ export function EvidenceList({ items }: { items: Evidence[] }) {
                 if (mail) open({ type: "mail", mail });
               }}
             >
-              View email
+              {t("viewEmail")}
             </Button>
           )}
           {item.kind === "file" && workspace.files.some((file) => file.id === item.id) && (
@@ -256,7 +258,7 @@ export function EvidenceList({ items }: { items: Evidence[] }) {
                 if (file) open({ type: "file", file });
               }}
             >
-              View file
+              {t("viewFile")}
             </Button>
           )}
         </View>
@@ -340,7 +342,7 @@ export function TaskDetail({ taskId }: { taskId: string }) {
         parsed = raw as Record<string, string | boolean>;
       }
       await act("input", {
-        answer: answer.trim() || "Provided the requested fields.",
+        answer: answer.trim() || t("providedFields"),
         fields: parsed,
       });
     } catch (e) {
@@ -354,7 +356,7 @@ export function TaskDetail({ taskId }: { taskId: string }) {
       await refreshWorkspace();
       const snapshot = await api.request<typeof workspace>("/api/workspace");
       const action = snapshot.actions.find((item) => item.id === task?.actionId);
-      if (!action) throw new Error("This review is not available yet. Refresh and try again.");
+      if (!action) throw new Error(t("reviewNotReady"));
       open({ type: "review", action });
     } catch (e) {
       setError(errorText(e));
@@ -374,9 +376,9 @@ export function TaskDetail({ taskId }: { taskId: string }) {
     .filter(Boolean);
   return (
     <Sheet
-      title={task?.title || "Task"}
+      title={task?.title || t("taskFallback")}
       subtitle={
-        task ? `${statusLabel(task.status)} · ${stamp(task.updatedAt)}` : "Loading saved progress…"
+        task ? `${statusLabel(task.status)} · ${stamp(task.updatedAt)}` : t("loadingProgress")
       }
       onClose={close}
     >
@@ -391,8 +393,8 @@ export function TaskDetail({ taskId }: { taskId: string }) {
           {task.milestoneId && data && (
             <Text style={s.muted}>
               {milestone?.title
-                ? `Milestone: ${milestone.title}. Completion is tracked manually in Goals.`
-                : "The linked milestone is no longer available. This task and its results are still accessible."}
+                ? t("milestoneTracked", { title: milestone.title })
+                : t("milestoneGone")}
             </Text>
           )}
           <View style={[s.row, { gap: 8, flexWrap: "wrap" }]}>
@@ -405,7 +407,7 @@ export function TaskDetail({ taskId }: { taskId: string }) {
                 busy={busy}
                 onPress={() => void act("control", { action: "pause" })}
               >
-                Pause
+                {t("pause")}
               </Button>
             )}
             {task.status === "paused" && (
@@ -415,7 +417,7 @@ export function TaskDetail({ taskId }: { taskId: string }) {
                 busy={busy}
                 onPress={() => void act("control", { action: "resume" })}
               >
-                Resume
+                {t("resume")}
               </Button>
             )}
             {task.status === "failed" && (
@@ -425,7 +427,7 @@ export function TaskDetail({ taskId }: { taskId: string }) {
                 busy={busy}
                 onPress={() => void act("control", { action: "retry" })}
               >
-                Retry task
+                {t("retryTask")}
               </Button>
             )}
             {activeTask(task) && (
@@ -436,22 +438,22 @@ export function TaskDetail({ taskId }: { taskId: string }) {
                 busy={busy}
                 onPress={() => void act("control", { action: "cancel" })}
               >
-                Cancel task
+                {t("cancelTask")}
               </Button>
             )}
           </View>
           {task.status === "waiting_approval" && (
             <Card style={{ backgroundColor: colors.lavender, gap: 12 }}>
-              <Text style={s.heading}>Ready for your review</Text>
-              <Text style={s.muted}>Review the exact action and account before it proceeds.</Text>
+              <Text style={s.heading}>{t("readyForReview")}</Text>
+              <Text style={s.muted}>{t("reviewBeforeProceed")}</Text>
               <Button primary busy={busy} onPress={() => void review()}>
-                Review action
+                {t("reviewAction")}
               </Button>
             </Card>
           )}
           {task.status === "waiting_input" && (
             <Card style={{ backgroundColor: colors.sky, gap: 10 }}>
-              <Text style={s.heading}>{task.question || "A detail from you will help"}</Text>
+              <Text style={s.heading}>{task.question || t("detailWillHelp")}</Text>
               {fieldNames.map((name) =>
                 missing.some(
                   (f) => typeof f === "object" && f && f.name === name && f.type === "checkbox",
@@ -475,26 +477,26 @@ export function TaskDetail({ taskId }: { taskId: string }) {
               )}
               {!fieldNames.length && (
                 <Field
-                  label="Your answer"
+                  label={t("yourAnswer")}
                   value={answer}
                   onChangeText={setAnswer}
                   multiline
-                  placeholder="Add the missing details…"
+                  placeholder={t("addMissingDetails")}
                 />
               )}
               {task.kind === "document" && !fieldNames.length && (
                 <>
                   <Button small onPress={() => setShowFieldJson(!showFieldJson)}>
-                    Form field values
+                    {t("formFieldValues")}
                   </Button>
                   {showFieldJson && (
                     <Field
-                      label="Fields (JSON: field name to value)"
+                      label={t("fieldsJson")}
                       value={fieldJson}
                       onChangeText={setFieldJson}
                       multiline
                       autoCapitalize="none"
-                      placeholder={'{"full_name":"Your name","consent":true}'}
+                      placeholder={'{"full_name":"你的名字","consent":true}'}
                     />
                   )}
                 </>
@@ -505,13 +507,13 @@ export function TaskDetail({ taskId }: { taskId: string }) {
                 disabled={!answer.trim() && !Object.keys(fields).length && !fieldJson.trim()}
                 onPress={() => void submitInput()}
               >
-                Continue task
+                {t("continueTask")}
               </Button>
             </Card>
           )}
           {!!task.plan.length && (
             <Card style={{ gap: 15 }}>
-              <Text style={s.heading}>Plan</Text>
+              <Text style={s.heading}>{t("planHeading")}</Text>
               {task.plan.map((step, index) => (
                 <View key={step.id} style={[s.row, { gap: 10, alignItems: "flex-start" }]}>
                   <Text
@@ -543,11 +545,11 @@ export function TaskDetail({ taskId }: { taskId: string }) {
           <ErrorNotice error={task.error ?? undefined} />
           {detail?.browsers?.map((browser) => (
             <Card key={browser.id} style={{ gap: 10 }}>
-              <Text style={s.heading}>{browser.title || "Agent browser"}</Text>
+              <Text style={s.heading}>{browser.title || t("agentBrowser")}</Text>
               <Text style={s.small}>{browser.url}</Text>
               {browser.status === "active" && browser.previewUrl && (
                 <Image
-                  accessibilityLabel="Agent browser preview"
+                  accessibilityLabel={t("agentBrowserPreview")}
                   source={{ uri: api.url(browser.previewUrl) }}
                   style={{ width: "100%", aspectRatio: 1.6, borderRadius: 12 }}
                 />
@@ -571,8 +573,8 @@ export function TaskDetail({ taskId }: { taskId: string }) {
                 }}
               >
                 {["running", "scheduled", "queued"].includes(task.status)
-                  ? "Pause and open browser"
-                  : "Open browser"}
+                  ? t("pauseOpenBrowser")
+                  : t("openBrowser")}
               </Button>
             </Card>
           ))}
@@ -580,7 +582,7 @@ export function TaskDetail({ taskId }: { taskId: string }) {
             <LinkRow
               key={file.id}
               title={file.name}
-              detail={`${file.pageCount} pages · PDF`}
+              detail={t("filePagesPdf", { n: file.pageCount })}
               icon={FileText}
               onPress={() => open({ type: "file", file })}
             />
@@ -594,11 +596,11 @@ export function TaskDetail({ taskId }: { taskId: string }) {
           ))}
           {!!task.evidence.length && (
             <View style={{ gap: 14 }}>
-              <Text style={s.heading}>Sources</Text>
+              <Text style={s.heading}>{t("sources")}</Text>
               <EvidenceList items={task.evidence} />
             </View>
           )}
-          <Text style={s.heading}>Timeline</Text>
+          <Text style={s.heading}>{t("timeline")}</Text>
           {detail?.events.map((event) => (
             <View
               key={event.id}
@@ -613,9 +615,7 @@ export function TaskDetail({ taskId }: { taskId: string }) {
               </Text>
             </View>
           ))}
-          {!detail?.events.length && (
-            <Text style={s.muted}>The worker will record each step here.</Text>
-          )}
+          {!detail?.events.length && <Text style={s.muted}>{t("workerRecordsSteps")}</Text>}
         </View>
       )}
     </Sheet>
@@ -690,7 +690,7 @@ export function ArtifactCard({ artifact }: { artifact: AgentArtifact }) {
         </View>
       ))}
       <Button small onPress={() => setExpanded(!expanded)}>
-        {expanded ? "Show summary" : "Explore full result"}
+        {expanded ? t("showSummary") : t("exploreFullResult")}
       </Button>
     </Card>
   );
@@ -710,8 +710,8 @@ function FinanceArtifact({ artifact }: { artifact: AgentArtifact }) {
       await mutate("/goals", {
         title: goalTitle.trim(),
         category: "Finances",
-        description: `Inspired by ${artifact.title}: ${artifact.summary}`,
-        milestones: ["Choose a savings target", "Review spending each week"],
+        description: t("goalInspiredBy", { title: artifact.title, summary: artifact.summary }),
+        milestones: [t("milestoneSavingsTarget"), t("milestoneWeeklyReview")],
       });
       setGoalSaved(true);
     } catch (error) {
@@ -735,7 +735,7 @@ function FinanceArtifact({ artifact }: { artifact: AgentArtifact }) {
     >
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Open finance tracker: ${artifact.title}`}
+        accessibilityLabel={t("openFinanceTracker", { title: artifact.title })}
         accessibilityState={{ expanded: details }}
         onPress={() => setDetails(!details)}
       >
@@ -761,17 +761,18 @@ function FinanceArtifact({ artifact }: { artifact: AgentArtifact }) {
             </Svg>
           </View>
           <Text style={{ color: "#D4DCFC", fontSize: 11, lineHeight: 18, marginBottom: 20 }}>
-            Read from your imported transactions.{"\n"}
+            {t("financeReadFrom")}
+            {"\n"}
             {String(period?.from ?? "")} — {String(period?.to ?? "")}
             {"\n"}
-            {transactions.length} transactions, categorized and summarized.
+            {t("financeSummarized", { n: transactions.length })}
           </Text>
           <View style={[s.row, { gap: 7 }]}>
             {(
               [
-                ["Income", "income"],
-                ["Spending", "spending"],
-                ["Remaining", "saved"],
+                [t("income"), "income"],
+                [t("spending"), "spending"],
+                [t("remaining"), "saved"],
               ] as const
             ).map(([label, key]) => (
               <View
@@ -793,7 +794,9 @@ function FinanceArtifact({ artifact }: { artifact: AgentArtifact }) {
                 >
                   {amount(artifact.data[key])}
                 </Text>
-                <Text style={{ color: "#7E8289", fontSize: 8, marginTop: 4 }}>source currency</Text>
+                <Text style={{ color: "#7E8289", fontSize: 8, marginTop: 4 }}>
+                  {t("sourceCurrency")}
+                </Text>
               </View>
             ))}
           </View>
@@ -801,15 +804,15 @@ function FinanceArtifact({ artifact }: { artifact: AgentArtifact }) {
         <View style={[s.row, { gap: 11, paddingHorizontal: 8, paddingTop: 13, paddingBottom: 4 }]}>
           <Text style={{ fontSize: 25 }}>💸</Text>
           <View style={{ flex: 1, gap: 2 }}>
-            <Text style={[s.text, { fontWeight: "600" }]}>Finance tracker</Text>
-            <Text style={s.small}>Spending, savings, and a plan for what’s next.</Text>
+            <Text style={[s.text, { fontWeight: "600" }]}>{t("financeTracker")}</Text>
+            <Text style={s.small}>{t("financeSubtitle")}</Text>
           </View>
           <ChevronRight size={17} color={colors.muted} />
         </View>
       </Pressable>
       {details && (
         <View style={{ gap: 16, padding: 10 }}>
-          <Text style={s.label}>Where your money went</Text>
+          <Text style={s.label}>{t("whereMoneyWent")}</Text>
           {categories.map((category) => {
             const row = record(category);
             if (!row) return null;
@@ -832,18 +835,16 @@ function FinanceArtifact({ artifact }: { artifact: AgentArtifact }) {
               </View>
             );
           })}
-          <Text style={s.small}>
-            Amounts use your source currency. This summary covers the imported dates.
-          </Text>
+          <Text style={s.small}>{t("financeCurrencyNote")}</Text>
           {goalSaved ? (
-            <Text style={s.text}>Your savings goal is saved in Goals.</Text>
+            <Text style={s.text}>{t("savingsGoalSaved")}</Text>
           ) : (
             <View style={{ gap: 10 }}>
               <Field
-                label="Turn this into a savings goal"
+                label={t("turnIntoGoal")}
                 value={goalTitle}
                 onChangeText={setGoalTitle}
-                placeholder="What would you like to save for?"
+                placeholder={t("whatToSaveFor")}
               />
               <ErrorNotice error={goalError} />
               <Button
@@ -852,12 +853,12 @@ function FinanceArtifact({ artifact }: { artifact: AgentArtifact }) {
                 disabled={!goalTitle.trim()}
                 onPress={() => void saveGoal()}
               >
-                Create savings goal
+                {t("createSavingsGoal")}
               </Button>
             </View>
           )}
           <Button small onPress={() => setExpanded(!expanded)}>
-            {expanded ? "Hide transactions" : "View transactions"}
+            {expanded ? t("hideTransactions") : t("viewTransactions")}
           </Button>
           {expanded &&
             transactions.slice(0, 100).map((transaction) => {
@@ -875,9 +876,7 @@ function FinanceArtifact({ artifact }: { artifact: AgentArtifact }) {
               ) : null;
             })}
           {expanded && transactions.length > 100 && (
-            <Text style={s.small}>
-              Showing the first 100 transactions. The totals include every row.
-            </Text>
+            <Text style={s.small}>{t("first100Transactions")}</Text>
           )}
         </View>
       )}
@@ -932,41 +931,33 @@ export function DelegateSheet({ goalId, milestoneId }: { goalId?: string; milest
     }
   }
   return (
-    <Sheet
-      title="Hand over an outcome"
-      subtitle="OpenMuse saves a plan and keeps working on the server."
-      onClose={close}
-    >
+    <Sheet title={t("handOverOutcome")} subtitle={t("delegateSubtitle")} onClose={close}>
       {milestoneId && (
         <Text style={[s.muted, { marginBottom: 16 }]}>
           {milestone
-            ? `${goal?.title} · ${milestone.title}. Mark this milestone complete when you are satisfied with the result.`
-            : "This milestone is no longer available."}
+            ? t("delegateMilestone", { goal: goal?.title ?? "", milestone: milestone.title })
+            : t("milestoneUnavailable")}
         </Text>
       )}
       <View style={[s.row, { flexWrap: "wrap", gap: 8, marginBottom: 20 }]}>
         {(["plan", "document", "finance", "agent"] as const).map((item) => (
           <Button small primary={kind === item} key={item} onPress={() => setKind(item)}>
-            {item === "agent" ? "General task" : statusLabel(item)}
+            {item === "agent" ? t("generalTask") : statusLabel(item)}
           </Button>
         ))}
       </View>
       <Field
-        label="What would you like done?"
+        label={t("whatDone")}
         value={prompt}
         onChangeText={setPrompt}
         multiline
         placeholder={
-          kind === "document"
-            ? "Fill the attached form and prepare a reply for my review"
-            : kind === "finance"
-              ? "Summarize my spending and suggest a savings plan"
-              : "Make a practical plan for my week"
+          kind === "document" ? t("phDocument") : kind === "finance" ? t("phFinance") : t("phPlan")
         }
       />
       {kind === "document" && (
         <View style={{ gap: 8, marginBottom: 18 }}>
-          <Text style={s.heading}>Choose the email with the PDF</Text>
+          <Text style={s.heading}>{t("chooseEmailPdf")}</Text>
           {workspace.mail
             .filter((mail) => mail.attachments.length)
             .map((mail) => (
@@ -978,16 +969,14 @@ export function DelegateSheet({ goalId, milestoneId }: { goalId?: string; milest
               />
             ))}
           {!workspace.mail.some((mail) => mail.attachments.length) && (
-            <Text style={s.muted}>
-              Connect mail in Apps and select a message with a PDF attachment.
-            </Text>
+            <Text style={s.muted}>{t("connectMailPdf")}</Text>
           )}
         </View>
       )}
       {kind === "finance" && (
         <>
           <Field
-            label="Transaction CSV"
+            label={t("transactionCsv")}
             value={csv}
             onChangeText={setCsv}
             multiline
@@ -1002,20 +991,14 @@ export function DelegateSheet({ goalId, milestoneId }: { goalId?: string; milest
                 )
               }
             >
-              Try example transactions
+              {t("tryExampleTransactions")}
             </Button>
           )}
-          <Text style={[s.small, { marginVertical: 12 }]}>
-            Positive amounts are expenses; negative amounts are income. Imported data only. No bank
-            connection is implied.
-          </Text>
+          <Text style={[s.small, { marginVertical: 12 }]}>{t("csvSignNote")}</Text>
         </>
       )}
       {kind === "agent" && !workspace.runtime.configured && (
-        <Text style={[s.muted, { marginBottom: 16 }]}>
-          General tasks and plans require a configured model. Document jobs, page watches and
-          spending summaries have guided workflows.
-        </Text>
+        <Text style={[s.muted, { marginBottom: 16 }]}>{t("generalNeedsModel")}</Text>
       )}
       <ErrorNotice error={error} />
       <Button
@@ -1029,7 +1012,7 @@ export function DelegateSheet({ goalId, milestoneId }: { goalId?: string; milest
         }
         onPress={() => void submit()}
       >
-        Delegate task
+        {t("delegateTask")}
       </Button>
     </Sheet>
   );
@@ -1054,9 +1037,9 @@ export function IdeasScreen() {
     <View style={{ gap: 20 }}>
       <AgentStatus />
       <View style={s.between}>
-        <Text style={s.small}>Inspired by your connected apps</Text>
+        <Text style={s.small}>{t("ideasInspiredBy")}</Text>
         <Button small icon={RefreshCw} busy={busy} onPress={() => void refreshIdeas()}>
-          Find ideas
+          {t("findIdeas")}
         </Button>
       </View>
       <ErrorNotice error={error} />
@@ -1064,18 +1047,14 @@ export function IdeasScreen() {
         <IdeaCard key={idea.id} idea={idea} />
       ))}
       {!ideas.length && (
-        <Empty
-          icon={Lightbulb}
-          title="Room for a good idea"
-          detail="Find ideas from the sources you have granted access to. Each suggestion includes its evidence."
-        />
+        <Empty icon={Lightbulb} title={t("ideasEmptyTitle")} detail={t("ideasEmptyDetail")} />
       )}
       {(data?.ideas || [])
         .filter((idea) => idea.status === "accepted")
         .map((idea) => (
           <Card key={idea.id} style={{ gap: 7 }}>
             <Text style={s.heading}>{idea.title}</Text>
-            <Chip tint={colors.green}>Started</Chip>
+            <Chip tint={colors.green}>{t("started")}</Chip>
             {!!idea.taskId && <TaskLink taskId={idea.taskId} />}
           </Card>
         ))}
@@ -1093,7 +1072,7 @@ function TaskLink({ taskId, onOpen }: { taskId: string; onOpen?: () => void }) {
         open({ type: "task", taskId });
       }}
     >
-      View task
+      {t("viewTask")}
     </Button>
   );
 }
@@ -1121,7 +1100,7 @@ function IdeaCard({ idea }: { idea: Idea }) {
     <View style={{ paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: colors.line }}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`View idea: ${idea.title}`}
+        accessibilityLabel={t("viewIdea", { title: idea.title })}
         accessibilityState={{ expanded }}
         onPress={() => setExpanded(!expanded)}
         style={{ flexDirection: "row", gap: 14 }}
@@ -1147,7 +1126,7 @@ function IdeaCard({ idea }: { idea: Idea }) {
           <EvidenceList items={idea.evidence} />
           {editing && (
             <Field
-              label="What should OpenMuse do?"
+              label={t("whatShouldMuseDo")}
               value={prompt}
               onChangeText={setPrompt}
               multiline
@@ -1161,13 +1140,13 @@ function IdeaCard({ idea }: { idea: Idea }) {
               disabled={!prompt.trim()}
               onPress={() => void act("accept")}
             >
-              Start this
+              {t("startThis")}
             </Button>
             <Button disabled={busy} onPress={() => setEditing(!editing)}>
-              {editing ? "Keep edits" : "Edit"}
+              {editing ? t("keepEdits") : t("edit")}
             </Button>
             <Button disabled={busy} onPress={() => void act("dismiss")}>
-              Dismiss
+              {t("dismiss")}
             </Button>
           </View>
         </View>
@@ -1200,17 +1179,17 @@ export function GoalsScreen() {
                 backgroundColor: "#24A46B",
               }}
             />
-            <Text style={[s.heading, { color: "#189A58" }]}>Tracking</Text>
+            <Text style={[s.heading, { color: "#189A58" }]}>{t("tracking")}</Text>
           </View>
           <Button small icon={Plus} onPress={() => setAdding("Tracking")}>
-            Track
+            {t("track")}
           </Button>
         </View>
         {(showAll ? monitors : monitors.slice(0, 3)).map((item) => (
           <Pressable
             key={item.id}
             accessibilityRole="button"
-            accessibilityLabel={`Open tracking: ${item.title}`}
+            accessibilityLabel={t("openTracking", { title: item.title })}
             onPress={() => setSelectedMonitor(item.id)}
             style={[s.row, { gap: 12, paddingVertical: 13 }]}
           >
@@ -1219,7 +1198,7 @@ export function GoalsScreen() {
               <Text style={s.text}>{item.title}</Text>
               <Text numberOfLines={1} style={s.muted}>
                 {item.status === "active"
-                  ? `Checking every ${item.intervalMinutes} minutes`
+                  ? t("checkingEvery", { n: item.intervalMinutes })
                   : statusLabel(item.status)}
               </Text>
             </View>
@@ -1227,13 +1206,11 @@ export function GoalsScreen() {
           </Pressable>
         ))}
         {!monitors.length && (
-          <Text style={[s.muted, { paddingVertical: 10 }]}>
-            Ticket prices, a reservation, a page you’re watching.
-          </Text>
+          <Text style={[s.muted, { paddingVertical: 10 }]}>{t("monitorHint")}</Text>
         )}
         {monitors.length > 3 && (
           <Button small onPress={() => setShowAll(!showAll)}>
-            {showAll ? "Show less" : `Show ${monitors.length - 3} more`}
+            {showAll ? t("showLess") : t("showMore", { n: monitors.length - 3 })}
           </Button>
         )}
       </View>
@@ -1250,13 +1227,13 @@ export function GoalsScreen() {
               backgroundColor: "#3D9BDE",
             }}
           />
-          <Text style={[s.heading, { color: colors.blueDark }]}>Goals</Text>
+          <Text style={[s.heading, { color: colors.blueDark }]}>{t("goals")}</Text>
         </View>
         {data?.goals.map((item) => (
           <Pressable
             key={item.id}
             accessibilityRole="button"
-            accessibilityLabel={`Open goal: ${item.title}`}
+            accessibilityLabel={t("openGoal", { title: item.title })}
             onPress={() => setSelectedGoal(item.id)}
             style={[s.row, { gap: 12, paddingVertical: 13 }]}
           >
@@ -1275,23 +1252,21 @@ export function GoalsScreen() {
           </Pressable>
         ))}
         {!data?.goals.length && (
-          <Text style={[s.muted, { paddingVertical: 10 }]}>
-            Big plans start with one small step.
-          </Text>
+          <Text style={[s.muted, { paddingVertical: 10 }]}>{t("goalsHint")}</Text>
         )}
       </View>
       <View style={{ height: 1, backgroundColor: colors.line }} />
-      <Text style={s.heading}>Create a goal</Text>
+      <Text style={s.heading}>{t("createGoal")}</Text>
       {[
-        { name: "Health", icon: Heart },
-        { name: "Relationships", icon: Users },
-        { name: "Finances", icon: CircleDollarSign },
-        { name: "Something else", icon: Target },
+        { name: t("catHealth"), icon: Heart },
+        { name: t("catRelationships"), icon: Users },
+        { name: t("catFinances"), icon: CircleDollarSign },
+        { name: t("catSomethingElse"), icon: Target },
       ].map((item) => (
         <Pressable
           key={item.name}
           accessibilityRole="button"
-          accessibilityLabel={`Create ${item.name.toLowerCase()} goal`}
+          accessibilityLabel={t("createCategoryGoal", { name: item.name })}
           onPress={() => setAdding(item.name)}
           style={[s.row, { gap: 12, minHeight: 38 }]}
         >
@@ -1302,7 +1277,7 @@ export function GoalsScreen() {
       ))}
       {adding && (
         <Sheet
-          title={adding === "Tracking" ? "Track something" : "Create a goal"}
+          title={adding === "Tracking" ? t("trackSomething") : t("createGoal")}
           onClose={() => setAdding(undefined)}
         >
           {adding === "Tracking" ? (
@@ -1355,26 +1330,21 @@ function GoalForm({ onDone, category }: { onDone: () => void; category?: string 
   return (
     <Card>
       <Field
-        label="Your goal"
+        label={t("yourGoal")}
         value={title}
         onChangeText={setTitle}
-        placeholder="Build a three-month emergency fund"
+        placeholder={t("phGoal")}
       />
+      <Field label={t("whatSuccess")} value={description} onChangeText={setDescription} multiline />
       <Field
-        label="What does success look like?"
-        value={description}
-        onChangeText={setDescription}
-        multiline
-      />
-      <Field
-        label="Milestones (one per line)"
+        label={t("milestonesOnePerLine")}
         value={milestones}
         onChangeText={setMilestones}
         multiline
       />
       <ErrorNotice error={error} />
       <Button primary disabled={!title.trim()} busy={busy} onPress={() => void save()}>
-        Create goal
+        {t("createGoalBtn")}
       </Button>
     </Card>
   );
@@ -1401,8 +1371,8 @@ function GoalCard({ goal, onOpenTask }: { goal: Goal; onOpenTask?: () => void })
     setError("");
     try {
       const task = await delegate({
-        title: `Plan: ${goal.title}`,
-        prompt: `Create a practical plan for this goal: ${goal.title}. ${goal.description}`,
+        title: t("planForGoal", { title: goal.title }),
+        prompt: t("planPrompt", { title: goal.title, description: goal.description }),
         kind: "plan",
         goalId: goal.id,
         input: {},
@@ -1424,9 +1394,7 @@ function GoalCard({ goal, onOpenTask }: { goal: Goal; onOpenTask?: () => void })
         </Chip>
       </View>
       <Text style={s.muted}>{goal.description}</Text>
-      <Text style={s.small}>
-        {done} of {goal.milestones.length} milestones
-      </Text>
+      <Text style={s.small}>{t("milestonesDone", { done, total: goal.milestones.length })}</Text>
       {goal.milestones.map((milestone) => (
         <View key={milestone.id} style={{ gap: 8 }}>
           <CheckRow
@@ -1445,7 +1413,7 @@ function GoalCard({ goal, onOpenTask }: { goal: Goal; onOpenTask?: () => void })
                 open({ type: "delegate", goalId: goal.id, milestoneId: milestone.id });
               }}
             >
-              Delegate
+              {t("delegate")}
             </Button>
           )}
           {data?.tasks
@@ -1462,15 +1430,15 @@ function GoalCard({ goal, onOpenTask }: { goal: Goal; onOpenTask?: () => void })
           busy={busy}
           onPress={() => void update({ status: goal.status === "active" ? "paused" : "active" })}
         >
-          {goal.status === "active" ? "Pause" : "Resume"}
+          {goal.status === "active" ? t("pause") : t("resume")}
         </Button>
         {goal.status !== "completed" && (
           <Button small busy={busy} onPress={() => void update({ status: "completed" })}>
-            Complete goal
+            {t("completeGoal")}
           </Button>
         )}
         <Button small primary busy={busy} onPress={() => void plan()}>
-          Plan next steps
+          {t("planNextSteps")}
         </Button>
       </View>
       {data?.tasks
@@ -1502,9 +1470,8 @@ function MonitorForm({ onDone }: { onDone: () => void }) {
     try {
       const minutes = Number(interval);
       if (!Number.isInteger(minutes) || minutes < 1 || minutes > 10080)
-        throw new Error("Use a check interval from 1 to 10080 minutes.");
-      if (!sample && !/^https?:\/\//i.test(url.trim()))
-        throw new Error("Enter an http or https address for a public page.");
+        throw new Error(t("invalidInterval"));
+      if (!sample && !/^https?:\/\//i.test(url.trim())) throw new Error(t("invalidUrl"));
       await mutate("/monitors", {
         title: title.trim(),
         url: sample ? "sample://availability" : url.trim(),
@@ -1522,56 +1489,50 @@ function MonitorForm({ onDone }: { onDone: () => void }) {
   return (
     <Card>
       <Field
-        label="What are you watching?"
+        label={t("whatWatching")}
         value={title}
         onChangeText={setTitle}
-        placeholder="A table at my favorite restaurant"
+        placeholder={t("phWatching")}
       />
       {workspace.mode === "sample" && (
-        <CheckRow
-          checked={sample}
-          label="Try the built-in availability page"
-          onPress={() => setSample(!sample)}
-        />
+        <CheckRow checked={sample} label={t("tryBuiltInPage")} onPress={() => setSample(!sample)} />
       )}
       {!sample && (
         <Field
-          label="Public page URL"
+          label={t("publicPageUrl")}
           value={url}
           onChangeText={setUrl}
           autoCapitalize="none"
           placeholder="https://example.com/product"
         />
       )}
-      <Text style={[s.small, { marginBottom: 10 }]}>Notify me when</Text>
+      <Text style={[s.small, { marginBottom: 10 }]}>{t("notifyWhen")}</Text>
       <View style={[s.row, { gap: 7, flexWrap: "wrap", marginBottom: 16 }]}>
         {(["change", "contains", "price_below"] as const).map((item) => (
           <Button small primary={condition === item} key={item} onPress={() => setCondition(item)}>
             {item === "change"
-              ? "Page changes"
+              ? t("condPageChanges")
               : item === "contains"
-                ? "Text appears"
-                : "Price drops below"}
+                ? t("condTextAppears")
+                : t("condPriceBelow")}
           </Button>
         ))}
       </View>
       {condition !== "change" && (
         <Field
-          label={condition === "contains" ? "Text to look for" : "Target price"}
+          label={condition === "contains" ? t("textToLookFor") : t("targetPrice")}
           value={value}
           onChangeText={setValue}
         />
       )}
       <Field
-        label="Check every (minutes)"
+        label={t("checkEveryMinutes")}
         value={interval}
         onChangeText={setInterval}
         keyboardType="number-pad"
       />
       <Text style={[s.small, { marginBottom: 14 }]}>
-        {sample
-          ? "Changes to this built-in page stay in your workspace."
-          : "OpenMuse checks this public page on the server and saves meaningful changes in Notifications."}
+        {sample ? t("builtinPageNote") : t("serverCheckNote")}
       </Text>
       <ErrorNotice error={error} />
       <Button
@@ -1582,7 +1543,7 @@ function MonitorForm({ onDone }: { onDone: () => void }) {
         }
         onPress={() => void save()}
       >
-        Start tracking
+        {t("startTracking")}
       </Button>
     </Card>
   );
@@ -1607,7 +1568,7 @@ function MonitorCard({ monitor, onOpenTask }: { monitor: Monitor; onOpenTask?: (
     setError("");
     try {
       await mutate("/sample-page", {
-        text: `Availability: a table is available. Updated ${new Date().toISOString()}`,
+        text: t("sampleAvailability", { time: new Date().toISOString() }),
       });
       await mutate(`/monitors/${monitor.id}/control`, { action: "check" });
     } catch (e) {
@@ -1623,21 +1584,21 @@ function MonitorCard({ monitor, onOpenTask }: { monitor: Monitor; onOpenTask?: (
         <Chip tint={colors.sky}>{statusLabel(monitor.status)}</Chip>
       </View>
       <Text selectable style={s.small}>
-        {monitor.url.startsWith("sample:") ? "Built-in availability page" : monitor.url}
+        {monitor.url.startsWith("sample:") ? t("builtinAvailabilityPage") : monitor.url}
       </Text>
       <Text style={s.text}>
         {monitor.condition === "change"
-          ? "Watch for a page change"
+          ? t("watchPageChange")
           : monitor.condition === "contains"
-            ? `Watch for “${monitor.value}”`
-            : `Price below ${monitor.value}`}
+            ? t("watchText", { value: monitor.value })
+            : t("priceBelow", { value: monitor.value })}
       </Text>
       <Text style={s.small}>
-        Every {monitor.intervalMinutes} min · {monitor.checks} checks
+        {t("everyMinChecks", { n: monitor.intervalMinutes, checks: monitor.checks })}
       </Text>
       <Text style={s.small}>
-        Last check: {stamp(monitor.lastCheckedAt)}
-        {monitor.status === "active" ? `\nNext check: ${stamp(monitor.nextCheckAt)}` : ""}
+        {t("lastCheck", { time: stamp(monitor.lastCheckedAt) })}
+        {monitor.status === "active" ? t("nextCheck", { time: stamp(monitor.nextCheckAt) }) : ""}
       </Text>
       {!!monitor.lastValue && (
         <Text selectable numberOfLines={5} style={s.muted}>
@@ -1652,19 +1613,19 @@ function MonitorCard({ monitor, onOpenTask }: { monitor: Monitor; onOpenTask?: (
             busy={busy}
             onPress={() => void act(monitor.status === "active" ? "pause" : "resume")}
           >
-            {monitor.status === "active" ? "Pause" : "Resume"}
+            {monitor.status === "active" ? t("pause") : t("resume")}
           </Button>
           <Button small busy={busy} onPress={() => void act("check")}>
-            Check now
+            {t("checkNow")}
           </Button>
           <Button small danger busy={busy} onPress={() => void act("stop")}>
-            Stop tracking
+            {t("stopTracking")}
           </Button>
         </View>
       )}
       {monitor.url.startsWith("sample:") && monitor.status !== "stopped" && (
         <Button small busy={busy} onPress={() => void changeSample()}>
-          Change availability
+          {t("changeAvailability")}
         </Button>
       )}
       <TaskLink taskId={monitor.taskId} onOpen={onOpenTask} />
@@ -1684,11 +1645,7 @@ export function NotificationsSheet() {
     }
   }
   return (
-    <Sheet
-      title="Notifications"
-      subtitle="Results and decisions that need your attention."
-      onClose={close}
-    >
+    <Sheet title={t("notifications")} subtitle={t("notificationsSubtitle")} onClose={close}>
       <View style={{ gap: 14 }}>
         <ErrorNotice error={error} />
         {data?.notifications.map((item) => (
@@ -1698,21 +1655,17 @@ export function NotificationsSheet() {
           >
             <View style={s.between}>
               <Text style={s.heading}>{item.title}</Text>
-              {!item.read && <Chip>New</Chip>}
+              {!item.read && <Chip>{t("new")}</Chip>}
             </View>
             <Text style={s.muted}>{item.body}</Text>
             <Text style={s.small}>{stamp(item.createdAt)}</Text>
             <Button small onPress={() => void read(item.id, item.taskId)}>
-              {item.taskId ? "View task" : item.read ? "Read" : "Mark read"}
+              {item.taskId ? t("viewTask") : item.read ? t("read") : t("markRead")}
             </Button>
           </Card>
         ))}
         {!data?.notifications.length && (
-          <Empty
-            icon={Bell}
-            title="You're all caught up"
-            detail="Results, meaningful changes and requests for your input will appear here."
-          />
+          <Empty icon={Bell} title={t("caughtUp")} detail={t("caughtUpDetail")} />
         )}
       </View>
     </Sheet>
@@ -1758,26 +1711,26 @@ export function AppsScreen() {
   const shortcuts = [
     {
       section: "mail" as const,
-      title: "Mail",
-      detail: "Read messages and prepare replies",
+      title: t("shortcutMail"),
+      detail: t("shortcutMailDetail"),
       icon: Mail,
     },
     {
       section: "calendar" as const,
-      title: "Calendar",
-      detail: "Events and reviewed invitations",
+      title: t("shortcutCalendar"),
+      detail: t("shortcutCalendarDetail"),
       icon: CalendarDays,
     },
     {
       section: "browser" as const,
-      title: "Agent computer",
-      detail: "Persistent browser sessions",
+      title: t("agentComputer"),
+      detail: t("shortcutComputerDetail"),
       icon: Globe2,
     },
     {
       section: "files" as const,
-      title: "Files",
-      detail: "PDFs, forms and filled copies",
+      title: t("shortcutFiles"),
+      detail: t("shortcutFilesDetail"),
       icon: FileText,
     },
   ];
@@ -1785,13 +1738,13 @@ export function AppsScreen() {
     <View style={{ gap: 22 }}>
       <AgentStatus />
       <Field
-        label="Search apps"
+        label={t("searchApps")}
         value={query}
         onChangeText={setQuery}
-        placeholder="Search connectors"
+        placeholder={t("searchConnectors")}
       />
       <ConnectionsScreen query={query} />
-      <Text style={s.heading}>On your computer</Text>
+      <Text style={s.heading}>{t("onYourComputer")}</Text>
       <Card style={{ paddingVertical: 3, backgroundColor: "#F4F5F6" }}>
         {shortcuts
           .filter((item) =>
@@ -1810,18 +1763,18 @@ export function AppsScreen() {
           ))}
       </Card>
       <Button onPress={() => setSettings(!settings)}>
-        {settings ? "Close agent settings" : "Personality & memory"}
+        {settings ? t("closeAgentSettings") : t("personalityMemory")}
       </Button>
       {settings && (
         <>
           <Card style={{ gap: 10 }}>
-            <SectionHeading title="Your agent" />
+            <SectionHeading title={t("yourAgent")} />
             <View style={[s.row, { gap: 16, justifyContent: "center", marginBottom: 12 }]}>
               {(["sky", "sand", "lilac"] as const).map((item) => (
                 <Pressable
                   key={item}
                   accessibilityRole="radio"
-                  accessibilityLabel={`${statusLabel(item)} avatar`}
+                  accessibilityLabel={t("avatarLabel", { name: statusLabel(item) })}
                   accessibilityState={{ checked: avatar === item }}
                   onPress={() => setAvatar(item)}
                   style={{
@@ -1834,7 +1787,7 @@ export function AppsScreen() {
                 </Pressable>
               ))}
             </View>
-            <Field label="Name" value={name} onChangeText={setName} />
+            <Field label={t("nameLabel")} value={name} onChangeText={setName} />
             <View style={[s.row, { gap: 8 }]}>
               {(["warm", "concise", "thoughtful"] as const).map((item) => (
                 <Button key={item} small primary={tone === item} onPress={() => setTone(item)}>
@@ -1843,14 +1796,11 @@ export function AppsScreen() {
               ))}
             </View>
             <CheckRow
-              label="Show background updates in chat"
+              label={t("showBackgroundUpdates")}
               checked={showChatUpdates}
               onPress={() => setShowChatUpdates(!showChatUpdates)}
             />
-            <Text style={s.small}>
-              Activity and notifications always keep the full record, including requests for
-              approval.
-            </Text>
+            <Text style={s.small}>{t("activityAlwaysFull")}</Text>
             <Button
               busy={busy}
               disabled={!name.trim()}
@@ -1858,29 +1808,29 @@ export function AppsScreen() {
                 void save("/identity", { name: name.trim(), tone, avatar, showChatUpdates })
               }
             >
-              Save preferences
+              {t("savePreferences")}
             </Button>
           </Card>
           <Card style={{ gap: 12 }}>
-            <SectionHeading title="Memory" />
-            <Text style={s.muted}>Context you can inspect, correct or forget.</Text>
+            <SectionHeading title={t("memory")} />
+            <Text style={s.muted}>{t("memoryIntro")}</Text>
             {data?.memories.map((item) => (
               <MemoryRow key={item.id} memory={item} />
             ))}
             <Field
-              label="Remember something about me"
+              label={t("rememberAboutMe")}
               value={memory}
               onChangeText={setMemory}
-              placeholder="I prefer morning meetings"
+              placeholder={t("phMemory")}
             />
             <Button
               busy={busy}
               disabled={!memory.trim()}
               onPress={() =>
-                void save("/memories", { text: memory.trim(), source: "User added in Apps" })
+                void save("/memories", { text: memory.trim(), source: t("sourceUserAdded") })
               }
             >
-              Remember
+              {t("remember")}
             </Button>
           </Card>
         </>
@@ -1912,7 +1862,7 @@ function MemoryRow({ memory }: { memory: AgentMemory }) {
       style={{ gap: 8, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: colors.line }}
     >
       {editing ? (
-        <Field label="Memory" value={text} onChangeText={setText} />
+        <Field label={t("memoryField")} value={text} onChangeText={setText} />
       ) : (
         <Text style={s.text}>{memory.text}</Text>
       )}
@@ -1922,15 +1872,15 @@ function MemoryRow({ memory }: { memory: AgentMemory }) {
       <View style={[s.row, { gap: 8 }]}>
         {editing ? (
           <Button small busy={busy} disabled={!text.trim()} onPress={() => void act(false)}>
-            Save correction
+            {t("saveCorrection")}
           </Button>
         ) : (
           <Button small onPress={() => setEditing(true)}>
-            Edit
+            {t("edit")}
           </Button>
         )}
         <Button small danger busy={busy} onPress={() => void act(true)}>
-          Forget
+          {t("forget")}
         </Button>
       </View>
       <ErrorNotice error={error} />

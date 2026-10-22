@@ -15,8 +15,15 @@ import { browserAddress } from "./browser-address";
 import { useComputerDraft } from "./computer-drafts";
 import { computerStatus } from "./computer-status";
 import { LinuxWorkspace } from "./computer-workspace";
+import { t } from "./strings";
 import { Button, Card, colors, ErrorNotice, Field, LinkRow, Sheet, s } from "./ui";
 import { useWorkspace } from "./workspace";
+
+const statusLabels: Record<string, string> = {
+  offline: t("statusOffline"),
+  "take control": t("statusTakeControl"),
+  ready: t("statusReady2"),
+};
 
 export function ComputerEntry() {
   const { workspace, open } = useWorkspace();
@@ -28,7 +35,7 @@ export function ComputerEntry() {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Agent computer — ${status}`}
+      accessibilityLabel={t("agentComputerStatus", { status: statusLabels[status] ?? status })}
       onPress={() => open({ type: "computer" })}
       style={[
         s.row,
@@ -43,7 +50,9 @@ export function ComputerEntry() {
       ]}
     >
       <Monitor size={13} color={colors.muted} />
-      <Text style={{ fontSize: 12, color: colors.muted }}>Computer · {status}</Text>
+      <Text style={{ fontSize: 12, color: colors.muted }}>
+        {t("computerDotStatus", { status: statusLabels[status] ?? status })}
+      </Text>
       <View
         style={{
           width: 5,
@@ -70,19 +79,19 @@ export function BrowserThreadCard({ browser }: { browser: BrowserSession }) {
           <Globe2 size={21} color={colors.blueDark} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[s.text, { fontWeight: "600" }]}>Browser</Text>
+          <Text style={[s.text, { fontWeight: "600" }]}>{t("browserCardTitle")}</Text>
           <Text numberOfLines={1} style={s.small}>
             {browser.status === "closed"
-              ? "Session saved"
+              ? t("sessionSaved")
               : browser.status === "error"
-                ? "Needs attention"
+                ? t("needsAttention")
                 : browser.title}
           </Text>
         </View>
       </View>
       {browser.previewUrl && browser.status === "active" && !failed ? (
         <Image
-          accessibilityLabel={`Browser preview: ${browser.title}`}
+          accessibilityLabel={t("browserPreview", { title: browser.title })}
           source={{ uri: browser.previewUrl }}
           style={{ width: "100%", aspectRatio: 1.6, borderRadius: 11, backgroundColor: "#FFF" }}
           resizeMode="contain"
@@ -100,21 +109,27 @@ export function BrowserThreadCard({ browser }: { browser: BrowserSession }) {
         >
           <Globe2 size={30} color={colors.muted} />
           <Text numberOfLines={2} style={[s.muted, { textAlign: "center" }]}>
-            {failed ? "Preview unavailable. Open the browser to reconnect." : browser.url}
+            {failed ? t("previewFailed") : browser.url}
           </Text>
         </View>
       )}
       <Button onPress={() => open({ type: "browser", browser })}>
         {browser.status === "closed"
-          ? "Reopen browser"
+          ? t("reopenBrowser")
           : browser.status === "error"
-            ? "Reconnect browser"
-            : "Take control"}
+            ? t("reconnectBrowser")
+            : t("takeControl")}
       </Button>
     </Card>
   );
 }
 const tabIcons = { Browser: Globe2, Desktop: Monitor, Terminal, Files: FolderOpen } as const;
+const tabLabels: Record<string, string> = {
+  Browser: t("tabBrowser"),
+  Desktop: t("tabDesktop"),
+  Terminal: t("tabTerminal"),
+  Files: t("shortcutFiles"),
+};
 export function ComputerSheet() {
   const { workspace, api, refresh, close, open, navigate } = useWorkspace();
   const [url, setUrl] = useState("");
@@ -167,11 +182,7 @@ export function ComputerSheet() {
     }
   }
   return (
-    <Sheet
-      title="Agent computer"
-      subtitle="Your agent works here. Step in whenever you need."
-      onClose={close}
-    >
+    <Sheet title={t("agentComputer")} subtitle={t("computerSubtitle")} onClose={close}>
       <View style={{ gap: 20 }}>
         {shown === "Browser" && (
           <View
@@ -179,11 +190,11 @@ export function ComputerSheet() {
           >
             <Monitor size={28} color={colors.blueDark} />
             <View style={{ flex: 1 }}>
-              <Text style={s.heading}>{available ? "Browser connected" : "Browser offline"}</Text>
+              <Text style={s.heading}>
+                {available ? t("browserConnected") : t("browserOffline")}
+              </Text>
               <Text style={s.muted}>
-                {available
-                  ? "Your agent’s browser and documents, in one place."
-                  : "Start the browser worker to connect this computer."}
+                {available ? t("browserConnectedDetail") : t("browserOfflineDetail")}
               </Text>
             </View>
           </View>
@@ -196,7 +207,7 @@ export function ComputerSheet() {
               icon={tabIcons[item]}
               onPress={() => setTab(item)}
             >
-              {item}
+              {tabLabels[item] ?? item}
             </Button>
           ))}
         </View>
@@ -208,7 +219,7 @@ export function ComputerSheet() {
           <>
             <View>
               <Field
-                label="Website address"
+                label={t("websiteAddress")}
                 value={url}
                 onChangeText={setUrl}
                 placeholder="https://example.com"
@@ -223,7 +234,7 @@ export function ComputerSheet() {
                 disabled={!available || !url.trim()}
                 onPress={() => void create()}
               >
-                Open a browser session
+                {t("openBrowserSession")}
               </Button>
             </View>
             {[...workspace.browsers]
@@ -231,27 +242,19 @@ export function ComputerSheet() {
               .map((browser) => (
                 <BrowserThreadCard key={browser.id} browser={browser} />
               ))}
-            {!workspace.browsers.length && (
-              <Text style={s.muted}>
-                Open a page here or ask your agent to research something. Its browsing sessions will
-                appear here.
-              </Text>
-            )}
-            <Text style={s.small}>
-              Browsing sessions keep their own logins and downloads. Open one to take over, then
-              return to your conversation.
-            </Text>
+            {!workspace.browsers.length && <Text style={s.muted}>{t("computerEmptyHint")}</Text>}
+            <Text style={s.small}>{t("computerSessionsNote")}</Text>
           </>
         ) : tab === "Files" ? (
           <>
-            <Text style={s.heading}>Documents</Text>
-            <Text style={s.small}>PDFs saved from mail, browser downloads, and your uploads.</Text>
+            <Text style={s.heading}>{t("documentsHeading")}</Text>
+            <Text style={s.small}>{t("documentsDetail")}</Text>
             {workspace.files.map((file) => (
               <LinkRow
                 key={file.id}
                 icon={FileText}
                 title={file.name}
-                detail={`${file.pageCount} pages · PDF`}
+                detail={t("filePagesPdf", { n: file.pageCount })}
                 onPress={() => open({ type: "file", file })}
               />
             ))}
@@ -262,7 +265,7 @@ export function ComputerSheet() {
                 navigate("files");
               }}
             >
-              Import a document
+              {t("importDocument")}
             </Button>
           </>
         ) : null}
@@ -275,7 +278,7 @@ export function ComputerSheet() {
               .catch((e) => setError(String(e)))
           }
         >
-          Refresh computer
+          {t("refreshComputer")}
         </Button>
       </View>
     </Sheet>

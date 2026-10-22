@@ -3,6 +3,7 @@ import { useContext, useState } from "react";
 import { ActivityIndicator, Linking, Text, View } from "react-native";
 import { z } from "zod";
 import { BrowserRunContext } from "./browser-tool-card";
+import { t } from "./strings";
 import { Card, colors, ErrorNotice, s } from "./ui";
 
 const resultSchema = z.object({
@@ -28,7 +29,7 @@ export function SearchToolCard({ result, loading }: { result: unknown; loading: 
   const failure = error.success
     ? error.data.error
     : !loading && !parsed.success
-      ? "Search did not return readable results."
+      ? t("searchUnreadable")
       : "";
   const sources = parsed.success
     ? [...new Map(parsed.data.results.map((source) => [source.url, source])).values()]
@@ -46,14 +47,14 @@ export function SearchToolCard({ result, loading }: { result: unknown; loading: 
         )}
         <Text style={s.text}>
           {failure
-            ? "Search failed"
+            ? t("searchFailed")
             : working
-              ? "Searching the web…"
+              ? t("searchingWeb")
               : loading
-                ? "Search stopped"
+                ? t("searchStopped")
                 : count
-                  ? `Found ${count} ${count === 1 ? "source" : "sources"}`
-                  : "No sources found"}
+                  ? t("foundSources", { n: count })
+                  : t("noSources")}
         </Text>
       </View>
       {!loading && parsed.success && (
@@ -65,17 +66,13 @@ export function SearchToolCard({ result, loading }: { result: unknown; loading: 
               style={[s.text, { color: colors.blueDark }]}
               onPress={() => {
                 setLinkError("");
-                void Linking.openURL(source.url).catch(() =>
-                  setLinkError("Could not open this source."),
-                );
+                void Linking.openURL(source.url).catch(() => setLinkError(t("couldntOpenSource")));
               }}
             >
               {source.title || source.url}
             </Text>
           ))}
-          {parsed.data.truncated && (
-            <Text style={s.small}>Some search results or excerpts were omitted.</Text>
-          )}
+          {parsed.data.truncated && <Text style={s.small}>{t("resultsOmitted")}</Text>}
           {[...new Set(parsed.data.warnings)].map((warning) => (
             <Text key={warning} style={s.small}>
               {warning}

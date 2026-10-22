@@ -38,33 +38,34 @@ import { ComputerEntry } from "./src/computer";
 import { ComputerDraftProvider } from "./src/computer-drafts";
 import { Details } from "./src/details";
 import { BrowserScreen, CalendarScreen, FilesScreen, MailScreen } from "./src/screens";
+import { t } from "./src/strings";
 import { ThreadsProvider, ThreadsSheet, useMuseThread } from "./src/threads";
 import { Button, Card, colors, ErrorNotice, Field, IconButton, Mascot, s } from "./src/ui";
 import { type Detail, useWorkspace, WorkspaceContext } from "./src/workspace";
 
 const nav: { id: Section; label: string; icon: LucideIcon }[] = [
-  { id: "chat", label: "Chat", icon: MessageCircle },
-  { id: "activity", label: "Activity", icon: PanelsTopLeft },
-  { id: "ideas", label: "Ideas", icon: Lightbulb },
-  { id: "goals", label: "Goals", icon: SquareCheck },
-  { id: "apps", label: "Apps", icon: Shapes },
+  { id: "chat", label: t("navChat"), icon: MessageCircle },
+  { id: "activity", label: t("navActivity"), icon: PanelsTopLeft },
+  { id: "ideas", label: t("navIdeas"), icon: Lightbulb },
+  { id: "goals", label: t("navGoals"), icon: SquareCheck },
+  { id: "apps", label: t("navApps"), icon: Shapes },
 ];
 const titles: Partial<Record<Section, { title: string; subtitle: string }>> = {
-  activity: { title: "Activity", subtitle: "Plans, progress, decisions and results." },
-  ideas: { title: "Ideas", subtitle: "Useful next steps, grounded in your world." },
+  activity: { title: t("navActivity"), subtitle: t("subtitleActivity") },
+  ideas: { title: t("navIdeas"), subtitle: t("subtitleIdeas") },
   goals: {
-    title: "Goals",
-    subtitle: "Longer-term goals and things to keep an eye on.",
+    title: t("navGoals"),
+    subtitle: t("subtitleGoals"),
   },
   apps: {
-    title: "Apps",
-    subtitle: "Connections, capabilities and what your agent remembers.",
+    title: t("navApps"),
+    subtitle: t("subtitleApps"),
   },
-  connections: { title: "Apps", subtitle: "Connections and capabilities." },
-  mail: { title: "Mail", subtitle: "The conversations behind your work." },
-  calendar: { title: "Calendar", subtitle: "Time for what matters." },
-  browser: { title: "Browser", subtitle: "Your connected browsing sessions." },
-  files: { title: "Files", subtitle: "Documents, forms and filled copies." },
+  connections: { title: t("navApps"), subtitle: t("subtitleConnections") },
+  mail: { title: t("shortcutMail"), subtitle: t("subtitleMail") },
+  calendar: { title: t("shortcutCalendar"), subtitle: t("subtitleCalendar") },
+  browser: { title: t("navBrowser"), subtitle: t("subtitleBrowser") },
+  files: { title: t("shortcutFiles"), subtitle: t("subtitleFiles") },
 };
 export default function App() {
   const [token, setToken] = useState("");
@@ -111,27 +112,26 @@ export default function App() {
             <Text
               style={{ fontSize: 32, color: colors.text, letterSpacing: -1, fontWeight: "500" }}
             >
-              Welcome to OpenMuse.
+              {t("welcomeTitle")}
             </Text>
-            <Text style={[s.muted, { textAlign: "center" }]}>A little room for your day.</Text>
+            <Text style={[s.muted, { textAlign: "center" }]}>{t("welcomeSubtitle")}</Text>
             {busy ? (
               <ActivityIndicator color={colors.blueDark} />
             ) : (
               <Card style={{ width: "100%" }}>
                 <ErrorNotice error={error} />
                 <Field
-                  label="Workspace access key"
+                  label={t("accessKeyLabel")}
                   value={accessKey}
                   onChangeText={setAccessKey}
                   secureTextEntry
-                  placeholder="Required for a live workspace"
+                  placeholder={t("phAccessKey")}
                 />
                 <Button primary onPress={() => void connect(accessKey || undefined)}>
-                  Open workspace
+                  {t("openWorkspace")}
                 </Button>
                 <Text style={[s.small, { marginTop: 15 }]}>
-                  Local workspaces open without a key. Make sure your OpenMuse server is running at{" "}
-                  {API_URL}.
+                  {t("localWorkspaceNote", { url: API_URL })}
                 </Text>
               </Card>
             )}
@@ -196,13 +196,13 @@ function WorkspaceApp({ token }: { token: string }) {
           <>
             <ErrorNotice error={error} />
             <Button onPress={() => void refresh().catch((e) => setError(String(e)))}>
-              Try again
+              {t("calTryAgain")}
             </Button>
           </>
         ) : (
           <>
             <ActivityIndicator color={colors.blueDark} />
-            <Text style={s.muted}>Opening your workspace…</Text>
+            <Text style={s.muted}>{t("openingWorkspace")}</Text>
           </>
         )}
       </SafeAreaView>
@@ -264,13 +264,13 @@ function WorkspaceShell({
   const agentName = data?.identity.name || "OpenMuse";
   const status = activeTask
     ? activeTask.status === "waiting_approval"
-      ? `Ready to review · ${activeTask.title}`
+      ? t("statusReadyReview", { title: activeTask.title })
       : activeTask.status === "waiting_input"
-        ? `Needs your input · ${activeTask.title}`
+        ? t("statusNeedsInput", { title: activeTask.title })
         : activeTask.plan.find((step) => step.status === "running")?.title || activeTask.title
     : data?.tasks.some((task) => task.status === "queued")
-      ? "Picking up your next task…"
-      : "Here when you need me";
+      ? t("statusPickingUp")
+      : t("statusHere");
   const title = titles[section] || titles.apps;
   const Screen =
     section === "mail"
@@ -304,14 +304,14 @@ function WorkspaceShell({
             <View style={{ position: "absolute", left: 0, top: 16 }}>
               <IconButton
                 icon={Menu}
-                label="Open conversations and menu"
+                label={t("openThreadsMenu")}
                 onPress={() => setThreadsOpen(true)}
               />
             </View>
             <View pointerEvents="box-none" style={{ alignItems: "center", gap: 1 }}>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Open ${agentName} activity and approvals`}
+                accessibilityLabel={t("openAgentActivity", { name: agentName })}
                 onPress={() => navigate("activity")}
                 style={({ pressed }) => ({
                   alignItems: "center",
@@ -342,7 +342,7 @@ function WorkspaceShell({
             <View style={{ position: "absolute", right: 0, top: 16 }}>
               <IconButton
                 icon={Bell}
-                label={`Notifications, ${pending} unread or pending`}
+                label={t("notificationsBadge", { n: pending })}
                 onPress={() => open({ type: "notifications" })}
               />
               {pending > 0 && (
@@ -375,7 +375,7 @@ function WorkspaceShell({
                     style={{ alignSelf: "flex-start", marginBottom: 18 }}
                     onPress={() => navigate("apps")}
                   >
-                    Back to Apps
+                    {t("backToApps")}
                   </Button>
                 )}
                 <Text style={[s.title, { fontSize: 25, marginBottom: 22 }]}>{title?.title}</Text>
@@ -395,13 +395,13 @@ function WorkspaceShell({
                 <>
                   <ErrorNotice error={threadsError} />
                   {threadsError ? (
-                    <Button onPress={retryThreads}>Retry main chat</Button>
+                    <Button onPress={retryThreads}>{t("retryMainChat")}</Button>
                   ) : threadsLoading ? (
                     <ActivityIndicator color={colors.blueDark} />
                   ) : null}
                   {!threadsLoading && selection.id !== mainId && (
                     <Text style={[s.small, { textAlign: "center", marginBottom: 8 }]}>
-                      Side chat
+                      {t("sideChat")}
                     </Text>
                   )}
                   {visited.map((thread) => (
@@ -493,7 +493,7 @@ function WorkspaceShell({
               <Text style={{ color: "#FFF", fontSize: 13, flexShrink: 1 }}>{toast}</Text>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Dismiss notification"
+                accessibilityLabel={t("dismissToast")}
                 onPress={clearToast}
               >
                 <X size={16} color="#FFF" />

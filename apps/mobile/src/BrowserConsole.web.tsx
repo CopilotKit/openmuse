@@ -1,6 +1,8 @@
+import { t } from "./strings";
+
 export default function BrowserConsole({
   url,
-  title = "Remote browser session console",
+  title = t("browserConsoleTitle"),
   sandboxed = false,
 }: {
   url: string;
