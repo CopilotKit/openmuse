@@ -260,7 +260,9 @@ export function LinuxWorkspace({
                 </Button>
                 <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 18 }}>
                   {snapshot.network === "enabled"
-                    ? "Runs on your computer with internet access. Start GUI apps with >/dev/null 2>&1 & to open them on the Desktop tab."
+                    ? snapshot.provider === "e2b-desktop"
+                      ? "Runs on your computer with internet access. Start GUI apps with >/dev/null 2>&1 & to open them on the Desktop tab."
+                      : "Runs on your Linux workspace with internet access."
                     : "Runs on your computer. Network access is off. Use Browser for the web."}
                 </Text>
               </View>

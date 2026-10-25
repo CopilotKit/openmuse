@@ -136,6 +136,67 @@ test("paths cannot escape the workspace and file contents travel on stdin", asyn
   assert.ok(!call.args.some((arg) => arg.includes(text)));
 });
 
+test("bridge networking is created explicitly and reported without relaxing other isolation", async () => {
+  const inspect = sandbox();
+  inspect.HostConfig.NetworkMode = "bridge";
+  inspect.NetworkSettings.Networks = { bridge: {} };
+  const options = { missing: true, inspect };
+  const f = fixture(options);
+  const service = new ComputerService(
+    db,
+    { ...config, computerNetwork: "bridge" },
+    (args, opts) => {
+      if (args[0] === "container" && args[1] === "create") options.missing = false;
+      return f.runner(args, opts);
+    },
+  );
+  const snapshot = await service.start("owner");
+  assert.equal(snapshot.network, "enabled");
+  assert.equal(snapshot.status, "running");
+  const creation = f.calls.find((c) => c.args[0] === "container" && c.args[1] === "create");
+  assert.ok(creation);
+  assert.equal(creation.args[creation.args.indexOf("--network") + 1], "bridge");
+  assert.ok(creation.args.includes("--read-only"));
+  assert.ok(creation.args.includes("no-new-privileges"));
+  assert.ok(!creation.args.includes("--publish"));
+  assert.equal((await service.execute("owner", { command: "pwd" })).status, "succeeded");
+});
+
+test("bridge opt-in refuses mismatched networks, extra networks and unsafe containers", async () => {
+  for (const modify of [
+    (value: ReturnType<typeof sandbox>) => {
+      value.HostConfig.NetworkMode = "none";
+    },
+    (value: ReturnType<typeof sandbox>) => {
+      value.HostConfig.NetworkMode = "host";
+    },
+    (value: ReturnType<typeof sandbox>) => {
+      value.NetworkSettings.Networks = {};
+    },
+    (value: ReturnType<typeof sandbox>) => {
+      value.NetworkSettings.Networks = {
+        bridge: {},
+        extra: {},
+      };
+    },
+    (value: ReturnType<typeof sandbox>) => {
+      value.HostConfig.Privileged = true;
+    },
+    (value: ReturnType<typeof sandbox>) => {
+      value.Mounts[0].Type = "bind";
+    },
+  ]) {
+    const inspect = sandbox();
+    inspect.HostConfig.NetworkMode = "bridge";
+    inspect.NetworkSettings.Networks = { bridge: {} };
+    modify(inspect);
+    const f = fixture({ inspect });
+    const service = new ComputerService(db, { ...config, computerNetwork: "bridge" }, f.runner);
+    await assert.rejects(service.execute("owner", { command: "pwd" }), /isolation|ownership/);
+    assert.ok(!f.calls.some((c) => c.args[0] === "exec"));
+  }
+});
+
 test("Stop interrupts an active command and its final output cannot overwrite the interrupted receipt", async () => {
   let finish: ((result: DockerResult) => void) | undefined;
   let signalStarted: (() => void) | undefined;

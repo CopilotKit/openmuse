@@ -59,6 +59,10 @@ test("real isolated computer executes commands, persists files, bridges PDFs and
     });
     assert.equal(command.status, "succeeded");
     assert.match(command.stdout, /^1000\nv22\./);
+    const certificates = await post("/commands", {
+      command: "python3 -c 'import ssl; assert ssl.create_default_context().get_ca_certs()'",
+    });
+    assert.equal(certificates.status, "succeeded", certificates.stderr);
     await post("/files/mkdir", { path: "/workspace/notes" });
     await post("/files/write", {
       path: "/workspace/notes/hello.txt",

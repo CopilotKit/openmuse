@@ -21,6 +21,20 @@ Open **Computer → Terminal → Start computer**. Run `pwd` or `python3 --versi
 
 If Docker is unavailable, the app reports the connection error. There is no fallback that executes commands on the API host.
 
+### Enable Docker outbound networking (optional)
+
+Docker commands run without network access by default. To allow downloads and HTTP/API requests, set this on the API and any task worker, then restart them:
+
+```dotenv
+COMPUTER_NETWORK=bridge
+```
+
+Only `none` (default) and `bridge` are accepted. The app reports the selected network mode to the agent and in the computer snapshot. Bridge mode keeps the nonroot user, read-only root filesystem, resource limits, and workspace volume; no ports are published. The image includes CA certificates for verified HTTPS requests. Installing system packages still requires rebuilding the image; network access does not grant root permissions.
+
+For an existing computer, stop it before switching modes, then remove only its container **without `-v`**, retaining the named workspace volume. The next Start recreates the container with the configured network and reuses `/workspace`. The service refuses to attach to a container whose network mode differs from its configuration; it does not silently reconnect a running computer. Use the same setting on API and task workers.
+
+Bridge networking permits destinations reachable from the Docker host, including private networks, and does not apply the browser worker's destination checks or the app's reviewed-write gateway. The agent is instructed to use external writes only when explicitly requested; that instruction is not a network enforcement layer. Use `COMPUTER_NETWORK=none` to restore the default network boundary, recreating the container as above.
+
 ### Optional isolated runtime on macOS
 
 Colima is an open-source way to run Docker in a Linux VM. A separate profile keeps OpenMuse independent of other Docker workloads:
@@ -100,7 +114,7 @@ The terminal runs bounded commands and displays their saved results. It is not a
 
 The workspace is a Docker container running as a nonroot user, with a read-only root filesystem, limited temporary storage and resources, dropped capabilities, and no added privileges. It receives no host directory mounts, Docker socket, model keys, Google tokens, or API access key. A named volume provides persistent `/workspace` storage.
 
-Terminal networking is disabled. The existing browser worker handles public web access through its own destination checks; see its [network boundary](../apps/worker/README.md#network-boundary). Browser profiles and workspace files have separate storage and lifecycle controls.
+Terminal networking is disabled by default; the optional `COMPUTER_NETWORK=bridge` enables Docker outbound networking as described above. The existing browser worker handles public web access through its own destination checks; see its [network boundary](../apps/worker/README.md#network-boundary). Browser profiles and workspace files have separate storage and lifecycle controls.
 
 The E2B desktop provider differs from Docker in these ways:
 

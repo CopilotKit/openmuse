@@ -205,6 +205,9 @@ export class ComputerService {
   get provider() {
     return this.backend.provider;
   }
+  get network() {
+    return this.backend.network;
+  }
   private labels(owner: string) {
     return computerIdentity(this.config, owner).labels;
   }
