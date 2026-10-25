@@ -39,6 +39,10 @@ export class Auth {
       throw new AppError("Session expired. Sign in again.", 401);
     return session.owner;
   }
+  async revoke(authorization?: string) {
+    if (authorization?.startsWith("Bearer "))
+      await this.db.remove("system", "sessions", digest(authorization.slice(7)).toString("hex"));
+  }
   sign(owner: string, path: string) {
     const expires = String(Date.now() + 15 * 60 * 1000);
     const signature = createHmac("sha256", this.signingKey)

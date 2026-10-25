@@ -61,6 +61,19 @@ test("API protects private data and rejects unrelated web origins", async () => 
     403,
   );
 });
+test("signing out revokes only the current session", async () => {
+  const signIn = await app.request("/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const revoked = (await signIn.json()).token;
+  const auth = { Authorization: `Bearer ${revoked}` };
+  assert.equal((await app.request("/api/session", { method: "DELETE", headers: auth })).status, 200);
+  assert.equal((await app.request("/api/workspace", { headers: auth })).status, 401);
+  assert.equal((await app.request("/api/session", { method: "DELETE", headers: auth })).status, 401);
+  assert.equal((await app.request("/api/workspace", { headers: headers() })).status, 200);
+});
 test("file operations recover a published PDF when metadata persistence fails", async (t) => {
   const owner = "file-recovery";
   const bytes = await createSamplePdf();

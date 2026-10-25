@@ -142,6 +142,10 @@ export async function createApp(
     c.set("owner", owner);
     await next();
   });
+  app.delete("/api/session", async (c) => {
+    await auth.revoke(c.req.header("authorization"));
+    return c.json({ ok: true });
+  });
   app.get("/api/workspace", async (c) => {
     const [snapshot, reachable] = await Promise.all([
       workspace.snapshot(c.get("owner"), c.req.query("q")),
