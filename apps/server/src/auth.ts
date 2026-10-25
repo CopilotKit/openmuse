@@ -30,13 +30,17 @@ export class Auth {
   }
   async owner(authorization?: string) {
     if (!authorization?.startsWith("Bearer ")) throw new AppError("Sign in to OpenMuse", 401);
+    const id = digest(authorization.slice(7)).toString("hex");
     const session = await this.db.get<{ owner: string; expiresAt: number }>(
       "system",
       "sessions",
-      digest(authorization.slice(7)).toString("hex"),
+      id,
     );
-    if (!session || session.expiresAt < Date.now())
+    if (!session || session.expiresAt < Date.now()) {
+      // Expired sessions can never be valid again, so drop the row instead of keeping it forever.
+      if (session) await this.db.remove("system", "sessions", id);
       throw new AppError("Session expired. Sign in again.", 401);
+    }
     return session.owner;
   }
   async revoke(authorization?: string) {

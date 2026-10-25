@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -69,10 +70,31 @@ test("signing out revokes only the current session", async () => {
   });
   const revoked = (await signIn.json()).token;
   const auth = { Authorization: `Bearer ${revoked}` };
-  assert.equal((await app.request("/api/session", { method: "DELETE", headers: auth })).status, 200);
+  assert.equal(
+    (await app.request("/api/session", { method: "DELETE", headers: auth })).status,
+    200,
+  );
   assert.equal((await app.request("/api/workspace", { headers: auth })).status, 401);
-  assert.equal((await app.request("/api/session", { method: "DELETE", headers: auth })).status, 401);
+  assert.equal(
+    (await app.request("/api/session", { method: "DELETE", headers: auth })).status,
+    401,
+  );
   assert.equal((await app.request("/api/workspace", { headers: headers() })).status, 200);
+});
+test("an expired session is rejected and its row is removed", async () => {
+  const signIn = await app.request("/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const expired = (await signIn.json()).token;
+  const id = createHash("sha256").update(expired).digest("hex");
+  await db.put("system", "sessions", { id, owner: "local-user", expiresAt: Date.now() - 1 });
+  const response = await app.request("/api/workspace", {
+    headers: { Authorization: `Bearer ${expired}` },
+  });
+  assert.equal(response.status, 401);
+  assert.equal(await db.get("system", "sessions", id), null);
 });
 test("file operations recover a published PDF when metadata persistence fails", async (t) => {
   const owner = "file-recovery";
