@@ -96,6 +96,21 @@ test("an expired session is rejected and its row is removed", async () => {
   assert.equal(response.status, 401);
   assert.equal(await db.get("system", "sessions", id), null);
 });
+test("an expired session still returns 401 when its cleanup fails", async (t) => {
+  const signIn = await app.request("/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const expired = (await signIn.json()).token;
+  const id = createHash("sha256").update(expired).digest("hex");
+  await db.put("system", "sessions", { id, owner: "local-user", expiresAt: Date.now() - 1 });
+  t.mock.method(db, "remove", () => Promise.reject(new Error("db unavailable")));
+  const response = await app.request("/api/workspace", {
+    headers: { Authorization: `Bearer ${expired}` },
+  });
+  assert.equal(response.status, 401);
+});
 test("file operations recover a published PDF when metadata persistence fails", async (t) => {
   const owner = "file-recovery";
   const bytes = await createSamplePdf();

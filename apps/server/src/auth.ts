@@ -38,7 +38,8 @@ export class Auth {
     );
     if (!session || session.expiresAt < Date.now()) {
       // Expired sessions can never be valid again, so drop the row instead of keeping it forever.
-      if (session) await this.db.remove("system", "sessions", id);
+      // Best-effort: a failed cleanup must not turn the rejection into a 5xx.
+      if (session) await this.db.remove("system", "sessions", id).catch(() => {});
       throw new AppError("Session expired. Sign in again.", 401);
     }
     return session.owner;
