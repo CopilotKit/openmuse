@@ -307,3 +307,104 @@ test("a value referenced twice is repaired everywhere it appears", async (t) => 
   assert.equal(saved?.first.keep, `shared ${replacement} value`);
   assert.equal(saved?.second.keep, `shared ${replacement} value`);
 });
+
+test("put preserves an own __proto__ key as data", async (t) => {
+  const store = await createStore();
+  t.after(() => store.close());
+  const source = JSON.parse('{"__proto__":{"approved":true},"text":"safe"}');
+  assert.equal(Object.hasOwn(source, "__proto__"), true);
+
+  const returned = await store.put("clip-owner", "records", { id: "proto-put", source });
+  assert.equal(Object.getPrototypeOf(returned.source), Object.prototype);
+  assert.equal(returned.source.approved, undefined);
+  assert.equal(Object.hasOwn(returned.source, "__proto__"), true);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(returned.source, "__proto__")?.value, {
+    approved: true,
+  });
+
+  const saved = await store.get<{ source: Record<string, unknown> }>(
+    "clip-owner",
+    "records",
+    "proto-put",
+  );
+  assert.equal(saved?.source.approved, undefined);
+  assert.equal(Object.hasOwn(saved?.source ?? {}, "__proto__"), true);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(saved?.source, "__proto__")?.value, {
+    approved: true,
+  });
+});
+
+test("insertIfAbsent preserves an own __proto__ key as data", async (t) => {
+  const store = await createStore();
+  t.after(() => store.close());
+  const source = JSON.parse('{"__proto__":{"approved":true},"text":"safe"}');
+
+  const returned = await store.insertIfAbsent("clip-owner", "records", {
+    id: "proto-insert",
+    source,
+  });
+  assert.equal(returned?.source.approved, undefined);
+  assert.equal(Object.hasOwn(returned?.source ?? {}, "__proto__"), true);
+
+  const saved = await store.get<{ source: Record<string, unknown> }>(
+    "clip-owner",
+    "records",
+    "proto-insert",
+  );
+  assert.equal(saved?.source.approved, undefined);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(saved?.source, "__proto__")?.value, {
+    approved: true,
+  });
+});
+
+test("compareAndSwap keeps a __proto__ condition distinct from an absent key", async (t) => {
+  const store = await createStore();
+  t.after(() => store.close());
+  await store.put("clip-owner", "records", { id: "proto-cas", source: { text: "safe" } });
+  const expected = {
+    source: JSON.parse('{"__proto__":{"approved":true},"text":"safe"}'),
+  };
+
+  const changed = await store.compareAndSwap("clip-owner", "records", "proto-cas", expected, {
+    changed: true,
+  });
+  assert.equal(changed, null);
+  const saved = await store.get<{ source: Record<string, unknown>; changed?: boolean }>(
+    "clip-owner",
+    "records",
+    "proto-cas",
+  );
+  assert.equal(saved?.changed, undefined);
+  assert.equal(saved?.source.approved, undefined);
+  assert.equal(Object.hasOwn(saved?.source ?? {}, "__proto__"), false);
+});
+
+test("compareAndSwap preserves an own __proto__ key in a patch", async (t) => {
+  const store = await createStore();
+  t.after(() => store.close());
+  const source = JSON.parse('{"__proto__":{"approved":true},"text":"safe"}');
+  await store.put("clip-owner", "records", { id: "proto-cas-patch", source });
+
+  const changed = await store.compareAndSwap<{ source: Record<string, unknown> }>(
+    "clip-owner",
+    "records",
+    "proto-cas-patch",
+    { source },
+    { source: JSON.parse('{"__proto__":{"approved":false},"text":"updated"}') },
+  );
+  assert.equal(changed?.source.approved, undefined);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(changed?.source, "__proto__")?.value, {
+    approved: false,
+  });
+
+  const saved = await store.get<{ source: Record<string, unknown> }>(
+    "clip-owner",
+    "records",
+    "proto-cas-patch",
+  );
+  assert.equal(saved?.source.approved, undefined);
+  assert.equal(saved?.source.text, "updated");
+  assert.deepEqual(Object.getOwnPropertyDescriptor(saved?.source, "__proto__")?.value, {
+    approved: false,
+  });
+});
