@@ -76,24 +76,29 @@ export class Auth {
 }
 export async function createAuth(db: Store, config: Config) {
   await mkdir(config.dataDir, { recursive: true, mode: 0o700 });
-  const path = join(config.dataDir, "session-signing-key");
-  let key: string;
+  const key = await readOrCreate(join(config.dataDir, "session-signing-key"), () =>
+    randomBytes(32).toString("base64"),
+  );
+  return new Auth(db, config, key);
+}
+/** Reads a private file, or creates it without replacing another process's value. */
+export async function readOrCreate(path: string, create: () => string) {
   try {
-    key = await readFile(path, "utf8");
+    return await readFile(path, "utf8");
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
-    key = randomBytes(32).toString("base64");
-    const temporary = `${path}.${randomBytes(16).toString("hex")}.tmp`;
-    await writeFile(temporary, key, { mode: 0o600, flag: "wx" });
-    try {
-      // Publish only complete bytes, without replacing another process's key.
-      await link(temporary, path);
-    } catch (error) {
-      if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
-      key = await readFile(path, "utf8");
-    } finally {
-      await unlink(temporary);
-    }
   }
-  return new Auth(db, config, key);
+  let value = create();
+  const temporary = `${path}.${randomBytes(16).toString("hex")}.tmp`;
+  await writeFile(temporary, value, { mode: 0o600, flag: "wx" });
+  try {
+    // Publish only complete bytes, without replacing another process's value.
+    await link(temporary, path);
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+    value = await readFile(path, "utf8");
+  } finally {
+    await unlink(temporary);
+  }
+  return value;
 }

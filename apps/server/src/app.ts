@@ -15,7 +15,7 @@ import { ActionService } from "./actions.ts";
 import { agentConfigured, makeRuntime } from "./agent.ts";
 import { createAuth } from "./auth.ts";
 import { BrowserService } from "./browser.ts";
-import { ComputerService, type DockerRunner } from "./computer.ts";
+import { ComputerService, type DockerRunner, resolveComputerDeployment } from "./computer.ts";
 import { computerRoutes } from "./computer-routes.ts";
 import { assertApiDeploymentConfig, type Config } from "./config.ts";
 import type { Store } from "./db.ts";
@@ -33,6 +33,7 @@ export async function createApp(
   options: { docker?: DockerRunner } = {},
 ) {
   assertApiDeploymentConfig(config);
+  await resolveComputerDeployment(config);
   const auth = await createAuth(db, config),
     files = new Files(db, config, auth),
     google = new GoogleAuth(db, config),

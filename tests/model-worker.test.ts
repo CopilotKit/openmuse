@@ -135,6 +135,7 @@ test("CopilotKit model worker executes server tools and persists the confirmed o
       googleRedirectUri: "http://localhost:8787/api/google/callback",
       allowedOrigins: [],
       computerEnabled: true,
+      computerDeploymentId: "fixture-deployment",
     },
     { docker: computerFixture().runner },
   );
