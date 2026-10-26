@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { deflateSync } from "node:zlib";
 import { PDFDocument, PDFName, PDFString } from "pdf-lib";
 import {
   createSamplePdf,
@@ -151,4 +152,35 @@ test("PDF failures expose safe typed 422 errors including malformed field and fo
     inspectPdf(await malformed.save({ updateFieldAppearances: false })),
     (error: unknown) => error instanceof PdfError && /malformed|inspect|field/i.test(error.message),
   );
+});
+
+test("PDFs whose compressed content expands past the decode limit are rejected", async () => {
+  // A valid one-page PDF plus an object stream that decompresses to just over 100 MiB.
+  const content = deflateSync(
+    Buffer.concat([
+      Buffer.from("5 0 "),
+      Buffer.alloc(100 * 1024 * 1024, 0x20),
+      Buffer.from("null"),
+    ]),
+  );
+  const oversized = Buffer.concat([
+    Buffer.from(
+      "%PDF-1.5\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" +
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n" +
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 10 10] >>\nendobj\n" +
+        `4 0 obj\n<< /Type /ObjStm /N 1 /First 4 /Filter /FlateDecode /Length ${content.length} >>\nstream\n`,
+    ),
+    content,
+    Buffer.from("\nendstream\nendobj\ntrailer\n<< /Root 1 0 R /Size 5 >>\n%%EOF\n"),
+  ]);
+  assert.ok(oversized.length < 10 * 1024 * 1024);
+  const [rejected, sample] = await Promise.allSettled([
+    inspectPdf(oversized),
+    createSamplePdf().then(inspectPdf),
+  ]);
+  assert.equal(rejected.status, "rejected");
+  assert.ok(rejected.reason instanceof PdfError);
+  assert.match(rejected.reason.message, /expands beyond the supported size/);
+  // The limit is per load: a concurrent ordinary PDF is unaffected.
+  assert.equal(sample.status === "fulfilled" && sample.value.pageCount, 2);
 });
