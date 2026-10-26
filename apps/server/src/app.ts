@@ -131,10 +131,14 @@ export async function createApp(
     );
   });
   app.use("/api/*", async (c, next) => {
+    // A signed URL grants only the requests its page makes: reads, and the console's input.
+    const method = c.req.method === "HEAD" ? "GET" : c.req.method;
     const signedRoute =
-      /^\/api\/files\/[^/]+\/content$|^\/api\/browsers\/[^/]+\/(?:preview|console)$/.test(
-        c.req.path,
-      );
+      (method === "GET" &&
+        /^\/api\/files\/[^/]+\/content$|^\/api\/browsers\/[^/]+\/(?:preview|console)$/.test(
+          c.req.path,
+        )) ||
+      (method === "POST" && /^\/api\/browsers\/[^/]+\/console$/.test(c.req.path));
     const owner =
       signedRoute && c.req.query("signature")
         ? auth.verify(new URL(c.req.url))
