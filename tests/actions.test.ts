@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import { ActionService } from "../apps/server/src/actions.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
@@ -118,6 +119,118 @@ test("uncertain writes retain uncertainty and cannot be retried", async () => {
   assert.equal(result.status, "outcome_unknown");
   await service.decide("uncertain-user", proposal.id, proposal.hash, "approve");
   assert.equal(calls, 1);
+});
+async function sendDraft(
+  owner: string,
+  decision: "approve" | "deny",
+  execute: () => Promise<string>,
+) {
+  const service = new ActionService(db, { execute, connected: async () => true });
+  const draft = await db.put(owner, "drafts", { ...email.data, id: randomUUID() });
+  const proposal = await service.propose(owner, { ...email, draftId: draft.id });
+  const result = await service.decide(owner, proposal.id, proposal.hash, decision);
+  return { status: result.status, draft: await db.get(owner, "drafts", draft.id) };
+}
+test("sending a saved draft removes it from drafts", async () => {
+  const sent = await sendDraft("draft-sent-user", "approve", async () => "sent");
+  assert.equal(sent.status, "succeeded");
+  assert.equal(sent.draft, null);
+});
+test("a draft stays when its email is declined, fails or has an unknown outcome", async () => {
+  const denied = await sendDraft("draft-denied-user", "deny", async () => "sent");
+  assert.equal(denied.status, "denied");
+  assert.ok(denied.draft);
+  const failed = await sendDraft("draft-failed-user", "approve", async () => {
+    throw new Error("Provider rejected the message");
+  });
+  assert.equal(failed.status, "failed");
+  assert.ok(failed.draft);
+  const uncertain = await sendDraft("draft-uncertain-user", "approve", async () => {
+    throw Object.assign(new Error("Provider response lost"), { outcomeUnknown: true });
+  });
+  assert.equal(uncertain.status, "outcome_unknown");
+  assert.ok(uncertain.draft);
+});
+test("an expired review keeps its draft", async () => {
+  let now = Date.now();
+  const service = new ActionService(db, {
+    execute: async () => "sent",
+    connected: async () => true,
+    now: () => now,
+  });
+  const draft = await db.put("draft-expired-user", "drafts", { ...email.data, id: randomUUID() });
+  const proposal = await service.propose("draft-expired-user", { ...email, draftId: draft.id });
+  now += 31 * 60 * 1000;
+  await assert.rejects(
+    service.decide("draft-expired-user", proposal.id, proposal.hash, "approve"),
+    /expired/i,
+  );
+  assert.ok(await db.get("draft-expired-user", "drafts", draft.id));
+});
+test("a draft rewritten after its review started is kept when that review is approved", async () => {
+  const service = new ActionService(db, {
+    execute: async () => "sent",
+    connected: async () => true,
+  });
+  const id = randomUUID();
+  await db.put("draft-rewrite-user", "drafts", { ...email.data, id });
+  const proposal = await service.propose("draft-rewrite-user", { ...email, draftId: id });
+  await db.put("draft-rewrite-user", "drafts", { ...email.data, id, body: "Rewritten" });
+  await service.decide("draft-rewrite-user", proposal.id, proposal.hash, "approve");
+  const kept = await db.get<{ body: string }>("draft-rewrite-user", "drafts", id);
+  assert.equal(kept?.body, "Rewritten");
+});
+test("a newer review of a draft replaces the older one, so the email is sent once", async () => {
+  let sends = 0;
+  const service = new ActionService(db, {
+    execute: async () => {
+      sends++;
+      return "sent";
+    },
+    connected: async () => true,
+  });
+  const draft = await db.put("draft-twice-user", "drafts", { ...email.data, id: randomUUID() });
+  const first = await service.propose("draft-twice-user", { ...email, draftId: draft.id });
+  const second = await service.propose("draft-twice-user", { ...email, draftId: draft.id });
+  const stale = await service.decide("draft-twice-user", first.id, first.hash, "approve");
+  assert.equal(stale.status, "cancelled");
+  const sent = await service.decide("draft-twice-user", second.id, second.hash, "approve");
+  assert.equal(sent.status, "succeeded");
+  assert.equal(sends, 1);
+  assert.equal(await db.get("draft-twice-user", "drafts", draft.id), null);
+});
+test("a failed draft cleanup still reports the email as sent", async (t) => {
+  const store = await createStore();
+  t.after(() => store.close());
+  const service = new ActionService(store, {
+    execute: async () => "sent",
+    connected: async () => true,
+  });
+  const draft = await store.put("cleanup-user", "drafts", { ...email.data, id: randomUUID() });
+  const proposal = await service.propose("cleanup-user", { ...email, draftId: draft.id });
+  const unavailable = async () => {
+    throw new Error("Database briefly unavailable");
+  };
+  Object.assign(store, { remove: unavailable, removeIf: unavailable });
+  const logged = t.mock.method(console, "error", () => {});
+  const result = await service.decide("cleanup-user", proposal.id, proposal.hash, "approve");
+  assert.equal(result.status, "succeeded");
+  assert.equal(logged.mock.callCount(), 1);
+});
+test("a review only links a draft that exists for the same owner", async () => {
+  const service = new ActionService(db, {
+    execute: async () => "sent",
+    connected: async () => true,
+  });
+  const draft = await db.put("draft-owner", "drafts", { ...email.data, id: randomUUID() });
+  await assert.rejects(
+    service.propose("draft-other-owner", { ...email, draftId: draft.id }),
+    /Draft not found/,
+  );
+  await assert.rejects(
+    service.propose("draft-owner", { ...email, draftId: randomUUID() }),
+    /Draft not found/,
+  );
 });
 test("another service instance sees persisted proposals", async () => {
   const options = { execute: async () => "created", connected: async () => true };
