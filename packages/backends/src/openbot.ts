@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { clip } from "../../domain/src/text.ts";
 
 /** Verified against OpenBot a96d88c6 and its public CopilotKit runtime 1.70.1. */
 export const OPENBOT_CONTRACT_REF = "a96d88c6fb75385842529d7db7d463f4a8c4a86e";
@@ -295,7 +296,7 @@ export class OpenBotAdapter {
       throw new OpenBotError(
         code,
         detail.success && detail.data.error
-          ? detail.data.error.slice(0, 1000)
+          ? clip(detail.data.error, 1000)
           : `OpenBot request failed (${response.status}).`,
         response.status,
         detail.success ? detail.data.rule : undefined,

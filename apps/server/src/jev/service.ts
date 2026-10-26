@@ -8,6 +8,7 @@ import {
   jevOptionSchema,
   jevPanelSchema,
 } from "../../../../packages/domain/src/jev.ts";
+import { clip } from "../../../../packages/domain/src/text.ts";
 import type { Store } from "../db.ts";
 import { type JevAdapter, rankJevOptions } from "./adapter.ts";
 
@@ -351,7 +352,7 @@ export class JevService {
         runId,
         kind,
         reference,
-        text: text.slice(0, 30_000),
+        text: clip(text, 30_000),
       });
       return;
     }

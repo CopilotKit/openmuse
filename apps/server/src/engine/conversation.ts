@@ -12,6 +12,7 @@ import {
 } from "../../../../packages/domain/src/agent.ts";
 import { calendarRangeSchema } from "../../../../packages/domain/src/index.ts";
 import { jevActionPrefix, parseJevAction } from "../../../../packages/domain/src/jev.ts";
+import { clip } from "../../../../packages/domain/src/text.ts";
 import { computerInstructions, computerTools } from "../computer-tools.ts";
 import type { Config } from "../config.ts";
 import { createJevAdapter, type JevAdapter } from "../jev/adapter.ts";
@@ -20,11 +21,6 @@ import { presentChoicesTool } from "../jev/tools.ts";
 import { searchDescription, searchInputSchema, searchInstructions } from "../search.ts";
 import type { AgentService } from "./service.ts";
 import { tanstackAgent } from "./tanstack-agent.ts";
-
-function clipCalendarText(text: string, limit: number) {
-  const clipped = text.slice(0, limit);
-  return text.length > limit && /[\uD800-\uDBFF]$/.test(clipped) ? clipped.slice(0, -1) : clipped;
-}
 
 export class ConversationAgent extends AbstractAgent {
   constructor(
@@ -187,9 +183,9 @@ export class ConversationAgent extends AbstractAgent {
               ...range,
               events: events.map(({ attendees: _, ...event }) => ({
                 ...event,
-                title: clipCalendarText(event.title, 500),
-                location: clipCalendarText(event.location, 500),
-                description: clipCalendarText(event.description, 2000),
+                title: clip(event.title, 500),
+                location: clip(event.location, 500),
+                description: clip(event.description, 2000),
               })),
               truncated:
                 page.truncated ||
@@ -226,7 +222,7 @@ export class ConversationAgent extends AbstractAgent {
                   from,
                   subject,
                   date,
-                  snippet: body.slice(0, 240),
+                  snippet: clip(body, 240),
                 })),
               truncated: mail.length > 20,
             };
@@ -250,7 +246,7 @@ export class ConversationAgent extends AbstractAgent {
             return {
               messages: messages.slice(-20).map((message) => ({
                 ...message,
-                body: message.body.slice(0, 12000),
+                body: clip(message.body, 12000),
               })),
               truncated:
                 messages.length > 20 || messages.some((message) => message.body.length > 12000),
