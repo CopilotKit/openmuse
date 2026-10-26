@@ -163,3 +163,31 @@ test("proposal schema discriminates on kind and validates nested data", () => {
   );
   assert.equal(proposalSchema.safeParse({ kind: "unknown.kind", data: {} }).success, false);
 });
+
+test("drafts drop invisible characters so the review card shows what is sent", () => {
+  const hidden = "\u200B\u202E\u2066\u2069\u2060\uFEFF\u{E0041}";
+  const draft = emailDraftSchema.parse({
+    ...email,
+    subject: `Your${hidden} visit`,
+    body: `See you${hidden} soon.`,
+  });
+  assert.equal(draft.subject, "Your visit");
+  assert.equal(draft.body, "See you soon.");
+  const created = eventDraftSchema.parse({
+    ...event,
+    title: `Museum${hidden} visit`,
+    location: `Hall${hidden} A`,
+    description: `Bring${hidden} tickets`,
+  });
+  assert.deepEqual(
+    [created.title, created.location, created.description],
+    ["Museum visit", "Hall A", "Bring tickets"],
+  );
+  // A subject made only of invisible characters is empty once they are dropped.
+  assert.equal(emailDraftSchema.safeParse({ ...email, subject: hidden }).success, false);
+});
+
+test("drafts keep joiners and directional marks that real text uses", () => {
+  const body = "Family 👨\u200D👩\u200D👧, می\u200Cخواهم, \u200Fשלום\u200E";
+  assert.equal(emailDraftSchema.parse({ ...email, body }).body, body);
+});
