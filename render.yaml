@@ -9,7 +9,10 @@ services:
     # `corepack enable` dies with EROFS. Render's pnpm honors packageManager.
     buildCommand: pnpm install --frozen-lockfile && pnpm build:server
     startCommand: pnpm start
-    healthCheckPath: /api/health
+    # Liveness + readiness: with the default embedded PGlite store this only
+    # proves the process is alive; with DATABASE_URL set it additionally gates
+    # traffic on Postgres actually answering.
+    healthCheckPath: /api/ready
     disk:
       name: openmuse-data
       mountPath: /var/data
@@ -18,6 +21,11 @@ services:
       # HOST must be 0.0.0.0 on Render, and OpenMuse only allows that in live mode.
       - key: HOST
         value: 0.0.0.0
+      # Behind Render's proxy every connection comes from the proxy address, so
+      # per-client rate limits (sign-in budget, shared API budget) must read the
+      # client IP our proxy appended to X-Forwarded-For.
+      - key: TRUST_PROXY
+        value: true
       - key: WORKSPACE_MODE
         value: live
       - key: AGENT_BACKEND
