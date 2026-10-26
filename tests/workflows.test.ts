@@ -106,6 +106,140 @@ test("document job runs without a client, waits for review, and resumes from its
   );
 });
 
+test("document job preserves valid fields while asking to repair an invalid checkbox", async () => {
+  const recoveryOwner = "document-field-recovery";
+  await server.workspace.ensureSample(recoveryOwner, server.actions);
+  const workspace = await server.workspace.snapshot(recoveryOwner);
+  const mail = workspace.mail.find((message) => message.attachments.length);
+  assert.ok(mail);
+  const task = await server.agent.createTask(recoveryOwner, {
+    prompt: "Fill the sample form and prepare a reply",
+    kind: "document",
+    input: {
+      messageId: mail.id,
+      fields: {
+        participant_name: "Test Student",
+        guardian_name: "Test Guardian",
+        permission_granted: "true",
+      },
+    },
+  });
+
+  await server.agent.worker.tick();
+  const waiting = await server.agent.getTask(recoveryOwner, task.id);
+  assert.equal(waiting.status, "waiting_input", waiting.error ?? waiting.question);
+  assert.equal(waiting.plan[0]?.status, "succeeded");
+  assert.equal(waiting.plan[1]?.status, "pending");
+  assert.ok(waiting.state.source);
+  assert.deepEqual(waiting.input.fields, {
+    participant_name: "Test Student",
+    guardian_name: "Test Guardian",
+  });
+  assert.deepEqual(waiting.state.fieldErrors, [
+    {
+      name: "permission_granted",
+      expected: "boolean",
+      received: "string",
+    },
+  ]);
+  assert.equal(
+    (await db.list<Artifact>(recoveryOwner, "files")).filter((file) => file.parentId).length,
+    0,
+  );
+  const source = waiting.state.source as { fileId: string };
+
+  await server.agent.answer(recoveryOwner, task.id, "Use a checked checkbox", {
+    permission_granted: true,
+  });
+  await server.agent.worker.tick();
+
+  const reviewed = await server.agent.detail(recoveryOwner, task.id);
+  assert.equal(
+    reviewed.task.status,
+    "waiting_approval",
+    reviewed.task.error ?? reviewed.task.question,
+  );
+  assert.equal((reviewed.task.state.source as { fileId: string }).fileId, source.fileId);
+  assert.deepEqual(reviewed.task.input.fields, {
+    participant_name: "Test Student",
+    guardian_name: "Test Guardian",
+    permission_granted: true,
+  });
+  assert.equal(reviewed.task.state.fieldErrors, undefined);
+  assert.equal(reviewed.task.state.missingFields, undefined);
+  assert.deepEqual(reviewed.task.state.answers, [
+    {
+      question: waiting.question,
+      answer: "Use a checked checkbox",
+    },
+  ]);
+  assert.equal(reviewed.files.length, 1);
+});
+
+test("document job preserves valid fields while asking to replace an unknown field", async () => {
+  const recoveryOwner = "document-field-name-recovery";
+  await server.workspace.ensureSample(recoveryOwner, server.actions);
+  const workspace = await server.workspace.snapshot(recoveryOwner);
+  const mail = workspace.mail.find((message) => message.attachments.length);
+  assert.ok(mail);
+  const task = await server.agent.createTask(recoveryOwner, {
+    prompt: "Fill the sample form and prepare a reply",
+    kind: "document",
+    input: {
+      messageId: mail.id,
+      fields: {
+        participant_name: "Test Student",
+        guardian_name: "Test Guardian",
+        consent: true,
+      },
+    },
+  });
+
+  await server.agent.worker.tick();
+  const waiting = await server.agent.getTask(recoveryOwner, task.id);
+  assert.equal(waiting.status, "waiting_input", waiting.error ?? waiting.question);
+  assert.equal(waiting.plan[0]?.status, "succeeded");
+  assert.equal(waiting.plan[1]?.status, "pending");
+  assert.ok(waiting.state.source);
+  assert.deepEqual(waiting.input.fields, {
+    participant_name: "Test Student",
+    guardian_name: "Test Guardian",
+  });
+  assert.deepEqual(waiting.state.fieldErrors, [
+    {
+      name: "consent",
+      expected: "a supported PDF field",
+      received: "boolean",
+    },
+  ]);
+  assert.equal(
+    (await db.list<Artifact>(recoveryOwner, "files")).filter((file) => file.parentId).length,
+    0,
+  );
+  const source = waiting.state.source as { fileId: string };
+
+  await server.agent.answer(recoveryOwner, task.id, "Use the PDF's checkbox field", {
+    permission_granted: true,
+  });
+  await server.agent.worker.tick();
+
+  const reviewed = await server.agent.detail(recoveryOwner, task.id);
+  assert.equal(
+    reviewed.task.status,
+    "waiting_approval",
+    reviewed.task.error ?? reviewed.task.question,
+  );
+  assert.equal((reviewed.task.state.source as { fileId: string }).fileId, source.fileId);
+  assert.deepEqual(reviewed.task.input.fields, {
+    participant_name: "Test Student",
+    guardian_name: "Test Guardian",
+    permission_granted: true,
+  });
+  assert.equal(reviewed.task.state.fieldErrors, undefined);
+  assert.equal(reviewed.task.state.missingFields, undefined);
+  assert.equal(reviewed.files.length, 1);
+});
+
 test("document retry reuses the filled PDF after its task checkpoint is lost", async (t) => {
   const replayOwner = "interrupted-document";
   await server.workspace.ensureSample(replayOwner, server.actions);
