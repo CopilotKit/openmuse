@@ -11,10 +11,12 @@ import { useCallback, useEffect, useState } from "react";
 import { AppState, Image, Pressable, Text, View } from "react-native";
 import type { BrowserSession } from "../../../packages/domain/src";
 import type { ComputerSnapshot } from "../../../packages/domain/src/computer";
+import { statusLabel } from "./agent-ui";
 import { browserAddress } from "./browser-address";
 import { useComputerDraft } from "./computer-drafts";
 import { computerStatus } from "./computer-status";
 import { LinuxWorkspace } from "./computer-workspace";
+import { i18n, names } from "./i18n";
 import { Button, Card, colors, ErrorNotice, Field, LinkRow, Sheet, s } from "./ui";
 import { useWorkspace } from "./workspace";
 
@@ -24,11 +26,13 @@ export function ComputerEntry() {
     (c) => c.id === "browser" && c.status === "connected",
   );
   const active = workspace.browsers.filter((b) => b.status === "active").length;
-  const status = computerStatus(available, active);
+  const rawStatus = computerStatus(available, active);
+  const status =
+    rawStatus === "take control" ? i18n.t("status.take_control") : statusLabel(rawStatus);
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Agent computer — ${status}`}
+      accessibilityLabel={i18n.t("a11y.agentComputer", { status })}
       onPress={() => open({ type: "computer" })}
       style={[
         s.row,
@@ -43,7 +47,9 @@ export function ComputerEntry() {
       ]}
     >
       <Monitor size={13} color={colors.muted} />
-      <Text style={{ fontSize: 12, color: colors.muted }}>Computer · {status}</Text>
+      <Text style={{ fontSize: 12, color: colors.muted }}>
+        {i18n.t("computer.statusLine", { status })}
+      </Text>
       <View
         style={{
           width: 5,
@@ -70,19 +76,19 @@ export function BrowserThreadCard({ browser }: { browser: BrowserSession }) {
           <Globe2 size={21} color={colors.blueDark} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[s.text, { fontWeight: "600" }]}>Browser</Text>
+          <Text style={[s.text, { fontWeight: "600" }]}>{i18n.t("browser.browser")}</Text>
           <Text numberOfLines={1} style={s.small}>
             {browser.status === "closed"
-              ? "Session saved"
+              ? i18n.t("browser.sessionSaved")
               : browser.status === "error"
-                ? "Needs attention"
+                ? i18n.t("browser.needsAttention")
                 : browser.title}
           </Text>
         </View>
       </View>
       {browser.previewUrl && browser.status === "active" && !failed ? (
         <Image
-          accessibilityLabel={`Browser preview: ${browser.title}`}
+          accessibilityLabel={i18n.t("a11y.browserPreview", { title: browser.title })}
           source={{ uri: browser.previewUrl }}
           style={{ width: "100%", aspectRatio: 1.6, borderRadius: 11, backgroundColor: "#FFF" }}
           resizeMode="contain"
@@ -100,21 +106,27 @@ export function BrowserThreadCard({ browser }: { browser: BrowserSession }) {
         >
           <Globe2 size={30} color={colors.muted} />
           <Text numberOfLines={2} style={[s.muted, { textAlign: "center" }]}>
-            {failed ? "Preview unavailable. Open the browser to reconnect." : browser.url}
+            {failed ? i18n.t("browser.previewReconnect") : browser.url}
           </Text>
         </View>
       )}
       <Button onPress={() => open({ type: "browser", browser })}>
         {browser.status === "closed"
-          ? "Reopen browser"
+          ? i18n.t("browser.reopen")
           : browser.status === "error"
-            ? "Reconnect browser"
-            : "Take control"}
+            ? i18n.t("browser.reconnect")
+            : i18n.t("browser.takeControl")}
       </Button>
     </Card>
   );
 }
 const tabIcons = { Browser: Globe2, Desktop: Monitor, Terminal, Files: FolderOpen } as const;
+const tabLabel = {
+  Browser: () => i18n.t("browser.browser"),
+  Desktop: () => i18n.t("computer.desktop"),
+  Terminal: () => i18n.t("computer.terminal"),
+  Files: () => i18n.t("settings.files"),
+} as const;
 export function ComputerSheet() {
   const { workspace, api, refresh, close, open, navigate } = useWorkspace();
   const [url, setUrl] = useState("");
@@ -167,11 +179,7 @@ export function ComputerSheet() {
     }
   }
   return (
-    <Sheet
-      title="Agent computer"
-      subtitle="Your agent works here. Step in whenever you need."
-      onClose={close}
-    >
+    <Sheet title={i18n.t("computer.title")} subtitle={i18n.t("computer.subtitle")} onClose={close}>
       <View style={{ gap: 20 }}>
         {shown === "Browser" && (
           <View
@@ -179,11 +187,11 @@ export function ComputerSheet() {
           >
             <Monitor size={28} color={colors.blueDark} />
             <View style={{ flex: 1 }}>
-              <Text style={s.heading}>{available ? "Browser connected" : "Browser offline"}</Text>
+              <Text style={s.heading}>
+                {available ? i18n.t("browser.connected") : i18n.t("browser.offline")}
+              </Text>
               <Text style={s.muted}>
-                {available
-                  ? "Your agent’s browser and documents, in one place."
-                  : "Start the browser worker to connect this computer."}
+                {available ? i18n.t("browser.together") : i18n.t("browser.startWorker")}
               </Text>
             </View>
           </View>
@@ -196,7 +204,7 @@ export function ComputerSheet() {
               icon={tabIcons[item]}
               onPress={() => setTab(item)}
             >
-              {item}
+              {tabLabel[item]()}
             </Button>
           ))}
         </View>
@@ -208,7 +216,7 @@ export function ComputerSheet() {
           <>
             <View>
               <Field
-                label="Website address"
+                label={i18n.t("computer.website")}
                 value={url}
                 onChangeText={setUrl}
                 placeholder="https://example.com"
@@ -223,7 +231,7 @@ export function ComputerSheet() {
                 disabled={!available || !url.trim()}
                 onPress={() => void create()}
               >
-                Open a browser session
+                {i18n.t("browser.openBrowserSession")}
               </Button>
             </View>
             {[...workspace.browsers]
@@ -244,14 +252,14 @@ export function ComputerSheet() {
           </>
         ) : tab === "Files" ? (
           <>
-            <Text style={s.heading}>Documents</Text>
-            <Text style={s.small}>PDFs saved from mail, browser downloads, and your uploads.</Text>
+            <Text style={s.heading}>{i18n.t("files.documents")}</Text>
+            <Text style={s.small}>{i18n.t("files.documentsDetail", names)}</Text>
             {workspace.files.map((file) => (
               <LinkRow
                 key={file.id}
                 icon={FileText}
                 title={file.name}
-                detail={`${file.pageCount} pages · PDF`}
+                detail={i18n.t("common.pages", { count: file.pageCount, ...names })}
                 onPress={() => open({ type: "file", file })}
               />
             ))}
@@ -262,7 +270,7 @@ export function ComputerSheet() {
                 navigate("files");
               }}
             >
-              Import a document
+              {i18n.t("files.importDocument")}
             </Button>
           </>
         ) : null}
@@ -275,7 +283,7 @@ export function ComputerSheet() {
               .catch((e) => setError(String(e)))
           }
         >
-          Refresh computer
+          {i18n.t("computer.refresh")}
         </Button>
       </View>
     </Sheet>

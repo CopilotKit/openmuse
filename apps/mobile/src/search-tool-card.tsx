@@ -3,6 +3,7 @@ import { useContext, useState } from "react";
 import { ActivityIndicator, Linking, Text, View } from "react-native";
 import { z } from "zod";
 import { BrowserRunContext } from "./browser-tool-card";
+import { i18n } from "./i18n";
 import { Card, colors, ErrorNotice, s } from "./ui";
 
 const resultSchema = z.object({
@@ -28,7 +29,7 @@ export function SearchToolCard({ result, loading }: { result: unknown; loading: 
   const failure = error.success
     ? error.data.error
     : !loading && !parsed.success
-      ? "Search did not return readable results."
+      ? i18n.t("search.unreadable")
       : "";
   const sources = parsed.success
     ? [...new Map(parsed.data.results.map((source) => [source.url, source])).values()]
@@ -46,14 +47,14 @@ export function SearchToolCard({ result, loading }: { result: unknown; loading: 
         )}
         <Text style={s.text}>
           {failure
-            ? "Search failed"
+            ? i18n.t("search.failed")
             : working
-              ? "Searching the web…"
+              ? i18n.t("search.searching")
               : loading
-                ? "Search stopped"
+                ? i18n.t("search.stopped")
                 : count
-                  ? `Found ${count} ${count === 1 ? "source" : "sources"}`
-                  : "No sources found"}
+                  ? i18n.t("search.found", { count })
+                  : i18n.t("search.none")}
         </Text>
       </View>
       {!loading && parsed.success && (
@@ -66,16 +67,14 @@ export function SearchToolCard({ result, loading }: { result: unknown; loading: 
               onPress={() => {
                 setLinkError("");
                 void Linking.openURL(source.url).catch(() =>
-                  setLinkError("Could not open this source."),
+                  setLinkError(i18n.t("search.cannotOpen")),
                 );
               }}
             >
               {source.title || source.url}
             </Text>
           ))}
-          {parsed.data.truncated && (
-            <Text style={s.small}>Some search results or excerpts were omitted.</Text>
-          )}
+          {parsed.data.truncated && <Text style={s.small}>{i18n.t("chat.searchOmitted")}</Text>}
           {[...new Set(parsed.data.warnings)].map((warning) => (
             <Text key={warning} style={s.small}>
               {warning}

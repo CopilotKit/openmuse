@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, Minus, Plus } from "lucide-react-native";
 import { useRef, useState } from "react";
 import { Text, View } from "react-native";
 import Pdf from "react-native-pdf";
+import { i18n } from "./i18n";
 import { Button, colors, ErrorNotice, s } from "./ui";
 export interface PdfReaderProps {
   url: string;
@@ -24,7 +25,7 @@ export default function PdfReader({ url, token, pageCount }: PdfReaderProps) {
             disabled={page <= 1}
             onPress={() => ref.current?.setPage(page - 1)}
           >
-            Previous
+            {i18n.t("files.previous")}
           </Button>
           <Text style={s.small}>
             {page} / {pages}
@@ -35,7 +36,7 @@ export default function PdfReader({ url, token, pageCount }: PdfReaderProps) {
             disabled={page >= pages}
             onPress={() => ref.current?.setPage(page + 1)}
           >
-            Next
+            {i18n.t("files.next")}
           </Button>
         </View>
         <View style={[s.row, { gap: 8 }]}>
@@ -45,7 +46,7 @@ export default function PdfReader({ url, token, pageCount }: PdfReaderProps) {
             disabled={scale <= 1}
             onPress={() => setScale(Math.max(1, scale - 0.25))}
           >
-            Zoom out
+            {i18n.t("files.zoomOut")}
           </Button>
           <Button
             small
@@ -53,7 +54,7 @@ export default function PdfReader({ url, token, pageCount }: PdfReaderProps) {
             disabled={scale >= 3}
             onPress={() => setScale(Math.min(3, scale + 0.25))}
           >
-            Zoom in
+            {i18n.t("files.zoomIn")}
           </Button>
         </View>
       </View>

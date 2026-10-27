@@ -2,6 +2,7 @@ import { Check, ExternalLink } from "lucide-react-native";
 import { createContext, useContext, useRef, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, Text, View } from "react-native";
 import type { JevOption, JevPanel } from "../../../packages/domain/src/jev";
+import { i18n } from "./i18n";
 import {
   choiceAvailability,
   parseJevResult,
@@ -40,7 +41,7 @@ function SourceLink({ title, url }: { title: string; url: string }) {
   return (
     <Pressable
       accessibilityRole="link"
-      accessibilityLabel={`Source: ${title}`}
+      accessibilityLabel={i18n.t("a11y.source", { title })}
       onPress={() => void Linking.openURL(url)}
       style={({ pressed }) => [s.row, { gap: 4, opacity: pressed ? 0.65 : 1 }]}
     >
@@ -70,11 +71,17 @@ function ChoiceButton({
   onChoose: (optionId: string) => void;
 }) {
   if (panel.type === "comparison") {
-    const caption = /exhibit/i.test(panel.title) ? "Choose this exhibit" : "Choose this option";
+    const caption = /exhibit/i.test(panel.title)
+      ? i18n.t("jev.chooseExhibit")
+      : i18n.t("jev.chooseOption");
     return (
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${caption}: ${option.label} (option ${position})`}
+        accessibilityLabel={i18n.t("a11y.choiceOption", {
+          caption,
+          option: option.label,
+          position,
+        })}
         accessibilityState={{ disabled: disabled || pending, busy: pending, selected }}
         disabled={disabled || pending}
         onPress={() => onChoose(option.id)}
@@ -118,13 +125,13 @@ export function JevToolCard({ result, loading }: { result: unknown; loading: boo
     return (
       <View style={[s.row, { gap: 10, padding: 14 }]}>
         <ActivityIndicator size="small" color={colors.blueDark} />
-        <Text style={s.muted}>Preparing choices…</Text>
+        <Text style={s.muted}>{i18n.t("jev.preparing")}</Text>
       </View>
     );
   }
 
   const parsed = parseJevResult(result);
-  if (!parsed) return <ErrorNotice error="The choices could not be displayed. Please retry." />;
+  if (!parsed) return <ErrorNotice error={i18n.t("jev.cannotDisplay")} />;
   if (parsed.error) return <ErrorNotice error={parsed.error} />;
   const panel = parsed.panel;
   if (!panel) return null;
@@ -191,13 +198,15 @@ export function JevToolCard({ result, loading }: { result: unknown; loading: boo
     <Card style={{ width: "100%", maxWidth: 440, padding: 17, gap: 13 }}>
       <View style={{ gap: 5 }}>
         <Text style={s.heading}>{panel.title}</Text>
-        {panel.mode === "sample" && <Text style={s.small}>Sample · scripted decisions</Text>}
-        {panel.mode === "live" && <Text style={s.small}>Live Jev · model decisions</Text>}
-        {preferredOption && !selectedId && (
-          <Text style={s.small}>Previous preference: {preferredOption.label}</Text>
+        {panel.mode === "sample" && <Text style={s.small}>{i18n.t("jev.sample")}</Text>}
+        {panel.mode === "live" && (
+          <Text style={s.small}>{i18n.t("jev.live", { name: "Jev" })}</Text>
         )}
-        {stale && <Text style={s.small}>Earlier choices</Text>}
-        {selectedId && <Text style={s.small}>Choice submitted</Text>}
+        {preferredOption && !selectedId && (
+          <Text style={s.small}>{i18n.t("jev.previous", { label: preferredOption.label })}</Text>
+        )}
+        {stale && <Text style={s.small}>{i18n.t("jev.earlier")}</Text>}
+        {selectedId && <Text style={s.small}>{i18n.t("jev.submitted")}</Text>}
       </View>
       {panel.type === "clarification" ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
@@ -262,7 +271,7 @@ export function JevToolCard({ result, loading }: { result: unknown; loading: boo
           }
           onPress={() => void choose(failedOptionId, true)}
         >
-          Retry choice
+          {i18n.t("jev.retry")}
         </Button>
       )}
     </Card>
