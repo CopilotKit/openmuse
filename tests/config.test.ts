@@ -115,6 +115,43 @@ test("environment variables that override a different .env value are reported by
   assert.deepEqual(shadowedEnvKeys(file, {}), []);
 });
 
+test("the boxcompute provider requires a server-side key and a deployment id", async () => {
+  const { readConfig } = await import("../apps/server/src/config.ts");
+  const keys = [
+    "COMPUTER_PROVIDER",
+    "COMPUTER_ENABLED",
+    "BOXCOMPUTE_API_KEY",
+    "BOXCOMPUTE_API_URL",
+    "BOXCOMPUTE_WORKSPACE_ID",
+    "COMPUTER_DEPLOYMENT_ID",
+    "CPK_INTELLIGENCE_API_KEY",
+  ];
+  const old = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  try {
+    process.env.CPK_INTELLIGENCE_API_KEY = "test-project-key-never-sent";
+    for (const key of keys.slice(0, 6)) delete process.env[key];
+    process.env.COMPUTER_PROVIDER = "boxcompute";
+    assert.equal(readConfig().computerProvider, "boxcompute", "a disabled computer needs no key");
+    process.env.COMPUTER_ENABLED = "true";
+    process.env.BOXCOMPUTE_API_KEY = " ";
+    assert.throws(() => readConfig(), /BOXCOMPUTE_API_KEY/);
+    process.env.BOXCOMPUTE_API_KEY = "bc_live_fixture";
+    // VMs are matched by metadata across the whole BoxCompute account.
+    assert.throws(() => readConfig(), /COMPUTER_DEPLOYMENT_ID/);
+    process.env.COMPUTER_DEPLOYMENT_ID = "fixture-deployment";
+    process.env.BOXCOMPUTE_WORKSPACE_ID = " ws_fixture ";
+    const config = readConfig();
+    assert.equal(config.boxcomputeApiKey, "bc_live_fixture");
+    assert.equal(config.boxcomputeWorkspaceId, "ws_fixture");
+    assert.equal(config.boxcomputeApiUrl, undefined);
+  } finally {
+    for (const [key, value] of Object.entries(old)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
 test("computer provider defaults to Docker and e2b-desktop requires a server-side key", async () => {
   const { readConfig } = await import("../apps/server/src/config.ts");
   const keys = [
