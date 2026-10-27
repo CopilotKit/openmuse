@@ -11,6 +11,7 @@
     "android": { "package": "app.openmuse.mobile" },
     "web": { "bundler": "metro", "name": "OpenMuse — a little room for everything" },
     "plugins": [
+      "./plugins/withIOSSceneLifecycle",
       "expo-document-picker",
       "@config-plugins/react-native-blob-util",
       "@config-plugins/react-native-pdf"
