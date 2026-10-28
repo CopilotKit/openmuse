@@ -15,6 +15,16 @@ import type {
 import type { ActionProposal, Artifact } from "../packages/domain/src/index.ts";
 import { createSamplePdf } from "../packages/integrations/src/pdf.ts";
 
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {
+    throw new Error("Promise was not initialized");
+  };
+  const promise = new Promise<T>((fulfill) => {
+    resolve = fulfill;
+  });
+  return { promise, resolve };
+}
+
 let db: Store, server: Awaited<ReturnType<typeof createApp>>, directory: string;
 const owner = "workflow-user";
 const reconcile = () => (server.agent as unknown as { maintain(): Promise<void> }).maintain();
@@ -372,6 +382,41 @@ test("dismissal racing acceptance never creates work for a dismissed idea", asyn
       assert.equal(tasks.filter((t) => t.title === idea.title).length, 0);
     else assert.ok(saved?.taskId && tasks.some((t) => t.id === saved.taskId));
   }
+});
+
+test("dismissing an idea that was just accepted returns the accepted idea", async (t) => {
+  const idea: Idea = {
+    id: "race-dismiss-after-accept",
+    title: "Plan a picnic",
+    reason: "User context",
+    prompt: "Plan a picnic",
+    kind: "plan",
+    input: {},
+    evidence: [],
+    status: "new",
+    createdAt: new Date().toISOString(),
+  };
+  await db.put(owner, "ideas", idea);
+  const originalGet = db.get.bind(db);
+  const read = deferred<void>();
+  const resumeRead = deferred<void>();
+  let intercept = true;
+  t.mock.method(db, "get", async (...args: Parameters<Store["get"]>) => {
+    const result = await originalGet(...args);
+    if (intercept && args[1] === "ideas" && args[2] === idea.id) {
+      intercept = false;
+      read.resolve();
+      await resumeRead.promise;
+    }
+    return result;
+  });
+  // The dismissal reads the idea as new, then the acceptance lands before it writes.
+  const dismissal = server.agent.decideIdea(owner, idea.id, "dismiss");
+  await read.promise;
+  await server.agent.decideIdea(owner, idea.id, "accept");
+  resumeRead.resolve();
+  const result = await dismissal;
+  assert.equal(result?.status, "accepted");
 });
 
 test("milestone-linked outcomes preserve manual progress and legacy goal tasks still append once", async () => {
