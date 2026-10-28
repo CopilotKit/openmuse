@@ -27,6 +27,8 @@ import { AppError } from "./errors.ts";
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 export const computerOutputLimit = 128 * 1024;
 const fileLimit = 256 * 1024;
+// File operations that change the workspace, so an unfinished one may still have happened.
+const fileWrites = new Set(["write", "write_pdf", "mkdir"]);
 const leaseDuration = 180000;
 export const computerCommandSchema = z.object({
   command: z.string().trim().min(1).max(16000),
@@ -611,11 +613,25 @@ export class ComputerService {
       const expectedOutput = operation === "read_pdf" ? maxOutputBytes : 0;
       const seconds = 8 + Math.ceil(Math.max(input.length, expectedOutput) / (1024 * 1024));
       const result = await session.file(input, seconds, maxOutputBytes);
-      if (result.exitCode !== 0 || result.timedOut || result.interrupted || result.truncated)
+      // The in-sandbox `timeout` usually stops a slow operation first: exit 124, or 137 when
+      // it has to kill it.
+      const stopped =
+        result.timedOut || result.interrupted || result.exitCode === 124 || result.exitCode === 137;
+      if (stopped && fileWrites.has(operation))
         throw new AppError(
-          "Computer file operation failed. Check the path, permissions and file size; symlinks cannot be opened.",
+          "The computer stopped before confirming this file change, so it may or may not have been saved. Check the file before trying again.",
           422,
         );
+      if (result.exitCode !== 0 || stopped || result.truncated) {
+        // files.py prints the reason (e.g. "File exceeds size limit") as its last stderr line.
+        const reason = stopped || result.truncated ? "" : result.stderr.trim().split("\n").at(-1);
+        throw new AppError(
+          reason
+            ? `Computer file operation failed: ${reason.trim().slice(0, 200)}`
+            : "Computer file operation failed. Check the path, permissions and file size; symlinks cannot be opened.",
+          422,
+        );
+      }
       try {
         return JSON.parse(result.stdout) as T;
       } catch {

@@ -136,6 +136,43 @@ test("paths cannot escape the workspace and file contents travel on stdin", asyn
   assert.ok(!call.args.some((arg) => arg.includes(text)));
 });
 
+test("file operations report why they failed and never call an unfinished write a failure", async () => {
+  const failing = fixture({
+    owner: "file-error",
+    command: async () => ({ ...ok(), stderr: "File exceeds size limit\n", exitCode: 1 }),
+  });
+  await assert.rejects(
+    new ComputerService(db, config, failing.runner).read("file-error", "/workspace/big.bin"),
+    /File exceeds size limit/,
+  );
+
+  const stopped = fixture({
+    owner: "file-timeout",
+    command: async () => ({ ...ok(), timedOut: true, exitCode: null }),
+  });
+  const service = new ComputerService(db, config, stopped.runner);
+  await assert.rejects(
+    service.write("file-timeout", "/workspace/note.txt", "hello"),
+    /may or may not have been saved/,
+  );
+  // A read that never finished changed nothing, so it keeps the general message.
+  await assert.rejects(service.read("file-timeout", "/workspace/note.txt"), /Check the path/);
+
+  // Usually the timeout inside the computer stops the operation first.
+  const timedOut = fixture({
+    owner: "file-inner-timeout",
+    command: async () => ({ ...ok(), exitCode: 124 }),
+  });
+  await assert.rejects(
+    new ComputerService(db, config, timedOut.runner).write(
+      "file-inner-timeout",
+      "/workspace/note.txt",
+      "hello",
+    ),
+    /may or may not have been saved/,
+  );
+});
+
 test("Stop interrupts an active command and its final output cannot overwrite the interrupted receipt", async () => {
   let finish: ((result: DockerResult) => void) | undefined;
   let signalStarted: (() => void) | undefined;
