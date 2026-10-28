@@ -30,7 +30,6 @@ export function DesktopToolCard({
   live = false,
   loading,
 }: {
-  toolCallId: string;
   live?: boolean;
   result: unknown;
   loading: boolean;

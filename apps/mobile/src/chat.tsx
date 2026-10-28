@@ -94,8 +94,8 @@ export function WorkspaceTools() {
     name: "use_desktop",
     description: "Show the agent working on the computer's desktop",
     parameters: displayParameters,
-    render: ({ toolCallId, result, status }) => (
-      <DesktopToolCard toolCallId={toolCallId} result={result} loading={status !== "complete"} />
+    render: ({ result, status }) => (
+      <DesktopToolCard result={result} loading={status !== "complete"} />
     ),
   });
   useRenderTool({
@@ -653,7 +653,6 @@ export function ChatScreen({
         {!!latestDesktop && (
           <DesktopToolCard
             live
-            toolCallId={latestDesktop}
             result={
               messages.find(
                 (message) => message.role === "tool" && message.toolCallId === latestDesktop,
