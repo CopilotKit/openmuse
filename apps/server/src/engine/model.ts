@@ -10,6 +10,7 @@ import { searchDescription, searchInputSchema, searchInstructions } from "../sea
 import type { AgentService } from "./service.ts";
 import { tanstackAgent } from "./tanstack-agent.ts";
 import type { TaskContext } from "./worker.ts";
+import { clipText } from "../text.ts";
 
 export type TaskAnswer = { question?: string; answer: string };
 
@@ -186,7 +187,7 @@ export async function executeModelTask(
                 kind: "web",
                 title: source.title ?? source.url,
                 url: source.url,
-                excerpt: source.excerpts.join("\n").slice(0, 500),
+                excerpt: clipText(source.excerpts.join("\n"), 500),
               });
             }
             task = await ctx.checkpoint({ evidence });
@@ -216,11 +217,11 @@ export async function executeModelTask(
                     kind: "web",
                     title: page.title,
                     url: page.url,
-                    excerpt: page.text.slice(0, 500),
+                    excerpt: clipText(page.text, 500),
                   },
                 ],
               });
-              return { ...page, text: page.text.slice(0, 30000) };
+              return { ...page, text: clipText(page.text, 30000) };
             },
           ),
         ]
@@ -400,7 +401,7 @@ export async function executeModelTask(
     });
   });
   if (runError) throw new Error(runError);
-  if (text) await ctx.event("step", "Agent update", text.slice(0, 12000));
+  if (text) await ctx.event("step", "Agent update", clipText(text, 12000));
   return (
     outcome ?? {
       status: "waiting_input",

@@ -19,12 +19,8 @@ import { JevService } from "../jev/service.ts";
 import { presentChoicesTool } from "../jev/tools.ts";
 import { searchDescription, searchInputSchema, searchInstructions } from "../search.ts";
 import type { AgentService } from "./service.ts";
+import { clipText } from "../text.ts";
 import { tanstackAgent } from "./tanstack-agent.ts";
-
-function clipCalendarText(text: string, limit: number) {
-  const clipped = text.slice(0, limit);
-  return text.length > limit && /[\uD800-\uDBFF]$/.test(clipped) ? clipped.slice(0, -1) : clipped;
-}
 
 export class ConversationAgent extends AbstractAgent {
   constructor(
@@ -187,9 +183,9 @@ export class ConversationAgent extends AbstractAgent {
               ...range,
               events: events.map(({ attendees: _, ...event }) => ({
                 ...event,
-                title: clipCalendarText(event.title, 500),
-                location: clipCalendarText(event.location, 500),
-                description: clipCalendarText(event.description, 2000),
+                title: clipText(event.title, 500),
+                location: clipText(event.location, 500),
+                description: clipText(event.description, 2000),
               })),
               truncated:
                 page.truncated ||
