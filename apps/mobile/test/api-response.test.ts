@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readApiPayload } from "../src/api-response.ts";
+import { readApiPayload, readNativePayload } from "../src/api-response.ts";
 
 test("JSON responses pass through and server errors keep their message", async () => {
   assert.deepEqual(
@@ -51,4 +51,27 @@ test("successful responses without a readable body fail clearly", async () => {
     /unreadable response \(204\)/,
   );
   await assert.rejects(readApiPayload(new Response("OK", { status: 200 })), /unreadable response/);
+});
+
+test("native upload and download results report the real failure", async () => {
+  assert.deepEqual(
+    await readNativePayload({ status: 201, body: JSON.stringify({ id: "file-1" }) }),
+    { id: "file-1" },
+  );
+  await assert.rejects(
+    readNativePayload(
+      { status: 413, body: JSON.stringify({ error: "PDF is too large" }) },
+      "Could not import this PDF.",
+    ),
+    /PDF is too large/,
+  );
+  for (const body of ["<html><body>Bad Gateway</body></html>", ""]) {
+    const error = await readNativePayload(
+      { status: 502, body },
+      "Could not import this PDF.",
+    ).catch((e: unknown) => e);
+    assert.ok(error instanceof Error);
+    assert.equal(error.message, "Could not import this PDF.");
+    assert.equal(error instanceof SyntaxError, false);
+  }
 });
