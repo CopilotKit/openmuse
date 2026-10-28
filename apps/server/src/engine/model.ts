@@ -363,6 +363,7 @@ export async function executeModelTask(
     forwardedProps: {},
   };
   let text = "";
+  let textMessageId: string | undefined;
   let runError: string | undefined;
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -382,8 +383,13 @@ export async function executeModelTask(
             event.type === EventType.TEXT_MESSAGE_CONTENT) &&
           "delta" in event &&
           typeof event.delta === "string"
-        )
+        ) {
+          // Each model step is its own message, so keep their text apart.
+          const messageId = "messageId" in event ? String(event.messageId) : undefined;
+          if (text && messageId !== textMessageId) text += "\n\n";
+          textMessageId = messageId;
           text += event.delta;
+        }
         if (event.type === EventType.RUN_ERROR && "message" in event)
           runError = String(event.message);
       },

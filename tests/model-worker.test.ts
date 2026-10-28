@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { LLMock } from "@copilotkit/aimock";
 import { createApp } from "../apps/server/src/app.ts";
 import { createStore, type Store } from "../apps/server/src/db.ts";
 import { createDemoModel, demoModel } from "../apps/server/src/demo/model.ts";
@@ -245,6 +246,66 @@ test("the model worker keeps the text a model replies with when it calls no tool
       ),
       "the reply is recorded in the task timeline",
     );
+  } finally {
+    await server.agent.stop();
+    await db.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("the model worker keeps the text of separate model steps apart", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "openmuse-model-steps-"));
+  const db = await createStore();
+  // One step says something and makes a plan, the next step replies after the plan is saved.
+  const mock = new LLMock({
+    host: "127.0.0.1",
+    port: 0,
+    latency: 0,
+    strict: true,
+    logLevel: "silent",
+  }).on({ model: "openmuse-browser-demo" }, (request) =>
+    request.messages.some((message) => message.role === "tool")
+      ? { content: "The plan is saved." }
+      : {
+          content: "I'll make a plan.",
+          toolCalls: [
+            {
+              id: "call_plan",
+              name: "set_plan",
+              arguments: JSON.stringify({ steps: ["Pick a day"] }),
+            },
+          ],
+        },
+  );
+  await mock.start();
+  const previousBase = process.env.OPENAI_BASE_URL;
+  const previousKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_BASE_URL = `${mock.url}/v1`;
+  process.env.OPENAI_API_KEY = "local-demo-test";
+  t.after(async () => {
+    if (previousBase === undefined) delete process.env.OPENAI_BASE_URL;
+    else process.env.OPENAI_BASE_URL = previousBase;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+    await mock.stop();
+  });
+  const server = await createApp(db, {
+    mode: "sample",
+    port: 8787,
+    host: "127.0.0.1",
+    publicUrl: "http://localhost:8787",
+    dataDir: directory,
+    agentBackend: "model",
+    intelligenceApiKey: "test-project-key-never-sent",
+    model: demoModel,
+    googleRedirectUri: "http://localhost:8787/api/google/callback",
+    allowedOrigins: [],
+  });
+  try {
+    const task = await server.agent.createTask("owner", { prompt: "Plan my week" });
+    await server.agent.worker.tick();
+    const result = await server.agent.detail("owner", task.id);
+    assert.equal(result.task.state.lastUpdate, "I'll make a plan.\n\nThe plan is saved.");
   } finally {
     await server.agent.stop();
     await db.close();
