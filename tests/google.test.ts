@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { mock } from "node:test";
 import { emailDraftSchema, eventDraftSchema } from "../packages/domain/src/index.ts";
 import {
   GoogleApiError,
@@ -16,6 +16,17 @@ function clientWith(handler: (request: Request) => Response | Promise<Response>)
   });
 }
 const json = (data: unknown, status = 200) => Response.json(data, { status });
+async function subjectFromHeader(value: string): Promise<string> {
+  const client = clientWith(() =>
+    json({
+      id: "thread1",
+      messages: [
+        { id: "msg1", threadId: "thread1", payload: { headers: [{ name: "Subject", value }] } },
+      ],
+    }),
+  );
+  return (await client.getThread("thread1"))[0].subject;
+}
 const email = () =>
   emailDraftSchema.parse({
     to: ["reader@example.com"],
@@ -200,6 +211,92 @@ test("mail decodes folded adjacent encoded words without inserting header whites
     assert.equal(mail.subject, "Visit résumé details", JSON.stringify(separator));
     assert.equal(mail.sender, "Community Museum", JSON.stringify(separator));
     assert.equal(mail.from, "museum@example.com");
+  }
+});
+
+test("mail tolerates malformed adjacent UTF-8 words that split a multibyte character", async () => {
+  // Optional tolerance for non-conforming senders: RFC 2047 requires complete
+  // characters in each encoded word. "Visit résumé" is split inside an é.
+  const word = (bytes: number[]) => `=?UTF-8?B?${Buffer.from(bytes).toString("base64")}?=`;
+  const visitResume = [..."Visit résumé"].flatMap((char) => [...Buffer.from(char)]);
+  const splitAt = visitResume.indexOf(0xc3) + 1;
+  const subjects = [
+    `${word(visitResume.slice(0, splitAt))} ${word(visitResume.slice(splitAt))}`,
+    `${word(visitResume.slice(0, splitAt))}\r\n ${word(visitResume.slice(splitAt))}`,
+    "=?UTF-8?Q?Visit_r=C3?= =?UTF-8?Q?=A9sum=C3=A9?=",
+  ];
+  for (const value of subjects) {
+    const client = clientWith(() =>
+      json({
+        id: "thread1",
+        messages: [
+          {
+            id: "msg1",
+            threadId: "thread1",
+            payload: { headers: [{ name: "Subject", value }] },
+          },
+        ],
+      }),
+    );
+    assert.equal((await client.getThread("thread1"))[0].subject, "Visit résumé", value);
+  }
+});
+
+test("mail preserves independent BOM-prefixed encoded words", async () => {
+  for (const value of [
+    "=?UTF-16?B?//5BAA==?= =?UTF-16?B?//5CAA==?=",
+    "=?UTF-8?B?77u/QQ==?= =?UTF-8?B?77u/Qg==?=",
+  ]) {
+    assert.equal(await subjectFromHeader(value), "AB", value);
+  }
+});
+
+test("mail decodes long independent headers without repeatedly copying accumulated bytes", async () => {
+  const value = Array(4096).fill("=?UTF-8?B?d29yZA==?=").join(" ");
+  const concat = Buffer.concat;
+  let copied = 0;
+  const spy = mock.method(Buffer, "concat", (parts: readonly Uint8Array[], length?: number) => {
+    copied += length ?? parts.reduce((total, part) => total + part.byteLength, 0);
+    return concat(parts, length);
+  });
+  try {
+    assert.equal(await subjectFromHeader(value), "word".repeat(4096));
+    assert.ok(
+      copied <= Buffer.byteLength(value) * 8,
+      `Copied ${copied} bytes for a ${value.length}-byte header`,
+    );
+  } finally {
+    spy.mock.restore();
+  }
+});
+
+test("mail tolerates a long run of split UTF-8 bytes with bounded copying", async () => {
+  const value = Array(4096).fill("=?UTF-8?B?ww==?= =?UTF-8?B?qQ==?=").join(" ");
+  const concat = Buffer.concat;
+  let copied = 0;
+  const spy = mock.method(Buffer, "concat", (parts: readonly Uint8Array[], length?: number) => {
+    copied += length ?? parts.reduce((total, part) => total + part.byteLength, 0);
+    return concat(parts, length);
+  });
+  try {
+    assert.equal(await subjectFromHeader(value), "é".repeat(4096));
+    assert.ok(
+      copied <= Buffer.byteLength(value) * 8,
+      `Copied ${copied} bytes for a ${value.length}-byte header`,
+    );
+  } finally {
+    spy.mock.restore();
+  }
+});
+
+test("malformed UTF-8 does not change valid following words or cross charset boundaries", async () => {
+  for (const [value, expected] of [
+    ["=?UTF-8?B?ww==?= =?UTF-8?B?77u/QQ==?=", "�A"],
+    ["=?UTF-8?B?ww==?= =?ISO-8859-1?Q?=A9?=", "�©"],
+    ["=?UTF-8?B?ww==?= =?unknown-charset?B?QQ==?=", "�=?unknown-charset?B?QQ==?="],
+    ["=?UTF-8?B?ww==?= =?utf8?B?qQ==?=", "é"],
+  ]) {
+    assert.equal(await subjectFromHeader(value), expected, value);
   }
 });
 
