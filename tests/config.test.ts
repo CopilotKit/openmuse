@@ -130,6 +130,9 @@ test("computer provider defaults to Docker and e2b-desktop requires a server-sid
     process.env.CPK_INTELLIGENCE_API_KEY = "test-project-key-never-sent";
     for (const key of keys.slice(0, 5)) delete process.env[key];
     assert.equal(readConfig().computerProvider, "docker");
+    process.env.COMPUTER_DEPLOYMENT_ID = " ";
+    assert.equal(readConfig().computerDeploymentId, undefined);
+    delete process.env.COMPUTER_DEPLOYMENT_ID;
     process.env.COMPUTER_PROVIDER = "k8s";
     assert.throws(() => readConfig(), /COMPUTER_PROVIDER/);
     process.env.COMPUTER_PROVIDER = "e2b-desktop";

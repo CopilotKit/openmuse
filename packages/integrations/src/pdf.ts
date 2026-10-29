@@ -1,6 +1,9 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
+  decodePDFRawStream,
   PDFArray,
   PDFCheckBox,
+  PDFContext,
   PDFDict,
   PDFDocument,
   PDFDropdown,
@@ -10,6 +13,7 @@ import {
   type PDFObject,
   PDFOptionList,
   PDFRadioGroup,
+  PDFRawStream,
   PDFString,
   PDFTextField,
   rgb,
@@ -18,6 +22,7 @@ import {
 
 const MAX_PDF_BYTES = 10 * 1024 * 1024;
 const MAX_PDF_PAGES = 500;
+const MAX_DECODED_BYTES = 10 * MAX_PDF_BYTES;
 
 export class PdfError extends Error {
   readonly status = 422;
@@ -41,6 +46,30 @@ export interface PdfInspection {
   fields: { name: string; value: string; type: "text" | "checkbox" | "unsupported" }[];
 }
 
+// pdf-lib decompresses object and cross-reference streams while loading, with no output limit,
+// so a file under MAX_PDF_BYTES could still expand without bound. Every pdf-lib decoder grows its
+// output buffer through DecodeStream.ensureBuffer, so cap what one load may allocate there.
+const decodeBudget = new AsyncLocalStorage<{ remaining: number }>();
+let decodeStream = Object.getPrototypeOf(
+  decodePDFRawStream(
+    PDFRawStream.of(PDFContext.create().obj({ Filter: "ASCIIHexDecode" }), new Uint8Array()),
+  ),
+);
+while (decodeStream && !Object.hasOwn(decodeStream, "ensureBuffer"))
+  decodeStream = Object.getPrototypeOf(decodeStream);
+if (!decodeStream) throw new Error("pdf-lib no longer decodes through DecodeStream");
+const ensureBuffer = decodeStream.ensureBuffer;
+decodeStream.ensureBuffer = function (this: { buffer: Uint8Array }, requested: number) {
+  const before = this.buffer.byteLength;
+  const buffer: Uint8Array = ensureBuffer.call(this, requested);
+  const budget = decodeBudget.getStore();
+  if (budget) {
+    budget.remaining -= buffer.byteLength - before;
+    if (budget.remaining < 0) throw new PdfError("PDF content expands beyond the supported size");
+  }
+  return buffer;
+};
+
 async function loadPdf(bytes: Uint8Array): Promise<PDFDocument> {
   if (
     !bytes.length ||
@@ -49,12 +78,16 @@ async function loadPdf(bytes: Uint8Array): Promise<PDFDocument> {
   ) {
     throw new PdfError("Invalid PDF: expected nonempty PDF bytes up to 10 MiB");
   }
+  const budget = { remaining: MAX_DECODED_BYTES };
   try {
-    const doc = await PDFDocument.load(new Uint8Array(bytes), {
-      ignoreEncryption: false,
-      throwOnInvalidObject: true,
-      updateMetadata: false,
-    });
+    const doc = await decodeBudget.run(budget, () =>
+      PDFDocument.load(new Uint8Array(bytes), {
+        ignoreEncryption: false,
+        throwOnInvalidObject: true,
+        updateMetadata: false,
+      }),
+    );
+    if (budget.remaining < 0) throw new PdfError("PDF content expands beyond the supported size");
     if (doc.isEncrypted) throw new PdfError("Encrypted PDFs are not supported");
     if (doc.catalog.lookupMaybe(PDFName.of("AcroForm"), PDFDict)?.has(PDFName.of("XFA"))) {
       throw new PdfError("Unsupported XFA PDF form");
@@ -63,6 +96,8 @@ async function loadPdf(bytes: Uint8Array): Promise<PDFDocument> {
       throw new PdfError("PDF must contain between 1 and 500 pages");
     return doc;
   } catch (error) {
+    // pdf-lib's parser can catch the limit error, then succeed or fail with its own error.
+    if (budget.remaining < 0) throw new PdfError("PDF content expands beyond the supported size");
     if (error instanceof PdfError) throw error;
     if (error instanceof Error && /encrypt/i.test(error.message))
       throw new PdfError("Encrypted PDFs are not supported");

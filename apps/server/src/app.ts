@@ -15,7 +15,7 @@ import { ActionService } from "./actions.ts";
 import { agentConfigured, makeRuntime } from "./agent.ts";
 import { createAuth } from "./auth.ts";
 import { BrowserService } from "./browser.ts";
-import { ComputerService, type DockerRunner } from "./computer.ts";
+import { ComputerService, type DockerRunner, resolveComputerDeployment } from "./computer.ts";
 import { computerRoutes } from "./computer-routes.ts";
 import { assertApiDeploymentConfig, type Config } from "./config.ts";
 import type { Store } from "./db.ts";
@@ -33,6 +33,7 @@ export async function createApp(
   options: { docker?: DockerRunner } = {},
 ) {
   assertApiDeploymentConfig(config);
+  await resolveComputerDeployment(config);
   const auth = await createAuth(db, config),
     files = new Files(db, config, auth),
     google = new GoogleAuth(db, config),
@@ -131,16 +132,24 @@ export async function createApp(
     );
   });
   app.use("/api/*", async (c, next) => {
+    // A signed URL grants only the requests its page makes: reads, and the console's input.
+    const method = c.req.method === "HEAD" ? "GET" : c.req.method;
     const signedRoute =
-      /^\/api\/files\/[^/]+\/content$|^\/api\/browsers\/[^/]+\/(?:preview|console)$/.test(
-        c.req.path,
-      );
+      (method === "GET" &&
+        /^\/api\/files\/[^/]+\/content$|^\/api\/browsers\/[^/]+\/(?:preview|console)$/.test(
+          c.req.path,
+        )) ||
+      (method === "POST" && /^\/api\/browsers\/[^/]+\/console$/.test(c.req.path));
     const owner =
       signedRoute && c.req.query("signature")
         ? auth.verify(new URL(c.req.url))
         : await auth.owner(c.req.header("authorization"));
     c.set("owner", owner);
     await next();
+  });
+  app.delete("/api/session", async (c) => {
+    await auth.revoke(c.req.header("authorization"));
+    return c.json({ ok: true });
   });
   app.get("/api/workspace", async (c) => {
     const [snapshot, reachable] = await Promise.all([

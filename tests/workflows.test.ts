@@ -553,3 +553,128 @@ test("a cancelled task does not stop its idea from starting fresh work", async (
   assert.ok(accepted?.taskId && accepted.taskId !== cancelled.id);
   assert.equal((await server.agent.getTask(ideaOwner, accepted.taskId)).status, "queued");
 });
+test("task detail reads only the rows the task names, not the whole workspace", async () => {
+  // A workspace keeps every run event, artifact and file it has ever produced, so detail() — which
+  // the app calls once per task card — must return the rows the task names and read nothing else.
+  const noiseOwner = "detail-scope";
+  const created = await server.agent.createTask(noiseOwner, {
+    kind: "agent",
+    title: "Scoped detail",
+    prompt: "Answer from the workspace",
+    input: {},
+  });
+  const now = new Date().toISOString();
+  await db.put(noiseOwner, "files", {
+    id: "detail-file",
+    name: "detail.pdf",
+    mimeType: "application/pdf",
+    size: 10,
+    pageCount: 1,
+    url: "",
+    createdAt: now,
+    source: "Gmail",
+  });
+  await db.put(noiseOwner, "browsers", {
+    id: "detail-browser",
+    title: "Example",
+    url: "https://example.com",
+    status: "active",
+    updatedAt: now,
+  });
+  await db.put(noiseOwner, "run-events", {
+    id: "detail-event",
+    taskId: created.id,
+    date: now,
+    kind: "step",
+    title: "Named",
+    detail: "",
+  });
+  await db.put(noiseOwner, "agent-artifacts", {
+    id: "detail-artifact",
+    taskId: created.id,
+    kind: "report",
+    title: "Named",
+    summary: "",
+    data: {},
+    createdAt: now,
+  });
+  await db.put(noiseOwner, "tasks", {
+    ...created,
+    artifactIds: ["detail-file"],
+    state: { ...created.state, browserId: "detail-browser" },
+  });
+  for (let index = 0; index < 200; index++) {
+    await db.put(noiseOwner, "run-events", {
+      id: `noise-event-${index}`,
+      taskId: `other-task-${index}`,
+      date: now,
+      kind: "step",
+      title: "Noise",
+      detail: "x".repeat(1000),
+    });
+    await db.put(noiseOwner, "agent-artifacts", {
+      id: `noise-artifact-${index}`,
+      taskId: `other-task-${index}`,
+      kind: "report",
+      title: "Noise",
+      summary: "",
+      data: {},
+      createdAt: now,
+    });
+    await db.put(noiseOwner, "files", {
+      id: `noise-file-${index}`,
+      name: `noise-${index}.pdf`,
+      mimeType: "application/pdf",
+      size: 10,
+      pageCount: 1,
+      url: "",
+      createdAt: now,
+      source: "Gmail",
+    });
+  }
+
+  // Count every row the store hands back while detail() runs, and put the store back afterwards.
+  const store = db as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  const wrapped: string[] = [];
+  let rows = 0;
+  for (const name of Object.getOwnPropertyNames(Object.getPrototypeOf(db))) {
+    if (
+      /^(put|remove|close|compareAndSwap|insertIfAbsent|updateCredential|recoverInterrupted)/.test(
+        name,
+      )
+    )
+      continue;
+    const original = store[name].bind(db);
+    store[name] = async (...args: unknown[]) => {
+      const result = await original(...args);
+      rows += Array.isArray(result) ? result.length : result ? 1 : 0;
+      return result;
+    };
+    wrapped.push(name);
+  }
+  let detail: Awaited<ReturnType<typeof server.agent.detail>>;
+  try {
+    detail = await server.agent.detail(noiseOwner, created.id);
+  } finally {
+    for (const name of wrapped) delete store[name];
+  }
+
+  assert.equal(detail.task.id, created.id);
+  assert.deepEqual(
+    detail.files.map((file) => file.id),
+    ["detail-file"],
+  );
+  assert.deepEqual(
+    detail.browsers.map((browser) => browser.id),
+    ["detail-browser"],
+  );
+  assert.deepEqual(
+    detail.events.map((event) => event.id),
+    ["detail-event"],
+  );
+  assert.deepEqual(
+    detail.artifacts.map((artifact) => artifact.id),
+    ["detail-artifact"],
+  );
+  assert.ok(rows < 20, `detail() read ${rows} rows to show one task`);
+});

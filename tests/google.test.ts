@@ -37,6 +37,88 @@ const eventResponse = {
 };
 const base64url = (text: string) => Buffer.from(text).toString("base64url");
 
+test("mail addresses exclude comments, including nested and escaped parentheses", async () => {
+  for (const comment of [
+    "(old@example.com)",
+    "(old@example.com (another@example.com))",
+    "(legacy \\) old@example.com)",
+  ]) {
+    const client = clientWith(() =>
+      json({
+        id: "thread1",
+        messages: [
+          {
+            id: "msg1",
+            threadId: "thread1",
+            payload: {
+              headers: [
+                { name: "From", value: `Support ${comment} <sender@example.com>` },
+                {
+                  name: "To",
+                  value: `${comment} <reader@example.com>, second@example.com ${comment}`,
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+    const [mail] = await client.getThread("thread1");
+    assert.equal(mail.from, "sender@example.com", comment);
+    assert.deepEqual(mail.to, ["reader@example.com", "second@example.com"], comment);
+  }
+});
+
+test("parentheses inside a quoted display name do not start address comments", async () => {
+  const client = clientWith(() =>
+    json({
+      id: "thread1",
+      messages: [
+        {
+          id: "msg1",
+          threadId: "thread1",
+          payload: {
+            headers: [
+              { name: "From", value: '"Support (West" <sender@example.com>' },
+              { name: "To", value: '"Help \\"desk (west@example.com)" <reader@example.com>' },
+            ],
+          },
+        },
+      ],
+    }),
+  );
+  const [mail] = await client.getThread("thread1");
+  assert.equal(mail.from, "sender@example.com");
+  assert.deepEqual(mail.to, ["reader@example.com"]);
+});
+
+test("encoded display-name punctuation does not become address syntax", async () => {
+  for (const name of ["Support (West", "Support ) West", "old@example.com (West)"]) {
+    const encoded = `=?UTF-8?B?${Buffer.from(name).toString("base64")}?=`;
+    const client = clientWith(() =>
+      json({
+        id: "thread1",
+        messages: [
+          {
+            id: "msg1",
+            threadId: "thread1",
+            payload: {
+              headers: [
+                { name: "From", value: `${encoded} <sender@example.com>` },
+                { name: "To", value: "=?UTF-8?Q?old@example.com_=28West?= <reader@example.com>" },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+    const [mail] = await client.getThread("thread1");
+    assert.equal(mail.from, "sender@example.com", name);
+    assert.equal(mail.sender, name);
+    assert.deepEqual(mail.to, ["reader@example.com"]);
+  }
+});
+
 test("mail reads nested plain text and attachment references over authenticated Gmail paths", async () => {
   const paths: URL[] = [];
   const client = clientWith((request) => {
@@ -137,6 +219,19 @@ test("header decoding preserves spaces encoded inside words and next to plain te
     }),
   );
   assert.equal((await client.getThread("thread1"))[0].subject, "Re: Visit résumé notes");
+});
+
+test("a numeric character reference to a surrogate stays literal instead of failing the list", async () => {
+  // String.fromCodePoint throws on surrogate code points; a sender can put the
+  // literal text &#xD800; in a snippet, and one such message must not reject
+  // the whole list (Promise.all over per-message parses).
+  const client = clientWith((request) =>
+    new URL(request.url).pathname.endsWith("/messages")
+      ? json({ messages: [{ id: "msg1" }] })
+      : json({ id: "msg1", threadId: "thread1", snippet: "Entity notes: &#xD800; and &#55296;" }),
+  );
+  const [mail] = await client.listMail();
+  assert.equal(mail.body, "Entity notes: &#xD800; and &#55296;");
 });
 
 test("a body charset TextDecoder does not know falls back to UTF-8 instead of failing the list", async () => {
@@ -1017,4 +1112,48 @@ test("an outgoing attachment name with an unpaired surrogate still sends", async
   await client.sendEmail(email(), [
     { name: "form\uD800.pdf", mimeType: "application/pdf", bytes: Buffer.from([1]) },
   ]);
+});
+
+test("attached MIME trees are not fetched while loading the parent message", async () => {
+  for (const attached of [
+    { mimeType: "message/rfc822", filename: "forwarded.eml" },
+    { mimeType: "message/rfc822" },
+    { mimeType: "multipart/mixed", filename: "attached.mime" },
+  ]) {
+    const reads: string[] = [];
+    const message = {
+      id: "outer",
+      threadId: "thread1",
+      payload: {
+        mimeType: "multipart/mixed",
+        parts: [
+          { mimeType: "text/plain", body: { data: base64url("Outer body.") } },
+          {
+            ...attached,
+            body: { attachmentId: "attached", size: 42 },
+            parts: [{ mimeType: "text/plain", body: { attachmentId: "inner", size: 20 } }],
+          },
+        ],
+      },
+    };
+    const client = clientWith((request) => {
+      const path = new URL(request.url).pathname;
+      reads.push(path);
+      if (path.includes("/attachments/"))
+        return json({ error: { message: "Unavailable attachment" } }, 404);
+      if (path.endsWith("/messages")) return json({ messages: [{ id: "outer" }] });
+      if (path.includes("/threads/")) return json({ id: "thread1", messages: [message] });
+      return json(message);
+    });
+    const [mail] = await client.listMail();
+    assert.equal(mail.body, "Outer body.");
+    assert.equal(reads.length, 2);
+    assert.deepEqual(mail.attachments, [
+      `outer:attached:${attached.filename || "forwarded-message.eml"}`,
+    ]);
+    const [threadMail] = await client.getThread("thread1");
+    assert.equal(threadMail.body, "Outer body.");
+    assert.deepEqual(threadMail.attachments, mail.attachments);
+    assert.equal(reads.length, 3);
+  }
 });

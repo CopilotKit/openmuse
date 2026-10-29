@@ -159,7 +159,8 @@ export function readConfig(): Config {
     webSearchEnabled: process.env.WEB_SEARCH_ENABLED !== "false",
     computerEnabled: process.env.COMPUTER_ENABLED === "true",
     computerImage: process.env.COMPUTER_IMAGE ?? "openmuse-computer:local",
-    computerDeploymentId: process.env.COMPUTER_DEPLOYMENT_ID,
+    // A blank line from .env is unset; otherwise every such install would share one name.
+    computerDeploymentId: process.env.COMPUTER_DEPLOYMENT_ID?.trim() || undefined,
     computerProvider,
     computerE2bTemplate: process.env.COMPUTER_E2B_TEMPLATE?.trim() || "desktop",
     e2bApiKey,

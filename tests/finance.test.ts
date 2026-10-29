@@ -41,3 +41,33 @@ test("transaction imports accept a UTF-8 byte order mark before the header", () 
     assert.equal(report.spending, 10.1);
   }
 });
+
+test("transaction imports accept CR, LF and CRLF record separators", () => {
+  for (const newline of ["\r", "\n", "\r\n"]) {
+    const report = analyzeSpending(
+      [
+        '"date","description","amount","category"',
+        '2026-09-01,"Coffee, local",10.10,Food',
+        '2026-09-02,"Salary",-100.00,Income',
+        "",
+      ].join(newline),
+    );
+    assert.equal(report.count, 2);
+    assert.equal(report.spending, 10.1);
+    assert.equal(report.income, 100);
+    assert.equal(report.transactions[0].description, "Coffee, local");
+  }
+});
+
+test("CR record separators do not split quoted multiline transaction text", () => {
+  const report = analyzeSpending(
+    'date,description,amount,category\r2026-09-01,"Coffee\rshop\r\nreceipt",10,Food\r',
+  );
+  assert.equal(report.count, 1);
+  assert.equal(report.transactions[0].description, "Coffee\rshop\r\nreceipt");
+  assert.equal(report.spending, 10);
+  assert.throws(
+    () => analyzeSpending('date,description,amount,category\r2026-09-01,"Coffee"shop,10,Food'),
+    /Invalid quoted CSV field/,
+  );
+});

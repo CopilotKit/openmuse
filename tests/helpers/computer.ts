@@ -15,6 +15,8 @@ export const config: Config = {
   googleRedirectUri: "http://localhost/callback",
   allowedOrigins: [],
   computerEnabled: true,
+  // Fixtures copy this config into fresh data directories, so name the deployment explicitly.
+  computerDeploymentId: "fixture-deployment",
 };
 export const ok = (stdout = ""): DockerResult => ({
   stdout,

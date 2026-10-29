@@ -188,15 +188,43 @@ function decodeSnippet(value: string): string {
         entity[1].toLowerCase() === "x"
           ? Number.parseInt(entity.slice(2), 16)
           : Number.parseInt(entity.slice(1), 10);
-      return code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : original;
+      // Surrogates are not scalar values: fromCodePoint throws on them, and one
+      // such reference in a snippet must not reject the whole message list.
+      const scalar = code >= 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff);
+      return scalar ? String.fromCodePoint(code) : original;
     },
   );
 }
 function addresses(value: string): string[] {
+  // Comments may contain addresses, nested comments and escaped parentheses.
+  // Quoted display names treat parentheses literally instead.
+  let uncommented = "";
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  // Encoded words are display text, never mailbox syntax, even if their raw
+  // payload happens to contain an address or parentheses.
+  for (const character of value.replace(/=\?[^?]+\?[bq]\?[^?]*\?=/gi, "")) {
+    if (escaped) {
+      if (!depth) uncommented += character;
+      escaped = false;
+    } else if (character === "\\") {
+      if (!depth) uncommented += character;
+      escaped = true;
+    } else if (!depth && character === '"') {
+      quoted = !quoted;
+      uncommented += character;
+    } else if (!quoted && character === "(") {
+      if (!depth) uncommented += " ";
+      depth++;
+    } else if (depth && character === ")") {
+      depth--;
+    } else if (!depth) uncommented += character;
+  }
   // A quoted display name may itself contain an e-mail-looking string; only
   // addresses outside display names count.
   return (
-    value
+    uncommented
       .replace(/"(?:[^"\\]|\\.)*"\s*(?=<)/g, " ")
       .match(/[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+/g) ?? []
   );
@@ -297,6 +325,14 @@ const wellFormed = (value: string): string =>
     "\uFFFD",
   );
 
+function isAttachedPart(part: GmailPart): boolean {
+  return (
+    Boolean(part.filename) ||
+    part.mimeType === "message/rfc822" ||
+    headers(part).get("content-disposition")?.split(";")[0].trim().toLowerCase() === "attachment"
+  );
+}
+
 function mapMessage(message: z.infer<typeof messageSchema>): Mail {
   const metadata = headers(message.payload);
   const plain: string[] = [];
@@ -305,13 +341,17 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
   const visit = (part: GmailPart, depth: number) => {
     if (depth > 30) throw new Error("Gmail message MIME nesting exceeds the limit");
     // Attachments carry their own content (or an attached message); never merge
-    // their parts into the parent text. A remote body has no filename: it is
-    // hydrated above and still counts as message text.
-    const attached = Boolean(part.filename) || part.mimeType === "message/rfc822";
-    if (part.filename && part.body?.attachmentId)
+    // their parts into the parent text. Unattached remote text is hydrated above
+    // and still counts as message text.
+    const attached = isAttachedPart(part);
+    if (attached && part.body?.attachmentId) {
+      const name =
+        part.filename ||
+        (part.mimeType === "message/rfc822" ? "forwarded-message.eml" : "attachment");
       attachments.push(
-        `${message.id}:${part.body.attachmentId}:${encodeURIComponent(wellFormed(part.filename))}`,
+        `${message.id}:${part.body.attachmentId}:${encodeURIComponent(wellFormed(name))}`,
       );
+    }
     if (
       !attached &&
       (part.mimeType === "text/plain" || part.mimeType === "text/html") &&
@@ -328,8 +368,9 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
     if (!attached) for (const child of part.parts ?? []) visit(child, depth + 1);
   };
   if (message.payload) visit(message.payload, 0);
-  const from = decodeHeader(metadata.get("from") ?? "");
-  const address = addresses(from)[0] ?? from;
+  const rawFrom = metadata.get("from") ?? "";
+  const from = decodeHeader(rawFrom);
+  const address = addresses(rawFrom)[0] ?? from;
   const displayName = from.includes("<")
     ? from.slice(0, from.indexOf("<")).trim().replace(/^"|"$/g, "")
     : "";
@@ -337,6 +378,7 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
   const time = message.internalDate
     ? Number(message.internalDate)
     : Date.parse(metadata.get("date") ?? "");
+  const date = new Date(time);
   const body = plain.length
     ? plain.join("\n\n")
     : html.length
@@ -351,7 +393,7 @@ function mapMessage(message: z.infer<typeof messageSchema>): Mail {
     to: addresses(metadata.get("to") ?? ""),
     subject: decodeHeader(metadata.get("subject") ?? "(No subject)"),
     body,
-    date: Number.isFinite(time) ? new Date(time).toISOString() : "",
+    date: Number.isFinite(date.getTime()) ? date.toISOString() : "",
     unread: message.labelIds.includes("UNREAD"),
     label: message.labelIds.includes("INBOX")
       ? "Inbox"
@@ -470,8 +512,10 @@ export class GoogleClient {
   private async mapMessage(message: z.infer<typeof messageSchema>): Promise<Mail> {
     const hydrate = async (part: GmailPart, depth: number): Promise<void> => {
       if (depth > 30) throw new Error("Gmail message MIME nesting exceeds the limit");
+      // Attached MIME trees are not part of the parent body. Leave their content
+      // lazy, matching the module-level mapMessage visible-text extractor.
+      if (isAttachedPart(part)) return;
       if (
-        !part.filename &&
         (part.mimeType === "text/plain" || part.mimeType === "text/html") &&
         part.body?.data === undefined &&
         part.body?.attachmentId

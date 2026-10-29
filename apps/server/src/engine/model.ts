@@ -11,6 +11,15 @@ import type { AgentService } from "./service.ts";
 import { tanstackAgent } from "./tanstack-agent.ts";
 import type { TaskContext } from "./worker.ts";
 
+export type TaskAnswer = { question?: string; answer: string };
+
+/** Every reply the user gave this task, oldest first, with the question it answered. */
+export function taskAnswers(state: Record<string, unknown>): TaskAnswer[] {
+  if (Array.isArray(state.answers)) return state.answers as TaskAnswer[];
+  // Tasks answered before replies were kept as a list hold only the latest one.
+  return typeof state.answer === "string" ? [{ answer: state.answer }] : [];
+}
+
 export async function executeModelTask(
   service: AgentService,
   owner: string,
@@ -339,7 +348,13 @@ export async function executeModelTask(
         role: "user",
         content:
           task.prompt +
-          (task.state.answer ? `\nAdditional answer: ${String(task.state.answer)}` : ""),
+          taskAnswers(task.state)
+            .map(({ question, answer }) =>
+              question
+                ? `\nYou asked: ${question}\nAnswer: ${answer}`
+                : `\nAdditional answer: ${answer}`,
+            )
+            .join(""),
       },
     ],
     state: {},

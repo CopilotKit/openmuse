@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +18,7 @@ import { createSamplePdf } from "../packages/integrations/src/pdf.ts";
 
 let db: Store,
   app: Awaited<ReturnType<typeof createApp>>["app"],
+  auth: Auth,
   agent: AgentService,
   config: Config,
   token: string,
@@ -36,7 +38,7 @@ before(async () => {
     googleRedirectUri: "http://localhost:8787/api/google/callback",
     allowedOrigins: ["http://localhost:8081"],
   };
-  ({ app, agent } = await createApp(db, config));
+  ({ app, agent, auth } = await createApp(db, config));
   const response = await app.request("/api/session", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -60,6 +62,55 @@ test("API protects private data and rejects unrelated web origins", async () => 
     ).status,
     403,
   );
+});
+test("signing out revokes only the current session", async () => {
+  const signIn = await app.request("/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const revoked = (await signIn.json()).token;
+  const auth = { Authorization: `Bearer ${revoked}` };
+  assert.equal(
+    (await app.request("/api/session", { method: "DELETE", headers: auth })).status,
+    200,
+  );
+  assert.equal((await app.request("/api/workspace", { headers: auth })).status, 401);
+  assert.equal(
+    (await app.request("/api/session", { method: "DELETE", headers: auth })).status,
+    401,
+  );
+  assert.equal((await app.request("/api/workspace", { headers: headers() })).status, 200);
+});
+test("an expired session is rejected and its row is removed", async () => {
+  const signIn = await app.request("/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const expired = (await signIn.json()).token;
+  const id = createHash("sha256").update(expired).digest("hex");
+  await db.put("system", "sessions", { id, owner: "local-user", expiresAt: Date.now() - 1 });
+  const response = await app.request("/api/workspace", {
+    headers: { Authorization: `Bearer ${expired}` },
+  });
+  assert.equal(response.status, 401);
+  assert.equal(await db.get("system", "sessions", id), null);
+});
+test("an expired session still returns 401 when its cleanup fails", async (t) => {
+  const signIn = await app.request("/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const expired = (await signIn.json()).token;
+  const id = createHash("sha256").update(expired).digest("hex");
+  await db.put("system", "sessions", { id, owner: "local-user", expiresAt: Date.now() - 1 });
+  t.mock.method(db, "remove", () => Promise.reject(new Error("db unavailable")));
+  const response = await app.request("/api/workspace", {
+    headers: { Authorization: `Bearer ${expired}` },
+  });
+  assert.equal(response.status, 401);
 });
 test("file operations recover a published PDF when metadata persistence fails", async (t) => {
   const owner = "file-recovery";
@@ -337,4 +388,36 @@ test("guided document delegation streams a rich tool result bound to its saved t
   );
   assert.equal(task?.kind, "document");
   assert.equal(task?.input.messageId, "mail-fieldtrip");
+});
+
+test("signed links authorize only the requests their page makes", async () => {
+  const link = (path: string) => {
+    const url = new URL(auth.sign("local-user", path));
+    return `${url.pathname}${url.search}`;
+  };
+  const file = link(`/api/files/${randomUUID()}/content`);
+  const consoleLink = link(`/api/browsers/${randomUUID()}/console`);
+  // Accepted links reach the handler, which then finds no such resource.
+  assert.equal((await app.request(file)).status, 404);
+  assert.equal((await app.request(file, { method: "HEAD" })).status, 404);
+  assert.equal((await app.request(consoleLink)).status, 404);
+  assert.equal(
+    (
+      await app.request(consoleLink, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "key", key: "Enter" }),
+      })
+    ).status,
+    404,
+  );
+  // Any other method needs a session, so a route added later cannot inherit link access.
+  for (const [path, method] of [
+    [file, "PUT"],
+    [file, "DELETE"],
+    [file, "POST"],
+    [consoleLink, "DELETE"],
+    [consoleLink, "PATCH"],
+  ])
+    assert.equal((await app.request(path, { method })).status, 401, `${method} ${path}`);
 });

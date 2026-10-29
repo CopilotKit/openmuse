@@ -74,3 +74,50 @@ for (const scenario of [
     }
   });
 }
+
+test("a model task keeps every earlier answer when it asks again", async (t) => {
+  const { requests } = await modelFixture(t, (index) =>
+    index === 0
+      ? { name: "ask_user", arguments: { question: "Which date should I use?" } }
+      : index === 1
+        ? { name: "ask_user", arguments: { question: "What time works?" } }
+        : { name: "finish_task", arguments: { summary: "Planned." } },
+  );
+  const directory = await mkdtemp(join(tmpdir(), "openmuse-model-answers-"));
+  const db = await createStore();
+  const server = await createApp(db, {
+    mode: "sample",
+    port: 8787,
+    host: "127.0.0.1",
+    publicUrl: "http://localhost:8787",
+    dataDir: directory,
+    agentBackend: "model",
+    model: "openai/fixture",
+    intelligenceApiKey: "test-project-key-never-sent",
+    googleRedirectUri: "http://localhost:8787/api/google/callback",
+    allowedOrigins: [],
+  });
+  try {
+    const task = await server.agent.createTask("owner", { prompt: "Plan a sample walk" });
+    await server.agent.worker.tick();
+    await server.agent.answer("owner", task.id, "Friday");
+    await server.agent.worker.tick();
+    await server.agent.answer("owner", task.id, "3pm");
+    await server.agent.worker.tick();
+    assert.equal((await server.agent.getTask("owner", task.id)).status, "succeeded");
+    assert.equal(requests.length, 3);
+    const userMessage = (body: string) =>
+      JSON.stringify(
+        (JSON.parse(body) as { input: { role?: string; content: unknown }[] }).input.find(
+          (item) => item.role === "user",
+        )?.content,
+      );
+    const last = userMessage(requests[2].body);
+    for (const text of ["Which date should I use?", "Friday", "What time works?", "3pm"])
+      assert.ok(last.includes(text), `the third run's request is missing "${text}": ${last}`);
+  } finally {
+    await server.agent.stop();
+    await db.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

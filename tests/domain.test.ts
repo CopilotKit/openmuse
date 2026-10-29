@@ -129,6 +129,25 @@ test("events accept valid leap days, month ends, and explicit offsets", () => {
   }
 });
 
+test("timed events reject 24:00 instead of moving the appointment to the next day", () => {
+  for (const time of ["24:00", "24:00:00", "24:00:00.000"]) {
+    for (const offset of ["Z", "-07:00", "+05:30"]) {
+      for (const field of ["start", "end"] as const) {
+        assert.equal(
+          eventDraftSchema.safeParse({
+            ...event,
+            start: "2000-01-01T10:00:00Z",
+            end: "2200-01-01T10:00:00Z",
+            [field]: `2026-10-10T${time}${offset}`,
+          }).success,
+          false,
+          `${field} must reject ${time}${offset}`,
+        );
+      }
+    }
+  }
+});
+
 test("events default calendarId, location, and description", () => {
   const parsed = eventDraftSchema.parse(event);
   assert.equal(parsed.calendarId, "primary");
@@ -143,4 +162,32 @@ test("proposal schema discriminates on kind and validates nested data", () => {
     false,
   );
   assert.equal(proposalSchema.safeParse({ kind: "unknown.kind", data: {} }).success, false);
+});
+
+test("drafts drop invisible characters so the review card shows what is sent", () => {
+  const hidden = "\u200B\u202E\u2066\u2069\u2060\uFEFF\u{E0041}";
+  const draft = emailDraftSchema.parse({
+    ...email,
+    subject: `Your${hidden} visit`,
+    body: `See you${hidden} soon.`,
+  });
+  assert.equal(draft.subject, "Your visit");
+  assert.equal(draft.body, "See you soon.");
+  const created = eventDraftSchema.parse({
+    ...event,
+    title: `Museum${hidden} visit`,
+    location: `Hall${hidden} A`,
+    description: `Bring${hidden} tickets`,
+  });
+  assert.deepEqual(
+    [created.title, created.location, created.description],
+    ["Museum visit", "Hall A", "Bring tickets"],
+  );
+  // A subject made only of invisible characters is empty once they are dropped.
+  assert.equal(emailDraftSchema.safeParse({ ...email, subject: hidden }).success, false);
+});
+
+test("drafts keep joiners and directional marks that real text uses", () => {
+  const body = "Family 👨\u200D👩\u200D👧, می\u200Cخواهم, \u200Fשלום\u200E";
+  assert.equal(emailDraftSchema.parse({ ...email, body }).body, body);
 });

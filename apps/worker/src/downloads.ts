@@ -122,8 +122,8 @@ export async function capturePdfDownload(options: {
       new Transform({
         transform(chunk: Buffer, _encoding, done) {
           bytes += chunk.length;
-          if (prefix.length < 5)
-            prefix = Buffer.concat([prefix, chunk.subarray(0, 5 - prefix.length)]);
+          if (prefix.length < 1024)
+            prefix = Buffer.concat([prefix, chunk.subarray(0, 1024 - prefix.length)]);
           if (bytes > MAX_DOWNLOAD_BYTES) {
             oversized = true;
             done(new Error("Download too large"));
@@ -132,7 +132,8 @@ export async function capturePdfDownload(options: {
       }),
       createWriteStream(destination, { mode: 0o600, flags: "wx" }),
     );
-    if (prefix.toString("ascii") !== "%PDF-") {
+    // Match the importer's bounded prefix check, without lossy ASCII decoding.
+    if (prefix.indexOf("%PDF-") < 0) {
       outcome.code = "UNSUPPORTED_DOWNLOAD";
       outcome.message = "Only PDF downloads can be imported. This file was not a PDF.";
       throw new Error("Unsupported download");

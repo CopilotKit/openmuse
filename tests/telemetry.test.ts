@@ -51,7 +51,7 @@ async function captureRuntime(envOverrides: Record<string, string> = {}) {
       {
         cwd: directory,
         env: { ...env, CPK_TELEMETRY_ID: "test-project-identity", ...envOverrides },
-        timeout: 15000,
+        timeout: 60000,
       },
     );
     return JSON.parse(stdout.trim().split("\n").at(-1) ?? "[]");

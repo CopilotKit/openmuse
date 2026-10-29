@@ -2,7 +2,8 @@ import { z } from "zod";
 
 /** CSV amounts use positive expenses and negative income. No currency conversion is inferred. */
 export function analyzeSpending(csv: string) {
-  if (csv.length > 500000) throw new Error("Import at most 500 KB of transaction CSV");
+  if (Buffer.byteLength(csv, "utf8") > 500000)
+    throw new Error("Import at most 500 KB of transaction CSV");
   // Excel and many bank exports start a UTF-8 CSV with a byte order mark. It is not part of the first header.
   if (csv.charCodeAt(0) === 0xfeff) csv = csv.slice(1);
   const rows: string[][] = [];
@@ -20,21 +21,17 @@ export function analyzeSpending(csv: string) {
         quoted = !quoted;
         if (!quoted) {
           const next = csv[i + 1];
-          if (
-            next !== undefined &&
-            next !== "," &&
-            next !== "\n" &&
-            !(next === "\r" && (csv[i + 2] === "\n" || csv[i + 2] === undefined))
-          )
+          if (next !== undefined && next !== "," && next !== "\n" && next !== "\r")
             throw new Error("Invalid quoted CSV field");
         }
       }
-    } else if (!quoted && (c === "," || c === "\n" || c === undefined)) {
-      row.push(cell.replace(/\r$/, ""));
+    } else if (!quoted && (c === "," || c === "\r" || c === "\n" || c === undefined)) {
+      row.push(cell);
       cell = "";
       if (c !== ",") {
         if (row.some((v) => v.trim())) rows.push(row);
         row = [];
+        if (c === "\r" && csv[i + 1] === "\n") i++;
       }
     } else if (c !== undefined) cell += c;
   }

@@ -29,32 +29,41 @@ for (const [text, expected, why] of [
   });
 }
 
-test("price watch reaches the worker outcome path through matchesPrice", async (t) => {
-  const url = "https://example.com/product";
-  const fixture = await browserFixture(t, (path, body) => ({
-    data: path.endsWith("/read")
-      ? { url, title: "Product", text: "Only $5, today only", truncated: false }
-      : {
-          id: body.id,
-          title: "Product",
-          url,
-          status: "active",
-          updatedAt: new Date().toISOString(),
-        },
-  }));
-  const server = await createApp(fixture.db, fixture.config);
-  t.after(() => server.agent.stop());
-  const owner = "price-boundary-user";
-  const monitor = await server.agent.createMonitor(owner, {
-    title: "Price watch",
-    url,
-    condition: "price_below",
-    value: "10",
+for (const [text, expected] of [
+  ["Only $5, today only", true],
+  ["Price: $1,0", false],
+  ["Price: $9M", false],
+] as const) {
+  test(`price watch reaches the worker outcome path for ${JSON.stringify(text)}`, async (t) => {
+    const url = "https://example.com/product";
+    const fixture = await browserFixture(t, (path, body) => ({
+      data: path.endsWith("/read")
+        ? { url, title: "Product", text, truncated: false }
+        : {
+            id: body.id,
+            title: "Product",
+            url,
+            status: "active",
+            updatedAt: new Date().toISOString(),
+          },
+    }));
+    const server = await createApp(fixture.db, fixture.config);
+    t.after(() => server.agent.stop());
+    const owner = "price-boundary-user";
+    const monitor = await server.agent.createMonitor(owner, {
+      title: "Price watch",
+      url,
+      condition: "price_below",
+      value: "10",
+    });
+    await server.agent.worker.tick();
+    const task = await server.agent.getTask(owner, monitor.taskId);
+    assert.equal(task.status, "scheduled");
+    assert.equal(task.state.matched, expected);
+    const notifications = await fixture.db.list<AgentNotification>(owner, "notifications");
+    assert.equal(
+      notifications.filter((entry) => entry.taskId === task.id).length,
+      expected ? 1 : 0,
+    );
   });
-  await server.agent.worker.tick();
-  const task = await server.agent.getTask(owner, monitor.taskId);
-  assert.equal(task.status, "scheduled");
-  assert.equal(task.state.matched, true);
-  const notifications = await fixture.db.list<AgentNotification>(owner, "notifications");
-  assert.equal(notifications.filter((entry) => entry.taskId === task.id).length, 1);
-});
+}

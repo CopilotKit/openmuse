@@ -34,7 +34,7 @@ import { backgroundFailure } from "../log.ts";
 import { SearchService } from "../search.ts";
 import type { WorkspaceService } from "../workspace.ts";
 import { analyzeSpending } from "./finance.ts";
-import { executeModelTask } from "./model.ts";
+import { executeModelTask, taskAnswers } from "./model.ts";
 import {
   countPageDiff,
   describePageDiff,
@@ -172,22 +172,23 @@ export class AgentService {
   }
   async detail(owner: string, id: string) {
     const task = await this.getTask(owner, id);
-    const files = (await this.db.list<Artifact>(owner, "files")).filter((file) =>
-      task.artifactIds.includes(file.id),
+    // Scoped by the ids the task already names, so a long-lived workspace does not read
+    // every file, browser, event and artifact it has ever stored to show one task.
+    const browserIds = [task.state.browserId, task.state.sessionId].filter(
+      (value): value is string => typeof value === "string" && value.length > 0,
     );
-    const browsers = (await this.db.list<BrowserSession>(owner, "browsers")).filter((browser) =>
-      [task.state.browserId, task.state.sessionId].includes(browser.id),
-    );
+    const [files, browsers, events, artifacts] = await Promise.all([
+      this.db.listByIds<Artifact>(owner, "files", task.artifactIds ?? []),
+      this.db.listByIds<BrowserSession>(owner, "browsers", browserIds),
+      this.db.listByTaskId<RunEvent>(owner, "run-events", id),
+      this.db.listByTaskId<AgentArtifact>(owner, "agent-artifacts", id),
+    ]);
     return {
       task,
       files: files.map((file) => this.files.signed(owner, file)),
       browsers: browsers.map((browser) => this.browser.decorate(owner, browser)),
-      events: (await this.db.list<RunEvent>(owner, "run-events"))
-        .filter((e) => e.taskId === id)
-        .sort((a, b) => a.date.localeCompare(b.date)),
-      artifacts: (await this.db.list<AgentArtifact>(owner, "agent-artifacts")).filter(
-        (a) => a.taskId === id,
-      ),
+      events: events.sort((a, b) => a.date.localeCompare(b.date)),
+      artifacts,
     };
   }
   async createTask(owner: string, raw: unknown, idempotencyKey?: string, held = false) {
@@ -342,6 +343,12 @@ export class AgentService {
     const task = await this.getTask(owner, id);
     if (task.status !== "waiting_input")
       throw new AppError("This task is not waiting for input", 409);
+    // Each run starts fresh, so keep every reply with its question, not just the latest.
+    const { answer: _latest, ...state } = task.state;
+    const answers = [
+      ...taskAnswers(task.state),
+      { ...(task.question ? { question: task.question } : {}), answer },
+    ];
     const next = await this.db.compareAndSwap<AgentTask>(
       owner,
       "tasks",
@@ -351,7 +358,7 @@ export class AgentService {
         status: "queued",
         question: null,
         input: { ...task.input, ...(fields ? { fields } : {}) },
-        state: { ...task.state, answer },
+        state: { ...state, answers },
         updatedAt: date(),
       },
     );
@@ -1090,11 +1097,14 @@ export class AgentService {
     const currentHash = hash(text);
     const previousHash =
       typeof task.state.lastHash === "string" ? task.state.lastHash : monitor.lastHash;
+    // Collapse whitespace in the watched text the same way as in the page text, so a
+    // trailing space from a phone keyboard or a line break in the value still matches.
+    const wanted = monitor.value.replace(/\s+/g, " ").trim().toLowerCase();
     const matched =
       monitor.condition === "change"
         ? Boolean(previousHash && previousHash !== currentHash)
         : monitor.condition === "contains"
-          ? text.toLowerCase().includes(monitor.value.toLowerCase())
+          ? text.toLowerCase().includes(wanted)
           : matchesPrice(text, Number(monitor.value));
     const previouslyMatched = Boolean(task.state.matched);
     // For change watches, keep the page lines and a relative-time-free fingerprint of the whole text.
