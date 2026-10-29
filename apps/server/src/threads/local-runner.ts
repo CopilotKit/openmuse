@@ -64,9 +64,11 @@ export function defaultTitleGenerator(model: string | undefined): TitleGenerator
         if (!apiKey) return clip;
         // Moonshot/Kimi rejects any temperature other than 1; plain OpenAI
         // (0-2) accepts 1 as well. 256 completion tokens leaves room for
-        // reasoning tokens before the short summary text.
+        // reasoning tokens before the short summary text. A hung gateway must
+        // not leak the fire-and-forget promise forever: time out and degrade.
         const response = await fetch(`${baseURL}/chat/completions`, {
           method: "POST",
+          signal: AbortSignal.timeout(30_000),
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
           body: JSON.stringify({
             model: modelId.trim(),
@@ -100,14 +102,24 @@ export function defaultTitleGenerator(model: string | undefined): TitleGenerator
             : null
       ) as AnySummarizeAdapter | null;
       if (!adapter) return clip;
-      const result = await summarize({
-        adapter,
-        text: clip,
-        maxLength: 10,
-        style: "concise",
-        modelOptions: { temperature: 1, max_tokens: 256 },
-      });
-      return cleanTitle(result.summary) ?? clip;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const result = await Promise.race([
+          summarize({
+            adapter,
+            text: clip,
+            maxLength: 10,
+            style: "concise",
+            modelOptions: { temperature: 1, max_tokens: 256 },
+          }),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("Title generation timed out")), 30_000);
+          }),
+        ]);
+        return cleanTitle(result.summary) ?? clip;
+      } finally {
+        clearTimeout(timer);
+      }
     } catch {
       // A title must never surface as a chat error; the truncated message is
       // a perfectly good stand-in.
