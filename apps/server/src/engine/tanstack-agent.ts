@@ -16,9 +16,21 @@ import {
 import { type AnthropicChatModel, anthropicText } from "@tanstack/ai-anthropic";
 import { type GeminiTextModel, geminiText } from "@tanstack/ai-gemini";
 import { type OpenAIChatModel, openaiChatCompletions, openaiText } from "@tanstack/ai-openai";
+import { openaiCompatibleText } from "@tanstack/ai-openai/compatible";
 import { map, mergeMap, type Observable } from "rxjs";
 import { z } from "zod";
 import { MODEL_MAX_RETRIES } from "../config.ts";
+
+const defaultLlmtrBaseUrl = "https://llmtr.com/v1";
+
+/**
+ * LLMTR catalog ids are `vendor/model`. Hosted ids are `llmtr/<name>`, so a
+ * single segment after the provider prefix is that hosted id, not a bare name.
+ */
+export function llmtrModelId(model: string): string {
+  const id = model.trim();
+  return id.includes("/") ? id : `llmtr/${id}`;
+}
 
 // Same "provider/model" strings, env vars and base URL formats as the AI SDK resolver in
 // @copilotkit/runtime. Each provider SDK retries transient failures up to MODEL_MAX_RETRIES times.
@@ -59,6 +71,18 @@ function adapter(spec: string) {
           retryOptions: { attempts: MODEL_MAX_RETRIES + 1 },
         },
       });
+    case "llmtr": {
+      // Chat completions is the catalog wire format. The Responses adapter sends
+      // `reasoning` as an object; LLMTR accepts that parameter only as a boolean.
+      const apiKey = process.env.LLMTR_API_KEY?.trim();
+      if (!apiKey) throw new Error("The llmtr provider requires LLMTR_API_KEY.");
+      return openaiCompatibleText(llmtrModelId(id), {
+        name: "llmtr",
+        baseURL: process.env.LLMTR_BASE_URL?.trim() || defaultLlmtrBaseUrl,
+        apiKey,
+        maxRetries: MODEL_MAX_RETRIES,
+      });
+    }
     default:
       throw unknownProvider(provider, spec);
   }
@@ -74,7 +98,7 @@ export function unknownProvider(
     ? ` For a model on your OPENAI_BASE_URL gateway, use "openai/${spec.trim()}".`
     : "";
   return new Error(
-    `Unknown provider "${provider}" in "${spec}". Supported: openai, anthropic, google (gemini).${hint}`,
+    `Unknown provider "${provider}" in "${spec}". Supported: openai, anthropic, google (gemini), llmtr.${hint}`,
   );
 }
 
