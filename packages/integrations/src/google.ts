@@ -150,23 +150,23 @@ function decodeHeader(value: string): string {
   return value
     .replace(/(\?=)(?:[ \t]|\r\n[ \t])+(?==\?)/g, "$1")
     .replace(/(?:=\?[^?]+\?[bq]\?[^?]*\?=)+/gi, (run) => {
-      // §6.2: adjacent encoded words concatenate before decoding, so a header
-      // wrapped at the encoded-word length limit can split a multibyte
-      // character across words; join same-charset bytes before decoding.
+      // Valid words keep independent decoder boundaries (including their BOMs).
+      // Tolerate split UTF-8 only when the words cannot decode independently.
       const word = /=\?([^?]+)\?([bq])\?([^?]*)\?=/gi;
-      let decoded = "";
-      let pending: Buffer | null = null;
-      let pendingCharset = "";
-      let pendingOriginal = "";
+      const decoded: string[] = [];
+      const utf8 = new TextDecoder("utf-8", { fatal: true });
+      let pending: Buffer[] = [];
+      let pendingFallback: string[] = [];
       const flush = () => {
-        if (pending === null) return;
+        if (pending.length === 0) return;
         try {
-          decoded += new TextDecoder(pendingCharset).decode(pending);
+          // One concatenate per malformed group, never one per incoming word.
+          decoded.push(utf8.decode(Buffer.concat(pending)));
         } catch {
-          decoded += pendingOriginal;
+          for (const text of pendingFallback) decoded.push(text);
         }
-        pending = null;
-        pendingOriginal = "";
+        pending = [];
+        pendingFallback = [];
       };
       for (const match of run.matchAll(word)) {
         const [original, charset, encoding, text] = match;
@@ -182,18 +182,31 @@ function decodeHeader(value: string): string {
                   ),
                 "latin1",
               );
-        if (pending !== null && normalized === pendingCharset) {
-          pending = Buffer.concat([pending, bytes]);
-          pendingOriginal += original;
+        let decoder: TextDecoder;
+        try {
+          decoder = new TextDecoder(normalized);
+        } catch {
+          flush();
+          decoded.push(original);
+          continue;
+        }
+        if (decoder.encoding === "utf-8") {
+          if (bytes.length === 0) continue;
+          try {
+            const text = utf8.decode(bytes);
+            flush();
+            decoded.push(text);
+          } catch {
+            pending.push(bytes);
+            pendingFallback.push(decoder.decode(bytes));
+          }
         } else {
           flush();
-          pending = bytes;
-          pendingCharset = normalized;
-          pendingOriginal = original;
+          decoded.push(decoder.decode(bytes));
         }
       }
       flush();
-      return decoded;
+      return decoded.join("");
     });
 }
 function decodeSnippet(value: string): string {
