@@ -40,7 +40,7 @@ import type {
 } from "../../../packages/domain/src";
 import { API_URL } from "./api";
 import { browserAddress } from "./browser-address";
-import { localDateTime, startOfZonedDay, zonedInstant } from "./date-time";
+import { compareEventStart, localDateTime, startOfZonedDay, zonedInstant } from "./date-time";
 import {
   Button,
   Card,
@@ -74,9 +74,7 @@ export function TodayScreen() {
   const pending = w.actions.filter((a) => a.status === "awaiting_review");
   const unread = w.mail.filter((m) => m.unread);
   const today = todayDate();
-  const events = w.events
-    .filter((e) => eventDate(e) === today)
-    .sort((a, b) => a.start.localeCompare(b.start));
+  const events = w.events.filter((e) => eventDate(e) === today).sort(compareEventStart);
   return (
     <View style={{ gap: 25 }}>
       <View
@@ -652,7 +650,7 @@ export function CalendarScreen() {
         return api.request<CalendarEvent[]>(`/api/calendar/events?${query}`);
       })
       .then((items) => {
-        if (active) setEvents(items.sort((a, b) => a.start.localeCompare(b.start)));
+        if (active) setEvents(items.sort(compareEventStart));
       })
       .catch((e) => {
         if (active) {
