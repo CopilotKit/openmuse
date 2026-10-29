@@ -95,13 +95,16 @@ function eventStartMs(event: EventStartLike): number {
 
 /**
  * Order events by the instant they start. All-day events sit at the start of
- * their day in their own time zone. When either start cannot be parsed,
- * Date.parse yields NaN and subtraction would make the comparator inconsistent,
- * so fall back to the previous text comparison, which is always total.
+ * their day in their own time zone. Unparseable starts form a separate group
+ * after valid instants, ordered by text within that group. Mixing text and
+ * chronological comparisons across groups would make the order non-transitive.
  */
 export function compareEventStart(a: EventStartLike, b: EventStartLike): number {
   const aMs = eventStartMs(a);
   const bMs = eventStartMs(b);
-  if (Number.isFinite(aMs) && Number.isFinite(bMs)) return aMs - bMs;
+  const aValid = Number.isFinite(aMs);
+  const bValid = Number.isFinite(bMs);
+  if (aValid !== bValid) return aValid ? -1 : 1;
+  if (aValid) return aMs - bMs;
   return a.start.localeCompare(b.start);
 }
