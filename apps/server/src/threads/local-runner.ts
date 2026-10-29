@@ -199,7 +199,7 @@ export class PersistentAgentRunner extends InMemoryAgentRunner {
 
   override run(request: AgentRunnerRunRequest): Observable<BaseEvent> {
     const subject = new ReplaySubject<BaseEvent>(Infinity);
-    this.hydrate(request.threadId).then(
+    this.hydrate(request.threadId, this.ownerOf(request.agent)).then(
       () => {
         // A concurrent run on the thread throws synchronously; deliver it as
         // an observable error instead of an unhandled rejection or a hang.
@@ -348,10 +348,21 @@ export class PersistentAgentRunner extends InMemoryAgentRunner {
   }
 
   /** Load a thread's record into the process-global store unless it is already there. */
-  private async hydrate(threadId: string): Promise<void> {
+  private async hydrate(threadId: string, owner?: string): Promise<void> {
+    // The process-global store is keyed by bare threadId, so a cache hit alone
+    // cannot prove ownership: an internal caller that reaches the runner with
+    // just a threadId must not append onto another owner's thread. Verify the
+    // durable record whenever the owner is knowable, even on a memory hit.
+    const record = await this.findRecord(threadId, owner);
+    if (owner && !record) {
+      // A durable record exists but belongs to someone else: refuse rather
+      // than run against the other owner's in-memory history. A thread with
+      // no record at all is simply new.
+      const exists = this.index.has(threadId) || this.scanIndex.has(threadId);
+      if (exists) throw new Error("Thread not found");
+    }
     if (ɵGLOBAL_STORE.peek(threadId)) return;
-    const record = await this.findRecord(threadId);
-    if (!record || ɵGLOBAL_STORE.peek(threadId)) return; // a concurrent run hydrated first
+    if (!record) return;
     const store = ɵGLOBAL_STORE.getOrCreate(threadId);
     store.createdAt = Date.parse(record.createdAt);
     store.messagesSnapshot = record.messages as never;
@@ -375,9 +386,14 @@ export class PersistentAgentRunner extends InMemoryAgentRunner {
   private async persist(threadId: string, agent: unknown): Promise<void> {
     const store = ɵGLOBAL_STORE.peek(threadId);
     if (!store) return;
-    const prior = await this.findRecord(threadId);
-    const owner = this.ownerOf(agent) ?? prior?.owner;
-    if (!owner) throw new Error("No owner is associated with the running agent");
+    const owner = this.ownerOf(agent);
+    // An owner-less agent (tests, internal tools) keeps the record's owner;
+    // a known owner never appends to another owner's durable record.
+    const prior = await this.findRecord(threadId, owner);
+    if (owner && !prior && (this.index.has(threadId) || this.scanIndex.has(threadId)))
+      throw new Error("Thread not found");
+    const effectiveOwner = owner ?? prior?.owner;
+    if (!effectiveOwner) throw new Error("No owner is associated with the running agent");
     const priorRuns = prior ? this.recordRuns(prior) : [];
     const known = new Set(priorRuns.map((run) => run.runId));
     const freshRuns = (store.historicRuns as HistoricRun[])
@@ -398,7 +414,7 @@ export class PersistentAgentRunner extends InMemoryAgentRunner {
     if (freshRuns.length === 0) return;
     const record: LocalThreadRecord = {
       id: threadId,
-      owner,
+      owner: effectiveOwner,
       agentId: prior?.agentId ?? "default",
       name: prior?.name ?? null,
       archived: prior?.archived ?? false,
@@ -407,7 +423,7 @@ export class PersistentAgentRunner extends InMemoryAgentRunner {
       messages: store.messagesSnapshot as unknown[],
       runs: [...priorRuns, ...freshRuns],
     };
-    await this.db.put(owner, CHAT_THREADS_KIND, record);
+    await this.db.put(effectiveOwner, CHAT_THREADS_KIND, record);
     this.index.set(threadId, record);
     this.scanIndex.set(threadId, record);
     if (record.name === null) this.titleThread(record);
@@ -445,13 +461,25 @@ export class PersistentAgentRunner extends InMemoryAgentRunner {
     return [];
   }
 
-  /** Resolve a record by thread id; owners are not knowable from a thread id alone. */
-  private async findRecord(threadId: string): Promise<LocalThreadRecord | null> {
+  /**
+   * Resolve a record by thread id. The scan covers every owner's rows because
+   * a thread id alone does not name an owner; when `expectedOwner` is given a
+   * record owned by someone else resolves to null, so a caller holding only a
+   * threadId can never hydrate or append onto another owner's thread — the
+   * invariant lives here, not in each route.
+   */
+  private async findRecord(
+    threadId: string,
+    expectedOwner?: string,
+  ): Promise<LocalThreadRecord | null> {
     const cached = this.index.get(threadId) ?? this.scanIndex.get(threadId);
-    if (cached) return cached;
+    if (cached) return !expectedOwner || cached.owner === expectedOwner ? cached : null;
     for (const { owner, value } of await this.db.scan<LocalThreadRecord>(CHAT_THREADS_KIND)) {
       this.scanIndex.set(value.id, { ...value, owner: value.owner ?? owner });
-      if (value.id === threadId) return this.scanIndex.get(threadId) ?? null;
+      if (value.id === threadId) {
+        const record = this.scanIndex.get(threadId) ?? null;
+        return !expectedOwner || record?.owner === expectedOwner ? record : null;
+      }
     }
     return null;
   }

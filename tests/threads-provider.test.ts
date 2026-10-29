@@ -190,6 +190,35 @@ test("threads are scoped and replayed per owner", async () => {
   );
 });
 
+test("the persistence layer refuses a foreign threadId even when it is warm in memory", async () => {
+  // owner-a creates a thread; its record is now cached in the runner's index
+  // and its history lives in the process-global store. A later internal caller
+  // (background job, webhook replay) that reaches the runner with just a
+  // threadId and owner-b's agent must not append onto owner-a's thread.
+  await runOnce(runnerFor(), "shared-thread", fakeAgent("shared-thread", "owner-a"));
+  const foreign = runnerFor();
+  await assert.rejects(
+    runOnce(foreign, "shared-thread", fakeAgent("shared-thread", "owner-b")),
+    /Thread not found/,
+    "a cross-owner run is refused at the persistence boundary",
+  );
+  const record = await db.get<LocalThreadRecord>("owner-a", CHAT_THREADS_KIND, "shared-thread");
+  assert.ok(record, "the original owner's record is intact");
+  assert.equal(record.owner, "owner-a");
+  assert.equal(await db.get("owner-b", CHAT_THREADS_KIND, "shared-thread"), null);
+});
+
+test("a cross-owner run after a cold start is refused from the database scan", async () => {
+  await runOnce(runnerFor(), "cold-thread", fakeAgent("cold-thread", "owner-a"));
+  ɵGLOBAL_STORE.clear();
+  const foreign = runnerFor();
+  await assert.rejects(
+    runOnce(foreign, "cold-thread", fakeAgent("cold-thread", "owner-b")),
+    /Thread not found/,
+  );
+  assert.equal(await db.get("owner-b", CHAT_THREADS_KIND, "cold-thread"), null);
+});
+
 test("a failed run still terminates the stream cleanly", async () => {
   const events = await runOnce(
     runnerFor(),

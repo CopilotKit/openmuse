@@ -35,7 +35,6 @@ export async function createApp(
   options: { docker?: DockerRunner } = {},
 ) {
   assertThreadsBackendConfig(config);
-  assertApiDeploymentConfig(config);
   await resolveComputerDeployment(config);
   const auth = await createAuth(db, config),
     files = new Files(db, config, auth),
