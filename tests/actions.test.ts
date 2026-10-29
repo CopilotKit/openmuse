@@ -199,6 +199,81 @@ test("a newer review of a draft replaces the older one, so the email is sent onc
   assert.equal(sends, 1);
   assert.equal(await db.get("draft-twice-user", "drafts", draft.id), null);
 });
+test("saving a draft while its review is being prepared keeps the newer draft", async () => {
+  const owner = "draft-race-user";
+  const paused = deferred<void>();
+  const resume = deferred<void>();
+  let sends = 0;
+  const service = new ActionService(db, {
+    execute: async () => {
+      sends++;
+      return "sent";
+    },
+    connected: async () => true,
+    connection: async () => {
+      paused.resolve();
+      await resume.promise;
+      return { id: "race-connection", account: "me@example.com" };
+    },
+  });
+  const id = randomUUID();
+  await db.put(owner, "drafts", { ...email.data, id, revision: randomUUID() });
+  const review = service.propose(owner, { ...email, draftId: id });
+  await paused.promise;
+  // What POST /api/drafts does when a draft is saved again.
+  await db.put(owner, "drafts", { ...email.data, id, body: "Rewritten", revision: randomUUID() });
+  await service.cancelDraftReviews(owner, id);
+  resume.resolve();
+  await assert.rejects(review, /draft changed/);
+  const [action] = (await db.list<ActionProposal>(owner, "actions")).filter(
+    (a) => a.draftId === id,
+  );
+  assert.equal(action?.status, "cancelled");
+  const kept = await db.get<{ body: string; actionId?: string }>(owner, "drafts", id);
+  assert.equal(kept?.body, "Rewritten");
+  assert.equal(kept?.actionId, undefined);
+  assert.equal(sends, 0);
+});
+test("two reviews of one draft started together leave exactly one to approve", async () => {
+  const owner = "draft-double-user";
+  const gates = [deferred<void>(), deferred<void>()];
+  const arrived = [deferred<void>(), deferred<void>()];
+  let calls = 0;
+  const service = new ActionService(db, {
+    execute: async () => "sent",
+    connected: async () => true,
+    connection: async () => {
+      const call = calls++;
+      arrived[call]?.resolve();
+      await gates[call]?.promise;
+      return { id: "double-connection", account: "me@example.com" };
+    },
+  });
+  const id = randomUUID();
+  await db.put(owner, "drafts", { ...email.data, id, revision: randomUUID() });
+  const reviews = [1, 2].map(() =>
+    service.propose(owner, { ...email, draftId: id }).then(
+      (action) => action,
+      (error: Error) => error,
+    ),
+  );
+  await Promise.all(arrived.map((a) => a.promise));
+  for (const gate of gates) gate.resolve();
+  const results = await Promise.all(reviews);
+  const opened = results.filter((r): r is ActionProposal => !(r instanceof Error));
+  const refused = results.filter((r) => r instanceof Error);
+  assert.equal(opened.length, 1);
+  assert.match(String(refused[0]), /draft changed/);
+  const pending = (await db.list<ActionProposal>(owner, "actions")).filter(
+    (a) => a.draftId === id && a.status === "awaiting_review",
+  );
+  assert.deepEqual(
+    pending.map((a) => a.id),
+    [opened[0]?.id],
+  );
+  const draft = await db.get<{ actionId?: string }>(owner, "drafts", id);
+  assert.equal(draft?.actionId, opened[0]?.id);
+});
 test("a failed draft cleanup still reports the email as sent", async (t) => {
   const store = await createStore();
   t.after(() => store.close());

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   type ActionProposal,
   type CalendarEvent,
+  emailDraftSchema,
   type ProposalInput,
   proposalSchema,
 } from "../../../packages/domain/src/index.ts";
@@ -29,6 +30,12 @@ interface Options {
   connection?: (owner: string) => Promise<{ id: string; account: string } | null>;
   now?: () => number;
 }
+const draftChanged =
+  "This draft changed while its review was being prepared. Open it again to review the latest version.";
+const draftFields = Object.keys(emailDraftSchema.shape);
+function sameDraft(a: Record<string, unknown>, b: Record<string, unknown>) {
+  return draftFields.every((key) => JSON.stringify(a[key]) === JSON.stringify(b[key]));
+}
 export class ActionService {
   private readonly now: () => number;
   constructor(
@@ -52,12 +59,10 @@ export class ActionService {
       if (existing) return existing;
     }
     const parsed = proposalSchema.parse(raw);
-    if (
-      parsed.kind === "email.send" &&
-      parsed.draftId &&
-      !(await this.db.get(owner, "drafts", parsed.draftId))
-    )
-      throw new AppError("Draft not found", 404);
+    const draft =
+      parsed.kind === "email.send" && parsed.draftId
+        ? { id: parsed.draftId, revision: await this.draftRevision(owner, parsed.draftId) }
+        : undefined;
     const connection = await this.options.connection?.(owner);
     if (this.options.connection && !connection)
       throw new AppError("Connect Google before preparing an action", 409);
@@ -73,7 +78,7 @@ export class ActionService {
     const proposal: ActionProposal = {
       id,
       taskId,
-      draftId: input.kind === "email.send" ? input.draftId : undefined,
+      draftId: draft?.id,
       title,
       kind: input.kind,
       data: input.data,
@@ -104,9 +109,22 @@ export class ActionService {
       if (!existing) throw new AppError("Prepared action could not be loaded", 409);
       return existing;
     }
-    if (saved.draftId) {
-      await this.db.compareAndSwap(owner, "drafts", saved.draftId, {}, { actionId: saved.id });
-      await this.cancelDraftReviews(owner, saved.draftId, saved.id);
+    if (draft) {
+      // A save, or another review, while this one was being prepared gave the draft a new
+      // revision. Linking now would let this older review replace, and then delete, the newer
+      // draft, or leave two reviews that cancel each other.
+      const linked = await this.db.compareAndSwap(
+        owner,
+        "drafts",
+        draft.id,
+        { revision: draft.revision },
+        { actionId: saved.id, revision: randomUUID() },
+      );
+      if (!linked) {
+        await this.cancelReview(owner, saved.id, "The draft changed before this review was ready");
+        throw new AppError(draftChanged, 409);
+      }
+      await this.cancelDraftReviews(owner, draft.id, saved.id);
     }
     await this.record(owner, saved, "Ready for your review");
     return saved;
@@ -119,16 +137,34 @@ export class ActionService {
       "awaiting_review",
     )) {
       if (action.draftId !== draftId || action.id === keepId) continue;
-      const cancelled = await this.db.compareAndSwap<ActionProposal>(
-        owner,
-        "actions",
-        action.id,
-        { status: "awaiting_review" },
-        { status: "cancelled" },
-      );
-      if (cancelled)
-        await this.record(owner, cancelled, "Replaced by a newer version of the draft");
+      await this.cancelReview(owner, action.id, "Replaced by a newer version of the draft");
     }
+  }
+  private async cancelReview(owner: string, id: string, detail: string) {
+    const cancelled = await this.db.compareAndSwap<ActionProposal>(
+      owner,
+      "actions",
+      id,
+      { status: "awaiting_review" },
+      { status: "cancelled" },
+    );
+    if (cancelled) await this.record(owner, cancelled, detail);
+  }
+  /** Drafts saved before revisions existed get one here, unless the draft changes meanwhile. */
+  private async draftRevision(owner: string, draftId: string): Promise<string> {
+    const draft = await this.db.get<Record<string, unknown>>(owner, "drafts", draftId);
+    if (!draft) throw new AppError("Draft not found", 404);
+    if (typeof draft.revision === "string") return draft.revision;
+    const revision = randomUUID();
+    const stamped = await this.db.compareAndSwap<Record<string, unknown>>(
+      owner,
+      "drafts",
+      draftId,
+      {},
+      { revision },
+    );
+    if (!stamped || !sameDraft(stamped, draft)) throw new AppError(draftChanged, 409);
+    return revision;
   }
   async decide(
     owner: string,

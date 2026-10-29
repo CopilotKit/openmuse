@@ -232,6 +232,18 @@ test("saving a draft again cancels its pending review, so the older text is neve
   ).json();
   assert.equal(drafts.find((d) => d.id === draft.id)?.body, "Second version");
 });
+test("every save gives a draft a new revision", async () => {
+  const post = (path: string, body: object) =>
+    app.request(path, { method: "POST", headers: headers(), body: JSON.stringify(body) });
+  const message = { to: ["sample@example.com"], subject: "Plans", body: "First version" };
+  const first: { id: string; revision: string } = await (await post("/api/drafts", message)).json();
+  const second: { id: string; revision: string } = await (
+    await post("/api/drafts", { ...message, id: first.id, body: "Second version" })
+  ).json();
+  assert.equal(second.id, first.id);
+  assert.ok(first.revision);
+  assert.notEqual(second.revision, first.revision);
+});
 test("reviewed sample email persists a receipt, then revocation blocks another proposal", async () => {
   const propose = () =>
     app.request("/api/actions", {

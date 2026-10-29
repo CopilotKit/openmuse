@@ -200,6 +200,7 @@ export async function createApp(
       ...body,
       id: body.id ?? randomUUID(),
       createdAt: existing?.createdAt ?? new Date().toISOString(),
+      revision: randomUUID(),
     });
     if (existing) await actions.cancelDraftReviews(c.get("owner"), saved.id);
     return c.json(saved, 201);
