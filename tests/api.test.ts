@@ -263,6 +263,38 @@ test("sample workspace serves a real PDF and filling creates a new version", asy
   forged.searchParams.set("owner", "another-user");
   assert.equal((await app.request(forged.toString())).status, 403);
 });
+test("saving a draft again cancels its pending review, so the older text is never sent", async () => {
+  const post = (path: string, body: object) =>
+    app.request(path, { method: "POST", headers: headers(), body: JSON.stringify(body) });
+  const message = { to: ["sample@example.com"], subject: "Trip", body: "First version" };
+  const draft: { id: string } = await (await post("/api/drafts", message)).json();
+  const review: ActionProposal = await (
+    await post("/api/actions", { kind: "email.send", data: message, draftId: draft.id })
+  ).json();
+  assert.equal(review.status, "awaiting_review");
+  const resaved = await post("/api/drafts", { ...message, id: draft.id, body: "Second version" });
+  assert.equal(resaved.status, 201);
+  const decided: ActionProposal = await (
+    await post(`/api/actions/${review.id}/decide`, { hash: review.hash, decision: "approve" })
+  ).json();
+  assert.equal(decided.status, "cancelled");
+  const drafts: { id: string; body: string }[] = await (
+    await app.request("/api/drafts", { headers: headers() })
+  ).json();
+  assert.equal(drafts.find((d) => d.id === draft.id)?.body, "Second version");
+});
+test("every save gives a draft a new revision", async () => {
+  const post = (path: string, body: object) =>
+    app.request(path, { method: "POST", headers: headers(), body: JSON.stringify(body) });
+  const message = { to: ["sample@example.com"], subject: "Plans", body: "First version" };
+  const first: { id: string; revision: string } = await (await post("/api/drafts", message)).json();
+  const second: { id: string; revision: string } = await (
+    await post("/api/drafts", { ...message, id: first.id, body: "Second version" })
+  ).json();
+  assert.equal(second.id, first.id);
+  assert.ok(first.revision);
+  assert.notEqual(second.revision, first.revision);
+});
 test("reviewed sample email persists a receipt, then revocation blocks another proposal", async () => {
   const propose = () =>
     app.request("/api/actions", {
