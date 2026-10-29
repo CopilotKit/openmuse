@@ -1,6 +1,7 @@
 import { useThreads } from "@copilotkit/react-native/headless";
 import {
   Archive,
+  ArchiveRestore,
   CalendarDays,
   FileText,
   MessageCircle,
@@ -8,6 +9,7 @@ import {
   Plus,
   RefreshCw,
   Settings2,
+  Trash2,
 } from "lucide-react-native";
 import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
@@ -32,6 +34,7 @@ const ThreadContext = createContext<{
   retry: () => void;
   select: (selection: Selection) => void;
   start: () => void;
+  removeVisited: (id: string) => void;
   claimPrompt: (id: number) => boolean;
 } | null>(null);
 export function ThreadsProvider({ children }: { children: ReactNode }) {
@@ -88,6 +91,10 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
         selection,
         select,
         start: () => select({ id: newThreadId(), existing: false }),
+        removeVisited: (id) => {
+          setVisited((items) => items.filter((item) => item.id !== id));
+          if (selection.id === id) select({ id: mainId, existing: true });
+        },
       }}
     >
       {children}
@@ -98,6 +105,81 @@ export function useMuseThread() {
   const context = useContext(ThreadContext);
   if (!context) throw new Error("Threads provider is unavailable");
   return context;
+}
+
+type ThreadSummary = { id: string; name: string | null; archived: boolean };
+
+/**
+ * One saved conversation row. The layout matches the Intelligence backend:
+ * the title sits on its own line, and a row of small labeled buttons
+ * (Rename / Archive|Restore / Delete) sits beneath it.
+ */
+function ThreadRow({
+  thread,
+  selected,
+  editing,
+  busy,
+  draft,
+  onDraft,
+  onOpen,
+  onSave,
+  onArchive,
+  onDelete,
+}: {
+  thread: ThreadSummary;
+  selected: boolean;
+  editing: boolean;
+  busy: boolean;
+  draft: string;
+  onDraft: (value: string) => void;
+  onOpen: () => void;
+  onSave: () => void;
+  onArchive: () => void;
+  onDelete: () => void;
+}) {
+  const title = thread.name || "Untitled conversation";
+  return (
+    <View
+      style={{
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.line,
+        gap: 10,
+      }}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Open conversation: ${title}`}
+        accessibilityState={{ selected }}
+        onPress={onOpen}
+        style={[s.row, { gap: 10 }]}
+      >
+        <MessageCircle size={19} color={colors.text} />
+        <Text style={[s.text, { flex: 1 }]} numberOfLines={1} ellipsizeMode="tail">
+          {title}
+        </Text>
+      </Pressable>
+      {editing && (
+        <Field label="Conversation name" value={draft} onChangeText={onDraft} autoFocus />
+      )}
+      <View style={[s.row, { gap: 8 }]}>
+        <Button small disabled={busy || (editing && !draft.trim())} onPress={onSave}>
+          {editing ? "Save name" : "Rename"}
+        </Button>
+        <Button
+          small
+          icon={thread.archived ? ArchiveRestore : Archive}
+          disabled={busy}
+          onPress={onArchive}
+        >
+          {thread.archived ? "Restore" : "Archive"}
+        </Button>
+        <Button small icon={Trash2} danger disabled={busy} onPress={onDelete}>
+          Delete
+        </Button>
+      </View>
+    </View>
+  );
 }
 export function ThreadsSheet({ onClose }: { onClose: () => void }) {
   const {
@@ -110,6 +192,7 @@ export function ThreadsSheet({ onClose }: { onClose: () => void }) {
     retry,
     select,
     start,
+    removeVisited,
   } = useMuseThread();
   const { workspace, open, navigate, refresh } = useWorkspace();
   const threads = useThreads({ agentId: "default", enabled, includeArchived: true, limit: 20 });
@@ -201,64 +284,40 @@ export function ThreadsSheet({ onClose }: { onClose: () => void }) {
             {threads.threads
               .filter((thread) => thread.id !== mainId && thread.archived === archived)
               .map((thread) => (
-                <View
+                <ThreadRow
                   key={thread.id}
-                  style={{
-                    paddingVertical: 12,
-                    borderBottomWidth: 1,
-                    borderBottomColor: colors.line,
-                    gap: 10,
+                  thread={thread}
+                  selected={selection.id === thread.id}
+                  editing={editing === thread.id}
+                  busy={threads.isMutating}
+                  draft={name}
+                  onDraft={setName}
+                  onOpen={() => {
+                    select({ id: thread.id, existing: true });
+                    onClose();
                   }}
-                >
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`Open conversation: ${thread.name || "Untitled conversation"}`}
-                    accessibilityState={{ selected: selection.id === thread.id }}
-                    onPress={() => {
-                      select({ id: thread.id, existing: true });
-                      onClose();
-                    }}
-                    style={[s.row, { gap: 10 }]}
-                  >
-                    <MessageCircle size={19} color={colors.text} />
-                    <Text style={[s.text, { flex: 1 }]}>
-                      {thread.name || "Untitled conversation"}
-                    </Text>
-                  </Pressable>
-                  {editing === thread.id && (
-                    <Field label="Conversation name" value={name} onChangeText={setName} />
-                  )}
-                  <View style={[s.row, { gap: 8 }]}>
-                    <Button
-                      small
-                      disabled={threads.isMutating || (editing === thread.id && !name.trim())}
-                      onPress={() => {
-                        if (editing === thread.id)
-                          void mutate(() => threads.renameThread(thread.id, name.trim()));
-                        else {
-                          setEditing(thread.id);
-                          setName(thread.name || "");
-                        }
-                      }}
-                    >
-                      {editing === thread.id ? "Save name" : "Rename"}
-                    </Button>
-                    <Button
-                      small
-                      icon={Archive}
-                      disabled={threads.isMutating}
-                      onPress={() =>
-                        void mutate(() =>
-                          thread.archived
-                            ? threads.unarchiveThread(thread.id)
-                            : threads.archiveThread(thread.id),
-                        )
-                      }
-                    >
-                      {thread.archived ? "Restore" : "Archive"}
-                    </Button>
-                  </View>
-                </View>
+                  onSave={() => {
+                    if (editing === thread.id)
+                      void mutate(() => threads.renameThread(thread.id, name.trim()));
+                    else {
+                      setEditing(thread.id);
+                      setName(thread.name || "");
+                    }
+                  }}
+                  onArchive={() =>
+                    void mutate(() =>
+                      thread.archived
+                        ? threads.unarchiveThread(thread.id)
+                        : threads.archiveThread(thread.id),
+                    )
+                  }
+                  onDelete={() =>
+                    void mutate(async () => {
+                      await threads.deleteThread(thread.id);
+                      removeVisited(thread.id);
+                    })
+                  }
+                />
               ))}
             {!threads.isLoading &&
               !threads.error &&

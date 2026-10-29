@@ -8,7 +8,15 @@ import { createStore } from "../db.ts";
 import { createDemoModel, demoModel } from "./model.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
-const intelligenceApiKey = required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage);
+const intelligenceApiKey = process.env.CPK_INTELLIGENCE_API_KEY?.trim();
+// An explicit choice wins; otherwise the demo follows the key. Either way the
+// child process gets THREADS_BACKEND verbatim, never a silent downgrade.
+const threadsBackend =
+  process.env.THREADS_BACKEND ?? (intelligenceApiKey ? "intelligence" : "local");
+if (threadsBackend !== "intelligence" && threadsBackend !== "local")
+  throw new Error("THREADS_BACKEND must be intelligence or local");
+if (threadsBackend === "intelligence" && !intelligenceApiKey)
+  throw new Error(intelligenceKeyRequiredMessage);
 const jevMode = process.env.DEMO_JEV_MODE ?? "sample";
 if (jevMode !== "sample" && jevMode !== "live")
   throw new Error("DEMO_JEV_MODE must be sample or live");
@@ -96,7 +104,8 @@ const api = spawn(
         process.env.DEMO_ALLOWED_ORIGINS ?? "http://localhost:8081,http://127.0.0.1:8081",
       DO_NOT_TRACK: "1",
       COPILOTKIT_TELEMETRY_DISABLED: "true",
-      CPK_INTELLIGENCE_API_KEY: intelligenceApiKey,
+      ...(intelligenceApiKey ? { CPK_INTELLIGENCE_API_KEY: intelligenceApiKey } : {}),
+      THREADS_BACKEND: threadsBackend,
     },
   },
 );

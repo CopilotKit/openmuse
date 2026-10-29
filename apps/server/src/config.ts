@@ -44,6 +44,8 @@ export interface Config {
   agentUrl?: string;
   agentToken?: string;
   intelligenceApiKey?: string;
+  /** Set by readConfig; undefined only in hand-built fixtures, meaning the default. */
+  threadsBackend?: ThreadsBackend;
   googleClientId?: string;
   googleClientSecret?: string;
   googleRedirectUri: string;
@@ -63,6 +65,10 @@ export interface Config {
 
 export type ComputerProvider = "docker" | "e2b-desktop";
 
+/** Chat thread persistence backend. Intelligence is the CopilotKit-hosted default;
+ * "local" keeps threads on the server's own database with no external service. */
+export type ThreadsBackend = "intelligence" | "local";
+
 /** Pinned so live rankings do not shift when TypeSafe moves the `jev-latest` alias. */
 export const defaultJevModel = "jev-1.13.0";
 
@@ -77,14 +83,17 @@ export function required(name: string, message: string, value = process.env[name
   return value.trim();
 }
 
-export function assertApiDeploymentConfig(
+export function assertThreadsBackendConfig(
   config: Config,
 ): asserts config is Config & { intelligenceApiKey: string } {
-  required(
-    "CPK_INTELLIGENCE_API_KEY",
-    intelligenceKeyRequiredMessage,
-    config.intelligenceApiKey ?? "",
-  );
+  // An explicit Intelligence selection without a key fails loudly at startup;
+  // it never silently downgrades to local persistence.
+  if ((config.threadsBackend ?? "intelligence") === "intelligence")
+    required(
+      "CPK_INTELLIGENCE_API_KEY",
+      intelligenceKeyRequiredMessage,
+      config.intelligenceApiKey ?? "",
+    );
 }
 
 /** Accept a full worker URL, or host:port from a platform that omits the scheme. */
@@ -131,6 +140,9 @@ export function readConfig(): Config {
         "COMPUTER_PROVIDER=e2b-desktop requires a unique COMPUTER_DEPLOYMENT_ID, e.g. from `openssl rand -hex 12`",
       );
   }
+  const threadsBackend = process.env.THREADS_BACKEND ?? "intelligence";
+  if (threadsBackend !== "intelligence" && threadsBackend !== "local")
+    throw new Error("THREADS_BACKEND must be intelligence or local");
   const port = Number(process.env.PORT ?? 8787);
   const publicUrl = process.env.PUBLIC_API_URL ?? `http://localhost:${port}`;
   const config: Config = {
@@ -149,7 +161,8 @@ export function readConfig(): Config {
     agentBackend: backend,
     agentUrl: process.env.AGENT_URL,
     agentToken: process.env.AGENT_TOKEN,
-    intelligenceApiKey: required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage),
+    intelligenceApiKey: process.env.CPK_INTELLIGENCE_API_KEY?.trim(),
+    threadsBackend,
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
     googleRedirectUri: `${publicUrl}/api/google/callback`,
