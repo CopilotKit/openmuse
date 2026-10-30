@@ -39,3 +39,23 @@ test("does not trim when the string is exactly the limit", () => {
   const text = "\u{1F44D}".repeat(6); // 12 UTF-16 units
   assert.equal(clipText(text, 12), text);
 });
+
+test("normalizes a lone surrogate already present in the input", () => {
+  // "ab" + a lone high surrogate + "cd": the input is malformed without any
+  // cut, so repairing only cut-created halves would let it through.
+  const clipped = clipText("ab\uD800cd", 100);
+  assert.equal(clipped, "ab\uFFFDcd");
+  // the result survives a UTF-8 round trip, e.g. a Postgres insert
+  assert.equal(Buffer.from(clipped, "utf8").toString("utf8"), clipped);
+});
+
+test("normalizes a lone low surrogate in the input", () => {
+  assert.equal(clipText("ab\uDC01cd", 100), "ab\uFFFDcd");
+});
+
+test("normalizes lone halves but keeps a well-formed pair in the same text", () => {
+  // A lone high surrogate followed by another high surrogate, then a valid
+  // emoji pair: only the halves that lack a partner are replaced.
+  const clipped = clipText("a\uD800\uD801b\u{1F44D}c", 100);
+  assert.equal(clipped, "a\uFFFD\uFFFDb\u{1F44D}c");
+});
