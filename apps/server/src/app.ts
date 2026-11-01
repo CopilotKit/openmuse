@@ -104,15 +104,12 @@ export async function createApp(
       browserConfigured: Boolean(config.workerUrl && config.workerToken),
     }),
   );
-  let loginWindow = 0,
-    loginAttempts = 0;
-  app.post("/api/session", async (c) => {
-    if (Date.now() - loginWindow > 60000) {
-      loginWindow = Date.now();
-      loginAttempts = 0;
-    }
-    if (++loginAttempts > 30)
-      throw new AppError("Too many sign-in attempts. Try again in a minute.", 429);
+  // Counted per client so one caller's failed guesses cannot lock out the owner.
+  const signInLimit = rateLimit(Boolean(config.trustProxy), {
+    maxRequests: 30,
+    message: "Too many sign-in attempts. Try again in a minute.",
+  });
+  app.post("/api/session", signInLimit, async (c) => {
     const body = z.object({ accessKey: z.string().optional() }).parse(await c.req.json());
     const session = await auth.session(body.accessKey);
     await workspace.ensureSample("local-user", actions);

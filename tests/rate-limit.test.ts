@@ -111,6 +111,47 @@ test("unauthenticated requests cannot multiply buckets by spoofing X-Forwarded-F
   );
 });
 
+test("one client's failed sign-ins do not block another client with the correct key", async () => {
+  const accessKey = "fictional-owner-access-key";
+  const liveDirectory = await mkdtemp(join(tmpdir(), "openmuse-signin-"));
+  const liveDb = await createStore();
+  try {
+    const { app: live } = await createApp(liveDb, {
+      ...config,
+      mode: "live",
+      agentBackend: "model",
+      dataDir: liveDirectory,
+      accessKey,
+      encryptionKey: Buffer.alloc(32, 1).toString("base64"),
+      trustProxy: true,
+    });
+    const signIn = (client: string, key: string) =>
+      live.request("/api/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Forwarded-For": client },
+        body: JSON.stringify({ accessKey: key }),
+      });
+    for (let i = 0; i < 30; i++)
+      assert.equal((await signIn("203.0.113.1", "wrong-guess")).status, 401);
+    const blocked = await signIn("203.0.113.1", "wrong-guess");
+    assert.equal(blocked.status, 429);
+    assert.deepEqual(await blocked.json(), {
+      error: "Too many sign-in attempts. Try again in a minute.",
+    });
+    const owner = await signIn("203.0.113.2", accessKey);
+    assert.equal(owner.status, 200, "another client's guesses must not lock out the owner");
+    const { token } = (await owner.json()) as { token: string };
+    const signOut = await live.request("/api/session", {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}`, "X-Forwarded-For": "203.0.113.1" },
+    });
+    assert.equal(signOut.status, 200, "the sign-in limit must not block signing out");
+  } finally {
+    await liveDb.close();
+    await rm(liveDirectory, { recursive: true, force: true });
+  }
+});
+
 function limitedApp(options: Parameters<typeof rateLimit>[1]) {
   const app = new Hono();
   app.onError((error, c) =>

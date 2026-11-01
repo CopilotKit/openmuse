@@ -72,7 +72,10 @@ function connectionAddress(c: Context): string | undefined {
 
 export function rateLimit(
   trustProxy: boolean,
-  options: RateLimitStoreOptions & { getAddress?: (c: Context) => string | undefined } = {},
+  options: RateLimitStoreOptions & {
+    getAddress?: (c: Context) => string | undefined;
+    message?: string;
+  } = {},
 ) {
   const store = createRateLimitStore(options);
   const getAddress = options.getAddress ?? connectionAddress;
@@ -84,7 +87,7 @@ export function rateLimit(
       connectionAddress: getAddress(c),
     });
     if (!store.take(key, Date.now()))
-      throw new AppError("Too many requests. Try again in a minute.", 429);
+      throw new AppError(options.message ?? "Too many requests. Try again in a minute.", 429);
     await next();
   };
 }
