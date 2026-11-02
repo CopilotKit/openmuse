@@ -104,10 +104,11 @@ export async function createApp(
       browserConfigured: Boolean(config.workerUrl && config.workerToken),
     }),
   );
-  // Counted per client so one caller's failed guesses cannot lock out the owner.
+  // Rejected guesses are counted per client so one caller cannot lock out the owner.
   const signInLimit = rateLimit(Boolean(config.trustProxy), {
     maxRequests: 30,
     message: "Too many sign-in attempts. Try again in a minute.",
+    counts: (status) => status === 401,
   });
   app.post("/api/session", signInLimit, async (c) => {
     const body = z.object({ accessKey: z.string().optional() }).parse(await c.req.json());

@@ -40,7 +40,12 @@ export function createRateLimitStore(options: RateLimitStoreOptions = {}) {
     return entry.count <= maxRequests;
   }
 
-  return { take, size: () => entries.size };
+  function release(key: string, now: number) {
+    const entry = entries.get(key);
+    if (entry && entry.expiresAt > now && entry.count > 0) entry.count -= 1;
+  }
+
+  return { take, release, size: () => entries.size };
 }
 
 // This limiter runs before authentication, so the key must never be derived from
@@ -75,6 +80,8 @@ export function rateLimit(
   options: RateLimitStoreOptions & {
     getAddress?: (c: Context) => string | undefined;
     message?: string;
+    /** Refund a request whose response status this rejects. Reserving first bounds parallel bursts. */
+    counts?: (status: number) => boolean;
   } = {},
 ) {
   const store = createRateLimitStore(options);
@@ -89,5 +96,6 @@ export function rateLimit(
     if (!store.take(key, Date.now()))
       throw new AppError(options.message ?? "Too many requests. Try again in a minute.", 429);
     await next();
+    if (options.counts && !options.counts(c.res.status)) store.release(key, Date.now());
   };
 }

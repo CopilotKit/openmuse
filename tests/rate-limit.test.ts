@@ -111,8 +111,9 @@ test("unauthenticated requests cannot multiply buckets by spoofing X-Forwarded-F
   );
 });
 
-test("one client's failed sign-ins do not block another client with the correct key", async () => {
-  const accessKey = "fictional-owner-access-key";
+const accessKey = "fictional-owner-access-key";
+
+async function withLiveApp(run: (live: typeof app) => Promise<void>) {
   const liveDirectory = await mkdtemp(join(tmpdir(), "openmuse-signin-"));
   const liveDb = await createStore();
   try {
@@ -125,20 +126,35 @@ test("one client's failed sign-ins do not block another client with the correct 
       encryptionKey: Buffer.alloc(32, 1).toString("base64"),
       trustProxy: true,
     });
-    const signIn = (client: string, key: string) =>
-      live.request("/api/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Forwarded-For": client },
-        body: JSON.stringify({ accessKey: key }),
-      });
+    await run(live);
+  } finally {
+    await liveDb.close();
+    await rm(liveDirectory, { recursive: true, force: true });
+  }
+}
+
+function signIn(live: typeof app, client: string, key: string) {
+  return postSession(live, client, JSON.stringify({ accessKey: key }));
+}
+
+function postSession(live: typeof app, client: string, body: string) {
+  return live.request("/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Forwarded-For": client },
+    body,
+  });
+}
+
+test("one client's failed sign-ins do not block another client with the correct key", async () => {
+  await withLiveApp(async (live) => {
     for (let i = 0; i < 30; i++)
-      assert.equal((await signIn("203.0.113.1", "wrong-guess")).status, 401);
-    const blocked = await signIn("203.0.113.1", "wrong-guess");
+      assert.equal((await signIn(live, "203.0.113.1", "wrong-guess")).status, 401);
+    const blocked = await signIn(live, "203.0.113.1", "wrong-guess");
     assert.equal(blocked.status, 429);
     assert.deepEqual(await blocked.json(), {
       error: "Too many sign-in attempts. Try again in a minute.",
     });
-    const owner = await signIn("203.0.113.2", accessKey);
+    const owner = await signIn(live, "203.0.113.2", accessKey);
     assert.equal(owner.status, 200, "another client's guesses must not lock out the owner");
     const { token } = (await owner.json()) as { token: string };
     const signOut = await live.request("/api/session", {
@@ -146,10 +162,20 @@ test("one client's failed sign-ins do not block another client with the correct 
       headers: { Authorization: `Bearer ${token}`, "X-Forwarded-For": "203.0.113.1" },
     });
     assert.equal(signOut.status, 200, "the sign-in limit must not block signing out");
-  } finally {
-    await liveDb.close();
-    await rm(liveDirectory, { recursive: true, force: true });
-  }
+  });
+});
+
+test("only rejected sign-in guesses use a client's attempts", async () => {
+  await withLiveApp(async (live) => {
+    const client = "203.0.113.3";
+    for (let i = 0; i < 31; i++) {
+      assert.equal((await signIn(live, client, accessKey)).status, 200);
+      assert.equal((await postSession(live, client, "{")).status, 400);
+    }
+    for (let i = 0; i < 30; i++)
+      assert.equal((await signIn(live, client, "wrong-guess")).status, 401);
+    assert.equal((await signIn(live, client, "wrong-guess")).status, 429);
+  });
 });
 
 function limitedApp(options: Parameters<typeof rateLimit>[1]) {
