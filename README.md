@@ -1,3 +1,21 @@
+<div align="center">
+
+# OpenMuse now lives in OpenBot
+
+OpenMuse is a skin on top of [OpenBot](https://github.com/CopilotKit/OpenBot), alongside OpenDots and OpenDuet. OpenBot is the source of truth, and this repo is community maintained.
+
+[**Get OpenBot**](https://github.com/CopilotKit/OpenBot) · [**copilotkit.ai/openbot**](https://www.copilotkit.ai/openbot) · [**Talk to an engineer**](https://www.copilotkit.ai/talk-to-an-engineer?ref=openmuse_readme)
+
+</div>
+
+**OpenBot is the AI assistant your company can actually own.** It runs on your infrastructure and you can change anything about it. Any agent stack, through AG-UI. The data sits in your PostgreSQL, and the model is yours to choose.
+
+To use OpenMuse, start [OpenBot](https://github.com/CopilotKit/OpenBot#quick-start), open **Settings** and choose **OpenMuse** under **Skin**.
+
+> **We can build this for you, or with you, at your company.** Our engineers will stand OpenBot up inside your infrastructure, customize it into something that looks like your own product, and hand it back to you to keep changing. [**Start the conversation**](https://www.copilotkit.ai/talk-to-an-engineer?ref=openmuse_readme).
+
+---
+
   <div align="center">
 
 # OpenMuse
