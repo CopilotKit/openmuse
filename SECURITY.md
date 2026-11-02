@@ -8,6 +8,8 @@ Use the repository's **Security → Report a vulnerability** form for private re
 
 OpenMuse currently supports one owner per deployment. Live mode uses a shared access key; it is not multi-tenant account authentication. Sample mode binds to loopback and contains fictional data. Use HTTPS and restricted network access for a remote live deployment.
 
+Rate limits, including failed sign-ins, are counted per client address. Set `TRUST_PROXY=true` only behind a reverse proxy that strips or overwrites `X-Forwarded-For`. The first entry is trusted, so an edge that appends to a caller-supplied value lets one caller appear as many clients. Without `TRUST_PROXY`, clients behind a proxy share one limit.
+
 The API holds provider credentials. Google tokens are encrypted at rest; short-lived signed URLs grant file and browser-console access. Protect `.env`, `.openmuse`, database backups, and browser profiles as private data. A signed URL is a credential until it expires.
 
 The browser worker must remain private and require its own random token. It runs persistent Chromium with application-enforced public-network checks. Playwright disables Chromium's internal sandbox by default; this is not a full desktop VM or a security boundary for hostile tenants. The browser Docker image reduces host access but does not establish kernel-enforced network isolation. See [worker boundaries](apps/worker/README.md).
