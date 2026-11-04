@@ -24,8 +24,8 @@ import { MODEL_MAX_RETRIES } from "../config.ts";
 const defaultLlmtrBaseUrl = "https://llmtr.com/v1";
 
 /**
- * LLMTR catalog ids are `vendor/model`. Hosted ids are `llmtr/<name>`, so a
- * single segment after the provider prefix is that hosted id, not a bare name.
+ * Every routed LLMTR model id is `vendor/model`. A bare id (no `/`) is always
+ * an LLMTR-hosted model, shorthand for `llmtr/<id>`.
  */
 export function llmtrModelId(model: string): string {
   const id = model.trim();
