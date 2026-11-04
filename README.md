@@ -56,6 +56,7 @@ The computer combines **persistent Chromium and an optional Linux workspace**. T
 | **Documents** | Email attachment → PDF → requested form values → filled copy → reviewed reply → receipt. Native/web PDF viewing, paging, zoom, supported fields, and sharing. |
 | **Finance** | Import transaction CSV to create a spending summary with categories, transactions, and a savings-goal action. |
 | **Gmail & Calendar** | Google OAuth adapters, complete mail threads, drafts/attachments, calendar discovery, and reviewed event creation/update/deletion. Live credentials required. |
+| **MCP connections** | Register Streamable HTTP, SSE, or local command servers in Apps. Discover tools and explicitly enable read-only tools for chat and delegated tasks. OAuth servers need a public HTTPS client metadata URL. |
 | **Personal context** | Editable name, tone, avatar, and memories. Background-update preferences and durable in-app notifications. |
 | **Rich Threads** | CopilotKit Intelligence persistence in every mode, with a stable main conversation, side chats, renaming, archiving, restoring, and replay. A server-only project key is required. |
 
@@ -154,6 +155,10 @@ Google credentials are encrypted at rest. File URLs and browser consoles use sho
 Web search is enabled by default. Set `WEB_SEARCH_ENABLED=false` on the API and any separate task worker to disable it. With a configured model, delegated tasks and built-in model chat (`AGENT_BACKEND=model`) use [Parallel's free, keyless Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp) as their built-in search provider. Ask, for example, “Find the official CopilotKit React Native setup instructions and cite the sources.” Results include source URLs and excerpts; delegated tasks save them as evidence. Scripted sample chat and external AG-UI conversations keep their existing tools.
 
 Search sends model-generated queries and context, which may include information from your conversation or task, plus a random per-chat/task session identifier to Parallel. See [Parallel's privacy policy](https://parallel.ai/privacy-policy). Free access is rate limited; failures are reported without a paid fallback. Stopping chat or interrupting a task cancels its search.
+
+### MCP connections
+
+Set `TOKEN_ENCRYPTION_KEY` (also in sample mode), restart the API, then open **Apps → MCP connections**. Add a Streamable HTTP, SSE, or local command server. OpenMuse discovers its tools and lets you enable tools marked read-only for chat and delegated tasks. Tool output is treated as untrusted data. Write tools are listed but cannot run automatically until a review flow is implemented. [MCP setup and ElevenLabs OAuth](docs/MCP.md).
 
 ## Browser worker
 
