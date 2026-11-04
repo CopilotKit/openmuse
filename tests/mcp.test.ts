@@ -104,6 +104,60 @@ test("remote MCP over Streamable HTTP and legacy SSE honors headers and the read
   }
 });
 
+test("a call re-checks the server's current tool list and fails closed on a changed grant", async () => {
+  const remote = await startRemoteMcp();
+  const db = await createStore();
+  const mcp = new McpService(db, config);
+  try {
+    for (const input of [
+      { name: "Remote HTTP", transport: "http" as const, url: remote.httpUrl },
+      { name: "Remote SSE", transport: "sse" as const, url: remote.sseUrl },
+    ]) {
+      const server = await mcp.add("owner", {
+        ...input,
+        headers: { Authorization: `Bearer ${REMOTE_TOKEN}` },
+      });
+      await mcp.connect("owner", server.id);
+      await mcp.enable("owner", server.id, { tools: ["echo", "server_proof"] });
+      remote.calls.length = 0;
+
+      // Enabled while read-only, then the server marks it a write tool. No reconnect in between.
+      remote.readOnly.echo = false;
+      await assert.rejects(
+        mcp.call("owner", server.id, "echo", { text: "x" }),
+        /not enabled/,
+        input.transport,
+      );
+      // Enabled, then the server stops listing it.
+      delete remote.readOnly.server_proof;
+      await assert.rejects(
+        mcp.call("owner", server.id, "server_proof", {}),
+        /not enabled/,
+        input.transport,
+      );
+      assert.deepEqual(remote.calls, [], `${input.transport}: nothing was dispatched`);
+      const [saved] = (await mcp.list("owner")).filter((s) => s.id === server.id);
+      assert.deepEqual(saved?.enabledTools, [], input.transport);
+      assert.equal(saved?.tools.find((tool) => tool.name === "echo")?.readOnly, false);
+
+      // The grants stay revoked when the tools come back read-only, until the owner enables them.
+      remote.readOnly.echo = true;
+      remote.readOnly.server_proof = true;
+      await assert.rejects(mcp.call("owner", server.id, "echo", { text: "x" }), /not enabled/);
+      assert.deepEqual(remote.calls, []);
+      assert.deepEqual((await mcp.connect("owner", server.id)).server?.enabledTools, []);
+      await mcp.enable("owner", server.id, { tools: ["echo"] });
+      const result = await mcp.call("owner", server.id, "echo", { text: input.transport });
+      assert.match(JSON.stringify(result), new RegExp(input.transport));
+      assert.deepEqual(remote.calls, ["echo"]);
+      await mcp.remove("owner", server.id);
+    }
+  } finally {
+    await db.close();
+    await remote.close();
+  }
+});
+
 const SECRET = "mcp-only-secret";
 const json = (res: import("node:http").ServerResponse, status: number, body: unknown) =>
   res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));

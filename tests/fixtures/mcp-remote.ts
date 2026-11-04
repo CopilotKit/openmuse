@@ -16,8 +16,10 @@ export const REMOTE_TOKEN = "remote-test-token";
 export interface RemoteMcpFixture {
   httpUrl: string;
   sseUrl: string;
-  /** Mutable read-only annotation per tool, read on every tools/list. */
+  /** Mutable read-only annotation per tool, read on every tools/list. Delete a key to unlist it. */
   readOnly: Record<string, boolean>;
+  /** Names of every tool the server was asked to run, in order. */
+  calls: string[];
   close(): Promise<void>;
 }
 
@@ -32,6 +34,7 @@ export async function startRemoteMcp(): Promise<RemoteMcpFixture> {
     server_proof: true,
     write_something: false,
   };
+  const calls: string[] = [];
   const mcpServer = () => {
     const server = new Server(
       { name: "openmuse-remote-test", version: "1.0.0" },
@@ -61,19 +64,22 @@ export async function startRemoteMcp(): Promise<RemoteMcpFixture> {
           inputSchema: { type: "object", properties: {} },
           annotations: { readOnlyHint: readOnly.write_something },
         },
-      ],
+      ].filter((tool) => tool.name in readOnly),
     }));
-    server.setRequestHandler(CallToolRequestSchema, async ({ params }) => ({
-      content: [
-        {
-          type: "text",
-          text:
-            params.name === "server_proof"
-              ? `proof:${randomBytes(16).toString("hex")}`
-              : String(params.arguments?.text ?? ""),
-        },
-      ],
-    }));
+    server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
+      calls.push(params.name);
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              params.name === "server_proof"
+                ? `proof:${randomBytes(16).toString("hex")}`
+                : String(params.arguments?.text ?? ""),
+          },
+        ],
+      };
+    });
     return server;
   };
 
@@ -115,6 +121,7 @@ export async function startRemoteMcp(): Promise<RemoteMcpFixture> {
     httpUrl: `${base}/mcp`,
     sseUrl: `${base}/sse`,
     readOnly,
+    calls,
     close: () =>
       new Promise<void>((resolve) => {
         http.closeAllConnections();

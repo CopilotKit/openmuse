@@ -362,15 +362,18 @@ export class McpService {
     return connected.server;
   }
   async call(owner: string, id: string, name: string, args: Record<string, unknown>) {
-    const server = await this.server(owner, id);
-    if (
-      !server.enabledTools.includes(name) ||
-      !server.tools.some((tool) => tool.name === name && tool.readOnly)
-    )
-      throw new AppError("This MCP tool is not enabled for automatic use", 403);
+    const allowed = (server: McpServer) =>
+      server.enabledTools.includes(name) &&
+      server.tools.some((tool) => tool.name === name && tool.readOnly);
+    const notEnabled = () => new AppError("This MCP tool is not enabled for automatic use", 403);
+    if (!allowed(await this.server(owner, id))) throw notEnabled();
     const { client, transport } = await this.client(owner, id);
     try {
       await client.connect(transport);
+      // The saved tool list can be stale. Re-list on this connection before dispatch: discover()
+      // saves the current list and drops grants for tools that are missing or no longer
+      // read-only, so a revoked grant stays revoked. A failed listing throws, and nothing runs.
+      if (!allowed(await this.discover(owner, id, client))) throw notEnabled();
       const result = await client.callTool({ name, arguments: args }, undefined, {
         timeout: 30000,
       });
