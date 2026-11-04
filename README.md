@@ -11,6 +11,7 @@ Built with CopilotKit React Native for iOS, Android, and web.
 
 [![CI](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Also a skin in OpenBot](https://img.shields.io/badge/also%20a%20skin%20in-OpenBot-6430AB)](https://github.com/CopilotKit/OpenBot)
 
 <a href="https://trendshift.io/repositories/254992?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-254992" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/254992/daily?language=TypeScript" alt="CopilotKit%2Fopenmuse | Trendshift" width="250" height="55"/></a>
 
@@ -18,7 +19,22 @@ Built with CopilotKit React Native for iOS, Android, and web.
 
 Clone this template and customize it however you want.
 
-**[Building on OpenMuse? Meet with the CopilotKit team →](https://www.copilotkit.ai/talk-to-an-engineer?ref=openmuse_hero)**
+<table>
+  <tr>
+    <th><sub>Maintained by CopilotKit</sub></th>
+    <th colspan="3"><sub>Community maintained</sub></th>
+  </tr>
+  <tr>
+    <td align="center"><a href="https://github.com/CopilotKit/OpenBot"><b>OpenBot</b></a><br><sub>The core</sub></td>
+    <td align="center"><a href="https://github.com/CopilotKit/OpenDots"><b>OpenDots</b></a><br><sub>Always-on coworkers</sub></td>
+    <td align="center"><b>OpenMuse</b><br><sub>You are here</sub></td>
+    <td align="center"><a href="https://github.com/CopilotKit/OpenDuet"><b>OpenDuet</b></a><br><sub>Proactive agent</sub></td>
+  </tr>
+</table>
+
+OpenMuse is a modified template on top of [OpenBot](https://github.com/CopilotKit/OpenBot), the officially maintained product. Use this as a starter for building your own project, or start directly with OpenBot desktop or [self-hosted](https://github.com/CopilotKit/OpenBot#deploy-it).
+
+**[Bringing OpenMuse to your company? Talk to us about OpenBot →](https://www.copilotkit.ai/talk-to-an-engineer?ref=openmuse_hero)**
 
 https://github.com/user-attachments/assets/8014d185-346c-4954-8ff0-26c582c5093a
 
@@ -27,6 +43,18 @@ https://github.com/user-attachments/assets/0cc87de0-c3c1-4f24-b7df-e7d04bb946fd
 </div>
 
 > **Alpha, for self-hosting and building on.** Open-ended reasoning, live Google accounts, and CopilotKit Rich Threads require their own configuration. See [what is verified](docs/VERIFICATION.md) and the [roadmap](ROADMAP.md).
+
+## OpenMuse and OpenBot
+
+OpenMuse also ships as a skin in [OpenBot](https://github.com/CopilotKit/OpenBot), CopilotKit's open-source agent platform, alongside [OpenDots](https://github.com/CopilotKit/OpenDots) and [OpenDuet](https://github.com/CopilotKit/OpenDuet). Pick it there and you get OpenMuse's look, with everything OpenBot does underneath.
+
+| If you want to | Start here |
+| --- | --- |
+| Try OpenMuse on your phone, or fork the app | This repo: [Quick start](#quick-start) |
+| Run it for your team, with sign-in, per-Bot permissions and an audit trail | [OpenBot](https://github.com/CopilotKit/OpenBot#quick-start), then **Settings → Skin → OpenMuse** |
+| Have us stand it up inside your company | [Talk to an engineer](https://www.copilotkit.ai/talk-to-an-engineer?ref=openmuse_readme_openbot) |
+
+OpenDots, OpenMuse and OpenDuet are community maintained, and issues and pull requests are welcome in each repo. OpenBot is the one the CopilotKit team maintains and ships fixes to.
 
 ## Demo
 
