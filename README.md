@@ -19,20 +19,10 @@ Built with CopilotKit React Native for iOS, Android, and web.
 
 Clone this template and customize it however you want.
 
-<table>
-  <tr>
-    <th><sub>Maintained by CopilotKit</sub></th>
-    <th colspan="3"><sub>Community maintained</sub></th>
-  </tr>
-  <tr>
-    <td align="center"><a href="https://github.com/CopilotKit/OpenBot"><b>OpenBot</b></a><br><sub>The core</sub></td>
-    <td align="center"><a href="https://github.com/CopilotKit/OpenDots"><b>OpenDots</b></a><br><sub>Always-on coworkers</sub></td>
-    <td align="center"><b>OpenMuse</b><br><sub>You are here</sub></td>
-    <td align="center"><a href="https://github.com/CopilotKit/OpenDuet"><b>OpenDuet</b></a><br><sub>Proactive agent</sub></td>
-  </tr>
-</table>
+**OpenMuse is now available as a UX skin in [OpenBot](https://github.com/CopilotKit/OpenBot)**, a more robust version with sign-in, per-Bot permissions and an audit trail, maintained by CopilotKit. This repo stays a community-maintained starter for building your own project.
 
-OpenMuse is a modified template on top of [OpenBot](https://github.com/CopilotKit/OpenBot), the officially maintained product. Use this as a starter for building your own project, or start directly with OpenBot desktop or [self-hosted](https://github.com/CopilotKit/OpenBot#deploy-it).
+<a href="https://github.com/CopilotKit/OpenBot"><img src="assets/openbot-openmuse-skin.png" alt="OpenBot running the OpenMuse skin" width="720"></a><br>
+<sub>OpenBot with the OpenMuse skin, picked under Settings → Skin</sub>
 
 **[Bringing OpenMuse to your company? Talk to us about OpenBot →](https://www.copilotkit.ai/talk-to-an-engineer?ref=openmuse_hero)**
 
