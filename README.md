@@ -248,7 +248,7 @@ flowchart TD
 
 ### OpenBot compatibility
 
-OpenMuse's native client and personal-agent workflows are independent of OpenBot. The disabled OpenBot adapter is pinned and contract-tested against upstream interfaces. Live user/session bridging, routine mapping, and computer backend wiring remain future work. OpenBot's Intelligence runtime is not a raw AG-UI endpoint. [Integration contract](docs/OPENBOT-INTEGRATION.md).
+This repo's native client and personal-agent workflows run without OpenBot. The OpenMuse skin in OpenBot is OpenBot's own app with OpenMuse's look, described in [OpenMuse and OpenBot](#openmuse-and-openbot). The disabled OpenBot adapter is pinned and contract-tested against upstream interfaces. Live user/session bridging, routine mapping, and computer backend wiring remain future work. OpenBot's Intelligence runtime is not a raw AG-UI endpoint. [Integration contract](docs/OPENBOT-INTEGRATION.md).
 
 ## Development
 
