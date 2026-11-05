@@ -11,6 +11,7 @@ Built with CopilotKit React Native for iOS, Android, and web.
 
 [![CI](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml/badge.svg)](https://github.com/CopilotKit/OpenMuse/actions/workflows/ci.yml)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Also a skin in OpenBot](https://img.shields.io/badge/also%20a%20skin%20in-OpenBot-6430AB)](https://github.com/CopilotKit/OpenBot)
 
 <a href="https://trendshift.io/repositories/254992?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-254992" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/254992/daily?language=TypeScript" alt="CopilotKit%2Fopenmuse | Trendshift" width="250" height="55"/></a>
 
@@ -18,7 +19,12 @@ Built with CopilotKit React Native for iOS, Android, and web.
 
 Clone this template and customize it however you want.
 
-**[Building on OpenMuse? Meet with the CopilotKit team →](https://www.copilotkit.ai/talk-to-an-engineer?ref=openmuse_hero)**
+**OpenMuse is now available as a UX skin in [OpenBot](https://github.com/CopilotKit/OpenBot)**, a more robust version with sign-in, per-Bot permissions and an audit trail, maintained by CopilotKit. This repo stays a community-maintained starter for building your own project.
+
+<a href="https://github.com/CopilotKit/OpenBot"><img src="assets/openbot-openmuse-skin.png" alt="OpenBot running the OpenMuse skin" width="720"></a><br>
+<sub>OpenBot with the OpenMuse skin, picked under Settings → Skin</sub>
+
+**[Bringing OpenMuse to your company? Talk to us about OpenBot →](https://www.copilotkit.ai/talk-to-an-engineer?ref=openmuse_hero)**
 
 https://github.com/user-attachments/assets/8014d185-346c-4954-8ff0-26c582c5093a
 
@@ -27,6 +33,18 @@ https://github.com/user-attachments/assets/0cc87de0-c3c1-4f24-b7df-e7d04bb946fd
 </div>
 
 > **Alpha, for self-hosting and building on.** Open-ended reasoning, live Google accounts, and CopilotKit Rich Threads require their own configuration. See [what is verified](docs/VERIFICATION.md) and the [roadmap](ROADMAP.md).
+
+## OpenMuse and OpenBot
+
+OpenMuse also ships as a skin in [OpenBot](https://github.com/CopilotKit/OpenBot), CopilotKit's open-source agent platform, alongside [OpenDots](https://github.com/CopilotKit/OpenDots) and [OpenDuet](https://github.com/CopilotKit/OpenDuet). Pick it there and you get OpenMuse's look, with everything OpenBot does underneath.
+
+| If you want to | Start here |
+| --- | --- |
+| Try OpenMuse on your phone, or fork the app | This repo: [Quick start](#quick-start) |
+| Run it for your team, with sign-in, per-Bot permissions and an audit trail | [OpenBot](https://github.com/CopilotKit/OpenBot#quick-start), then **Settings → Skin → OpenMuse** |
+| Have us stand it up inside your company | [Talk to an engineer](https://www.copilotkit.ai/talk-to-an-engineer?ref=openmuse_readme_openbot) |
+
+OpenDots, OpenMuse and OpenDuet are community maintained, and issues and pull requests are welcome in each repo. OpenBot is the one the CopilotKit team maintains and ships fixes to.
 
 ## Demo
 
@@ -230,7 +248,7 @@ flowchart TD
 
 ### OpenBot compatibility
 
-OpenMuse's native client and personal-agent workflows are independent of OpenBot. The disabled OpenBot adapter is pinned and contract-tested against upstream interfaces. Live user/session bridging, routine mapping, and computer backend wiring remain future work. OpenBot's Intelligence runtime is not a raw AG-UI endpoint. [Integration contract](docs/OPENBOT-INTEGRATION.md).
+This repo's native client and personal-agent workflows run without OpenBot. The OpenMuse skin in OpenBot is OpenBot's own app with OpenMuse's look, described in [OpenMuse and OpenBot](#openmuse-and-openbot). The disabled OpenBot adapter is pinned and contract-tested against upstream interfaces. Live user/session bridging, routine mapping, and computer backend wiring remain future work. OpenBot's Intelligence runtime is not a raw AG-UI endpoint. [Integration contract](docs/OPENBOT-INTEGRATION.md).
 
 ## Development
 
