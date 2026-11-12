@@ -12,7 +12,7 @@ function decodeKey(key: string): Buffer {
 export function encryptSecret(plaintext: string, key: string): string {
   const nonce = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", decodeKey(key), nonce);
-  cipher.setAAD(Buffer.from("openmuse:credential:v1"));
+  cipher.setAAD(Buffer.from("openfuse:credential:v1"));
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   return [
     "v1",
@@ -47,7 +47,7 @@ export function decryptSecret(encrypted: string, key: string): string {
   }
   try {
     const decipher = createDecipheriv("aes-256-gcm", keyBytes, nonce);
-    decipher.setAAD(Buffer.from("openmuse:credential:v1"));
+    decipher.setAAD(Buffer.from("openfuse:credential:v1"));
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
   } catch {

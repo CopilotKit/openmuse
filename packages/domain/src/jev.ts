@@ -77,7 +77,7 @@ export const jevActionSchema = z
     optionId: id,
   })
   .strict();
-export const jevActionPrefix = "[OpenMuse choice] ";
+export const jevActionPrefix = "[OpenFuse choice] ";
 export type JevSource = z.infer<typeof jevSourceSchema>;
 export type JevOption = z.infer<typeof jevOptionSchema>;
 export type JevPanel = z.infer<typeof jevPanelSchema>;

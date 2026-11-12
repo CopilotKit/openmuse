@@ -5,7 +5,7 @@ build/
 .env
 .env.local
 .env.*.local
-.openmuse/
+.openfuse/
 apps/mobile/ios/
 apps/mobile/android/
 .DS_Store

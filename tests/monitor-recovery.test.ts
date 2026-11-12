@@ -73,7 +73,7 @@ const makeDue = (taskId: string) =>
 const maintain = () => (server.agent as unknown as { maintain(): Promise<void> }).maintain();
 
 before(async () => {
-  directory = await mkdtemp(join(tmpdir(), "openmuse-monitor-recovery-"));
+  directory = await mkdtemp(join(tmpdir(), "openfuse-monitor-recovery-"));
   db = await createStore({ dataDir: join(directory, "db") });
   server = await createApp(db, {
     mode: "sample",

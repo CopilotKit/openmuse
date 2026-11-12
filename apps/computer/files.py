@@ -76,7 +76,7 @@ def main():
                     raise ValueError("Only regular files can be replaced")
             except FileNotFoundError:
                 pass
-            temporary = ".openmuse-" + uuid.uuid4().hex
+            temporary = ".openfuse-" + uuid.uuid4().hex
             fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
             try:
                 with os.fdopen(fd, "wb") as target:

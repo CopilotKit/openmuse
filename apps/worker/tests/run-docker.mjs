@@ -3,11 +3,11 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const name = `openmuse-worker-test-${randomUUID().slice(0, 8)}`;
+const name = `openfuse-worker-test-${randomUUID().slice(0, 8)}`;
 const env = { ...process.env, WORKER_TOKEN: randomBytes(32).toString("hex") };
 const run = (args, options = {}) =>
   execFileSync("docker", args, { env, stdio: "inherit", ...options });
-run(["build", "-t", "openmuse-browser-worker:test", root]);
+run(["build", "-t", "openfuse-browser-worker:test", root]);
 try {
   run([
     "run",
@@ -34,7 +34,7 @@ try {
     `type=bind,source=${root}tests,target=/app/tests,readonly`,
     "--env",
     "WORKER_TOKEN",
-    "openmuse-browser-worker:test",
+    "openfuse-browser-worker:test",
     "node",
     "--experimental-strip-types",
     "tests/fixture-worker.ts",

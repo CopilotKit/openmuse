@@ -8,7 +8,7 @@ import { createStore } from "../apps/server/src/db.ts";
 import { config, fixture, ok } from "./helpers/computer.ts";
 
 test("computer REST endpoints require session ownership and return persisted receipts", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "openmuse-computer-api-"));
+  const directory = await mkdtemp(join(tmpdir(), "openfuse-computer-api-"));
   const db = await createStore();
   const f = fixture({ command: async () => ok("actual output") });
   const server = await createApp(db, { ...config, dataDir: directory }, { docker: f.runner });

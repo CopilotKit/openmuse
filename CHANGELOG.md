@@ -2,7 +2,7 @@
 
 ## 0.1.0-alpha — 2026-09-15
 
-Initial public OpenMuse alpha.
+Initial public OpenFuse alpha.
 
 - Native/web interface using CopilotKit React Native and AG-UI.
 - Persistent browser computer, inline PDFs, structured artifacts, and optional Rich Threads integration.
