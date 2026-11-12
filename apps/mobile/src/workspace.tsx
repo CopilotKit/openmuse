@@ -10,7 +10,7 @@ import type {
   Section,
   Workspace,
 } from "../../../packages/domain/src";
-import type { MuseApi } from "./api";
+import type { FuseApi } from "./api";
 export type Detail =
   | { type: "mail"; mail: Mail }
   | { type: "email"; draft?: Partial<EmailDraft> & { id?: string } }
@@ -25,7 +25,7 @@ export type Detail =
   | { type: "menu" };
 export interface WorkspaceContextValue {
   workspace: Workspace;
-  api: MuseApi;
+  api: FuseApi;
   section: Section;
   navigate: (section: Section) => void;
   refresh: () => Promise<void>;

@@ -14,7 +14,7 @@ const browseTool = {
   function: { name: "browse_web", parameters: {} },
 };
 const request = (messages: ChatMessage[]): ChatCompletionRequest => ({
-  model: "openmuse-browser-demo",
+  model: "openfuse-browser-demo",
   messages,
   tools: [browseTool],
 });
@@ -129,7 +129,7 @@ test("both non-exhibit clarification choices continue from trusted school mail",
     { role: "user", content: "Help me get ready for the aquarium trip" },
     {
       role: "tool",
-      tool_call_id: "call_openmuse_demo_mail_read_prior",
+      tool_call_id: "call_openfuse_demo_mail_read_prior",
       content: JSON.stringify({
         messages: [
           {
@@ -176,7 +176,7 @@ test("school-trip demo stops after failed mail or choice result", () => {
       { role: "user", content: "Help me get ready for the aquarium trip" },
       {
         role: "tool",
-        tool_call_id: "call_openmuse_demo_mail_read_failure",
+        tool_call_id: "call_openfuse_demo_mail_read_failure",
         content: JSON.stringify({ error: "No mail" }),
       },
     ]),
@@ -188,7 +188,7 @@ test("school-trip demo stops after failed mail or choice result", () => {
       { role: "user", content: "Help me get ready for the aquarium trip" },
       {
         role: "tool",
-        tool_call_id: "call_openmuse_demo_jev_failure",
+        tool_call_id: "call_openfuse_demo_jev_failure",
         content: JSON.stringify({ panel: null, error: "Jev unavailable" }),
       },
     ]),
@@ -312,7 +312,7 @@ test("hands-on preference refines the same candidate set and selection is acknow
     { role: "user", content: "Explore exhibits" },
     {
       role: "tool",
-      tool_call_id: "call_openmuse_demo_jev_previous",
+      tool_call_id: "call_openfuse_demo_jev_previous",
       content: JSON.stringify({ panel: { id: "comparison-1", type: "comparison" } }),
     },
     { role: "user", content: "Something hands-on" },
@@ -338,7 +338,7 @@ test("aquarium research distinguishes exhibit entries from navigation and only q
       { role: "user", content: "Research Monterey Bay Aquarium" },
       {
         role: "tool",
-        tool_call_id: "call_openmuse_demo_browse_aquarium",
+        tool_call_id: "call_openfuse_demo_browse_aquarium",
         content: JSON.stringify({
           sessionId: "aquarium",
           url: "https://www.montereybayaquarium.org/visit/exhibits",
@@ -403,7 +403,7 @@ test("the email demo handles no matches and disconnected mail without inventing 
         { role: "user", content: "Check my emails for the school trip" },
         {
           role: "tool",
-          tool_call_id: "call_openmuse_demo_mail_search_failure",
+          tool_call_id: "call_openfuse_demo_mail_search_failure",
           content: JSON.stringify(result),
         },
       ]),
@@ -449,7 +449,7 @@ test("demo reports missing or failed browser evidence without inventing a summar
       { role: "user", content: "Summarize copilotkit.ai" },
       {
         role: "tool",
-        tool_call_id: "call_openmuse_demo_browse_failure",
+        tool_call_id: "call_openfuse_demo_browse_failure",
         content: '{"error":"Worker unavailable"}',
       },
     ]),

@@ -44,10 +44,10 @@ test("actions round trip and malformed prefixed actions reject", () => {
   const action = { panelId: "p", threadId: "t", candidateSetVersion: 1, optionId: "a" };
   assert.deepEqual(parseJevAction(encodeJevAction(action)), action);
   assert.equal(parseJevAction("ordinary message"), null);
-  assert.throws(() => parseJevAction("[OpenMuse choice] bad-json"));
+  assert.throws(() => parseJevAction("[OpenFuse choice] bad-json"));
   assert.throws(() =>
     parseJevAction(
-      '[OpenMuse choice] {"panelId":"p","threadId":"t","candidateSetVersion":1,"optionId":"a","label":"untrusted"}',
+      '[OpenFuse choice] {"panelId":"p","threadId":"t","candidateSetVersion":1,"optionId":"a","label":"untrusted"}',
     ),
   );
 });

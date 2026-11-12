@@ -14,7 +14,7 @@ test("browser PDF downloads accept the same bounded header prefix as PDF imports
     Buffer.from([0xef, 0xbb, 0xbf, 0x0a]),
     Buffer.alloc(1019, 32),
   ]) {
-    const directory = await mkdtemp(join(tmpdir(), "openmuse-pdf-prefix-"));
+    const directory = await mkdtemp(join(tmpdir(), "openfuse-pdf-prefix-"));
     t.after(() => rm(directory, { recursive: true, force: true }));
     const bytes = Buffer.concat([prefix, pdf]);
     assert.equal((await inspectPdf(bytes)).pageCount, 2);
@@ -54,7 +54,7 @@ test("browser PDF sniffing rejects late markers and non-ASCII lookalikes", async
     Buffer.from([0xa5, 0xd0, 0xc4, 0xc6, 0xad]),
     Buffer.from("not a PDF"),
   ]) {
-    const directory = await mkdtemp(join(tmpdir(), "openmuse-pdf-invalid-prefix-"));
+    const directory = await mkdtemp(join(tmpdir(), "openfuse-pdf-invalid-prefix-"));
     t.after(() => rm(directory, { recursive: true, force: true }));
     await capturePdfDownload({
       directory,

@@ -6,7 +6,7 @@
     "moduleSuffixes": [".native", ""],
     "lib": ["ES2022", "DOM"],
     "paths": {
-      "@openmuse/domain": ["../../packages/domain/src/index.ts"]
+      "@openfuse/domain": ["../../packages/domain/src/index.ts"]
     },
     "allowImportingTsExtensions": true
   },

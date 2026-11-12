@@ -5,7 +5,7 @@ body:
   - type: textarea
     id: outcome
     attributes:
-      label: What outcome should OpenMuse handle?
+      label: What outcome should OpenFuse handle?
     validations:
       required: true
   - type: textarea

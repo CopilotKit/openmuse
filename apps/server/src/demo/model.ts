@@ -9,7 +9,7 @@ import {
 import { z } from "zod";
 import { aquariumFixture, schoolTripFixture } from "./jev-fixture.ts";
 
-export const demoModel = "openai/openmuse-browser-demo";
+export const demoModel = "openai/openfuse-browser-demo";
 
 const pageSchema = z.object({
   sessionId: z.string().min(1),
@@ -140,7 +140,7 @@ function schoolMessageFromHistory(messages: ChatMessage[]) {
 }
 
 function demoMailResponse(request: ChatCompletionRequest, turn: ChatMessage[]): FixtureResponse {
-  const read = turnResult(turn, "read_mail_thread", "call_openmuse_demo_mail_read_");
+  const read = turnResult(turn, "read_mail_thread", "call_openfuse_demo_mail_read_");
   if (read) {
     const parsed = z
       .object({
@@ -163,7 +163,7 @@ function demoMailResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
       content: `From ${message.sender}:\n“${message.subject}”\n\n${paragraphs.join("\n\n")}\n\nI can look up the aquarium next.`,
     };
   }
-  const search = turnResult(turn, "search_mail", "call_openmuse_demo_mail_search_");
+  const search = turnResult(turn, "search_mail", "call_openfuse_demo_mail_search_");
   if (search) {
     const parsed = z
       .object({ matches: z.array(z.object({ threadId: z.string(), subject: z.string() })) })
@@ -180,7 +180,7 @@ function demoMailResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
       content: "I found the school’s reminder. I’ll read the details.",
       toolCalls: [
         {
-          id: `call_openmuse_demo_mail_read_${randomUUID()}`,
+          id: `call_openfuse_demo_mail_read_${randomUUID()}`,
           name: "read_mail_thread",
           arguments: JSON.stringify({ threadId: match.threadId }),
         },
@@ -193,7 +193,7 @@ function demoMailResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
     content: "I’ll check your inbox for the school trip.",
     toolCalls: [
       {
-        id: `call_openmuse_demo_mail_search_${randomUUID()}`,
+        id: `call_openfuse_demo_mail_search_${randomUUID()}`,
         name: "search_mail",
         arguments: JSON.stringify({ query: "aquarium" }),
       },
@@ -202,7 +202,7 @@ function demoMailResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
 }
 
 function demoTripResponse(request: ChatCompletionRequest, turn: ChatMessage[]): FixtureResponse {
-  const choice = turnResult(turn, "present_choices", "call_openmuse_demo_jev_");
+  const choice = turnResult(turn, "present_choices", "call_openfuse_demo_jev_");
   if (choice) {
     const parsed = z
       .object({ panel: z.object({ id: z.string() }).nullable(), error: z.string().optional() })
@@ -214,7 +214,7 @@ function demoTripResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
             "I couldn’t prepare the trip choices. Please try again when choices are available.",
         };
   }
-  const read = turnResult(turn, "read_mail_thread", "call_openmuse_demo_mail_read_");
+  const read = turnResult(turn, "read_mail_thread", "call_openfuse_demo_mail_read_");
   if (read) {
     const parsed = z
       .object({
@@ -224,7 +224,7 @@ function demoTripResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
     const message = parsed.success ? parsed.data.messages.findLast(isSchoolTripMessage) : undefined;
     if (!message)
       return { content: "I couldn’t verify the school-trip email. Check Mail and try again." };
-    const search = turnResult(turn, "search_mail", "call_openmuse_demo_mail_search_");
+    const search = turnResult(turn, "search_mail", "call_openfuse_demo_mail_search_");
     const searched = z
       .object({
         matches: z.array(
@@ -251,7 +251,7 @@ function demoTripResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
         "The school reminder mentions the permission slip and trip details. I’ll lay out the next steps.",
       toolCalls: [
         {
-          id: `call_openmuse_demo_jev_${randomUUID()}`,
+          id: `call_openfuse_demo_jev_${randomUUID()}`,
           name: "present_choices",
           arguments: JSON.stringify({
             message: "Help me get ready for the aquarium trip",
@@ -265,7 +265,7 @@ function demoTripResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
       ],
     };
   }
-  const search = turnResult(turn, "search_mail", "call_openmuse_demo_mail_search_");
+  const search = turnResult(turn, "search_mail", "call_openfuse_demo_mail_search_");
   if (search) {
     const parsed = z
       .object({
@@ -287,7 +287,7 @@ function demoTripResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
       content: "I found the school reminder. I’ll read it before suggesting next steps.",
       toolCalls: [
         {
-          id: `call_openmuse_demo_mail_read_${randomUUID()}`,
+          id: `call_openfuse_demo_mail_read_${randomUUID()}`,
           name: "read_mail_thread",
           arguments: JSON.stringify({ threadId: match.threadId }),
         },
@@ -300,7 +300,7 @@ function demoTripResponse(request: ChatCompletionRequest, turn: ChatMessage[]): 
     content: "I’ll check the sample school email first.",
     toolCalls: [
       {
-        id: `call_openmuse_demo_mail_search_${randomUUID()}`,
+        id: `call_openfuse_demo_mail_search_${randomUUID()}`,
         name: "search_mail",
         arguments: JSON.stringify({ query: schoolTripFixture.searchQuery }),
       },
@@ -323,7 +323,7 @@ function demoSchoolChoiceResponse(
     return {
       content: `From ${mail.sender}, “${mail.subject}”:\n\n${mail.body.replace(/\n\nThis message is included with your local workspace\.?/i, "").slice(0, 1200)}`,
     };
-  const task = turnResult(turn, "delegate_task", "call_openmuse_demo_document_");
+  const task = turnResult(turn, "delegate_task", "call_openfuse_demo_document_");
   if (task) {
     const parsed = z.object({ id: z.string().min(1) }).safeParse(parseResult(task));
     return parsed.success
@@ -346,7 +346,7 @@ function demoSchoolChoiceResponse(
     content: "I’ll prepare the school’s permission slip for your review.",
     toolCalls: [
       {
-        id: `call_openmuse_demo_document_${randomUUID()}`,
+        id: `call_openfuse_demo_document_${randomUUID()}`,
         name: "delegate_task",
         arguments: JSON.stringify({
           kind: "document",
@@ -387,7 +387,7 @@ function pageExcerpt(text: string, anchor: RegExp): string {
 }
 
 function demoExhibitResponse(request: ChatCompletionRequest, turn: ChatMessage[]): FixtureResponse {
-  const choice = turnResult(turn, "present_choices", "call_openmuse_demo_jev_");
+  const choice = turnResult(turn, "present_choices", "call_openfuse_demo_jev_");
   if (choice) {
     const parsed = z
       .object({ panel: z.object({ id: z.string() }).nullable(), error: z.string().optional() })
@@ -401,7 +401,7 @@ function demoExhibitResponse(request: ChatCompletionRequest, turn: ChatMessage[]
   const browseResults = turn.filter(
     (message) =>
       message.role === "tool" &&
-      message.tool_call_id?.startsWith("call_openmuse_demo_exhibit_browse_"),
+      message.tool_call_id?.startsWith("call_openfuse_demo_exhibit_browse_"),
   );
   const observed = new Set<string>();
   const observedPages = new Map<string, string>();
@@ -443,7 +443,7 @@ function demoExhibitResponse(request: ChatCompletionRequest, turn: ChatMessage[]
       content: `I’ll read the aquarium’s ${next.label} page.`,
       toolCalls: [
         {
-          id: `call_openmuse_demo_exhibit_browse_${randomUUID()}`,
+          id: `call_openfuse_demo_exhibit_browse_${randomUUID()}`,
           name: "browse_web",
           arguments: JSON.stringify({ url: next.sources[0].url }),
         },
@@ -476,7 +476,7 @@ function demoExhibitResponse(request: ChatCompletionRequest, turn: ChatMessage[]
     content: "The three aquarium pages are open. I’ll compare their verified exhibit details.",
     toolCalls: [
       {
-        id: `call_openmuse_demo_jev_${randomUUID()}`,
+        id: `call_openfuse_demo_jev_${randomUUID()}`,
         name: "present_choices",
         arguments: JSON.stringify({
           message: "Explore exhibits for the aquarium school trip",
@@ -495,7 +495,7 @@ function demoRefinementResponse(
   request: ChatCompletionRequest,
   turn: ChatMessage[],
 ): FixtureResponse {
-  const choice = turnResult(turn, "present_choices", "call_openmuse_demo_jev_");
+  const choice = turnResult(turn, "present_choices", "call_openfuse_demo_jev_");
   if (choice) {
     const parsed = z
       .object({
@@ -525,7 +525,7 @@ function demoRefinementResponse(
     content: "I’ll rerank the researched exhibits for a hands-on visit.",
     toolCalls: [
       {
-        id: `call_openmuse_demo_jev_${randomUUID()}`,
+        id: `call_openfuse_demo_jev_${randomUUID()}`,
         name: "present_choices",
         arguments: JSON.stringify({
           message: "Something hands-on",
@@ -585,7 +585,7 @@ export function demoResponse(request: ChatCompletionRequest): FixtureResponse {
       message.role === "tool" &&
       message.tool_call_id &&
       (calls.has(message.tool_call_id) ||
-        message.tool_call_id.startsWith("call_openmuse_demo_browse_")),
+        message.tool_call_id.startsWith("call_openfuse_demo_browse_")),
   );
   if (result) return summarizePage(result);
   if (!request.tools?.some((tool) => tool.function.name === "browse_web"))
@@ -598,7 +598,7 @@ export function demoResponse(request: ChatCompletionRequest): FixtureResponse {
         : "I’ll open CopilotKit and read the page.",
     toolCalls: [
       {
-        id: `call_openmuse_demo_browse_${randomUUID()}`,
+        id: `call_openfuse_demo_browse_${randomUUID()}`,
         name: "browse_web",
         arguments: JSON.stringify({ url }),
       },
@@ -621,7 +621,7 @@ export function createDemoModel(
     strict: true,
     logLevel: "silent",
     journalMaxEntries: 100,
-  }).on({ model: "openmuse-browser-demo" }, demoResponse, {
+  }).on({ model: "openfuse-browser-demo" }, demoResponse, {
     streamingProfile: { ttft: firstByteDelay },
   });
 }

@@ -34,7 +34,7 @@ console.log(JSON.stringify(requests));
 `;
 
 async function captureRuntime(envOverrides: Record<string, string> = {}) {
-  const directory = await mkdtemp(join(tmpdir(), "openmuse-telemetry-test-"));
+  const directory = await mkdtemp(join(tmpdir(), "openfuse-telemetry-test-"));
   const env = { ...process.env };
   for (const key of [
     "DO_NOT_TRACK",
@@ -60,14 +60,14 @@ async function captureRuntime(envOverrides: Record<string, string> = {}) {
   }
 }
 
-test("runtime telemetry carries OpenMuse attribution and the CLI-issued project identity", async () => {
+test("runtime telemetry carries OpenFuse attribution and the CLI-issued project identity", async () => {
   const events = await captureRuntime();
   assert.equal(events.length, 1);
   const event = events[0];
   assert.equal(event.url, "https://telemetry.copilotkit.ai/ingest");
   assert.equal(event.headers["X-CopilotKit-Telemetry-Id"], "test-project-identity");
   assert.equal(event.body.event, "oss.runtime.instance_created");
-  assert.equal(event.body.global_properties.accessibility_title, "OpenMuse");
+  assert.equal(event.body.global_properties.accessibility_title, "OpenFuse");
   assert.equal(event.body.global_properties.sampleRate, 1);
   assert.equal(JSON.stringify(event).includes("test-project-key-never-sent"), false);
 });

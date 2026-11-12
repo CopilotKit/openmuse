@@ -42,7 +42,7 @@ const baseTask = (): AgentTask => ({
 });
 
 async function setup() {
-  const root = await mkdtemp(join(tmpdir(), "openmuse-prepare-"));
+  const root = await mkdtemp(join(tmpdir(), "openfuse-prepare-"));
   const db = await createStore({ dataDir: join(root, "pg") });
   const actions = new ActionService(db, {
     execute: async () => "sent",

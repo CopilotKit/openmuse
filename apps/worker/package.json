@@ -1,5 +1,5 @@
 {
-  "name": "@openmuse/browser-worker",
+  "name": "@openfuse/browser-worker",
   "version": "0.1.0",
   "private": true,
   "type": "module",

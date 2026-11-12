@@ -13,7 +13,7 @@ const sampleConfig: Config = {
   port: 8787,
   host: "127.0.0.1",
   publicUrl: "http://localhost:8787",
-  dataDir: ".openmuse",
+  dataDir: ".openfuse",
   agentBackend: "sample",
   googleRedirectUri: "http://localhost:8787/api/google/callback",
   allowedOrigins: ["http://localhost:8081"],
@@ -29,7 +29,7 @@ function liveConfig(intelligenceApiKey?: string): Config {
 }
 
 const missingKeyMessage =
-  "OpenMuse requires CPK_INTELLIGENCE_API_KEY. " +
+  "OpenFuse requires CPK_INTELLIGENCE_API_KEY. " +
   "Run `npx copilotkit@latest login` and `npx copilotkit@latest project select`, " +
   "then set the generated server-only key. " +
   "See https://docs.copilotkit.ai/intelligence/connect-your-runtime";
@@ -105,7 +105,7 @@ test("browser worker URL keeps an existing scheme and adds http to host:port", (
   assert.equal(browserWorkerUrl("  "), undefined);
   assert.equal(browserWorkerUrl("http://127.0.0.1:8790"), "http://127.0.0.1:8790");
   assert.equal(browserWorkerUrl("https://browser.internal:8790"), "https://browser.internal:8790");
-  assert.equal(browserWorkerUrl("openmuse-browser-h4fx:8790"), "http://openmuse-browser-h4fx:8790");
+  assert.equal(browserWorkerUrl("openfuse-browser-h4fx:8790"), "http://openfuse-browser-h4fx:8790");
 });
 
 test("environment variables that override a different .env value are reported by name", () => {

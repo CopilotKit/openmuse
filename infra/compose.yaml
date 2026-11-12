@@ -1,4 +1,4 @@
-name: openmuse
+name: openfuse
 services:
   browser-worker:
     build:
