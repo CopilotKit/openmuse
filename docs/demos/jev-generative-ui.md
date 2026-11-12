@@ -1,7 +1,5 @@
 # Jev generative UI: aquarium school-trip demo
 
-![Live Jev reranks the aquarium exhibits in OpenFuse](../../assets/demos/2026-09-23/jev-live-web.png)
-
 The live recording calls TypeSafe Jev for each clarification and comparison decision, visibly labeled `Live Jev · model decisions` in the cards. AI Mock scripts the agent's conversation steps, while OpenFuse runs its normal mailbox, real browser worker, and `present_choices` tool. The mailbox is a fictional local Lincoln Middle School sample. The live comparison details are excerpts of the public aquarium pages read during that turn; Jev decides whether to show the agent's prepared cards and ranks those candidates. The revised hands-on preference moves Rocky Shore to first place in this recorded run.
 
 For a repeatable, TypeSafe-key-free walkthrough, run the scripted sample. Its cards are labeled `Sample · scripted decisions`; it does not make a live Jev call.

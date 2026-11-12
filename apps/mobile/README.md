@@ -4,8 +4,6 @@ A shared React Native workspace for iOS, Android, and the web preview. The clien
 
 ## Demos
 
-![OpenFuse on iPhone](../../assets/demos/2026-09-16/mobile.png)
-
 [Recording setup](../../docs/DEMO.md)
 
 Meet OpenFuse's capybara in two different journeys: Hacker News and CopilotKit on iPhone; reading a school-trip email and researching aquarium exhibits on desktop. Results appear inline in chat, with **Take control** opening the same browser session. Send and Stop share the input pill's primary control.
