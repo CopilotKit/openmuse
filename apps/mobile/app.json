@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "OpenMuse",
+    "name": "OpenFuse",
     "slug": "openmuse",
     "scheme": "openmuse",
     "version": "0.1.0",
@@ -9,7 +9,7 @@
     "newArchEnabled": true,
     "ios": { "supportsTablet": true, "bundleIdentifier": "app.openmuse.mobile" },
     "android": { "package": "app.openmuse.mobile" },
-    "web": { "bundler": "metro", "name": "OpenMuse — a little room for everything" },
+    "web": { "bundler": "metro", "name": "OpenFuse — a little room for everything" },
     "plugins": [
       "expo-document-picker",
       "@config-plugins/react-native-blob-util",

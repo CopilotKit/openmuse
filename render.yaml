@@ -15,7 +15,7 @@ services:
       mountPath: /var/data
       sizeGB: 1
     envVars:
-      # HOST must be 0.0.0.0 on Render, and OpenMuse only allows that in live mode.
+      # HOST must be 0.0.0.0 on Render, and OpenFuse only allows that in live mode.
       - key: HOST
         value: 0.0.0.0
       - key: WORKSPACE_MODE

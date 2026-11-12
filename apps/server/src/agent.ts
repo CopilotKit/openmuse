@@ -62,7 +62,7 @@ export function makeRuntime(
     telemetryProperties: { accessibility_title: "OpenMuse" },
     identifyUser: async (request) => ({
       id: await auth.owner(request.headers.get("authorization") ?? undefined),
-      name: "OpenMuse user",
+      name: "OpenFuse user",
     }),
     generateThreadNames: false,
   });

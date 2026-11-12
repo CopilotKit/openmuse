@@ -98,7 +98,7 @@ export type OpenBotProbe =
 
 /**
  * Future integration seam; constructing it does not connect to OpenBot.
- * The caller must enforce OpenMuse proposals before dispatching external writes.
+ * The caller must enforce OpenFuse proposals before dispatching external writes.
  * OpenBot's own policy/audit gateway remains authoritative for every request.
  */
 export class OpenBotAdapter {

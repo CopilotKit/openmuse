@@ -1,6 +1,6 @@
 # The agent computer
 
-OpenMuse combines a persistent browser with an optional Linux workspace for commands and files. The app and CopilotKit tools use the same authenticated computer service, so you can inspect what the agent ran and continue working with its results.
+OpenFuse combines a persistent browser with an optional Linux workspace for commands and files. The app and CopilotKit tools use the same authenticated computer service, so you can inspect what the agent ran and continue working with its results.
 
 ## Start the Linux workspace
 
@@ -23,7 +23,7 @@ If Docker is unavailable, the app reports the connection error. There is no fall
 
 ### Optional isolated runtime on macOS
 
-Colima is an open-source way to run Docker in a Linux VM. A separate profile keeps OpenMuse independent of other Docker workloads:
+Colima is an open-source way to run Docker in a Linux VM. A separate profile keeps OpenFuse independent of other Docker workloads:
 
 ```sh
 brew install colima
@@ -89,8 +89,8 @@ When the agent uses `use_desktop`, the chat shows a **Desktop** card for each st
 ## Work with files
 
 - **Computer → Files** lists the persistent `/workspace` directory. Create folders, add text files, edit them, and save.
-- **Copy a document here** copies an owned PDF from OpenMuse into the current folder. A matching filename is replaced.
-- Open a PDF in the workspace to save a copy to OpenMuse Documents and view it in the native/web reader.
+- **Copy a document here** copies an owned PDF from OpenFuse into the current folder. A matching filename is replaced.
+- Open a PDF in the workspace to save a copy to OpenFuse Documents and view it in the native/web reader.
 - Browser downloads first enter Documents through **Import PDF downloads**, then can be copied into the Linux workspace.
 - Stopping the computer ends its running commands and keeps the named workspace volume. Starting it again restores those files.
 

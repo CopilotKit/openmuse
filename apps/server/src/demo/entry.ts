@@ -101,7 +101,7 @@ const api = spawn(
   },
 );
 console.log(
-  `OpenMuse recording demo: AI Mock scripts the agent; ${jevMode === "live" ? "Jev decisions call TypeSafe" : "Jev decisions are scripted"}; browser visits use the real worker.`,
+  `OpenFuse recording demo: AI Mock scripts the agent; ${jevMode === "live" ? "Jev decisions call TypeSafe" : "Jev decisions are scripted"}; browser visits use the real worker.`,
 );
 console.log(`Demo API: ${publicUrl}; browser worker: ${workerUrl}`);
 console.log(`Isolated demo data: ${dataDir}`);

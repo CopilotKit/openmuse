@@ -8,7 +8,7 @@ const worker = await createWorkerServer({
   idleTimeoutMs: 30 * 60_000,
 });
 worker.server.listen(8790, process.env.WORKER_HOST ?? "127.0.0.1", () => {
-  console.log("OpenMuse browser worker listening on port 8790");
+  console.log("OpenFuse browser worker listening on port 8790");
 });
 let stopping = false;
 async function stop() {

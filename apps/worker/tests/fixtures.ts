@@ -6,7 +6,7 @@ import { startEgressProxy } from "../src/proxy.ts";
 
 // Only a public URL identity: validated fixture traffic is sent to loopback.
 export const fixtureOrigin = "http://1.1.1.1";
-export const fixtureTitle = "OpenMuse fixture";
+export const fixtureTitle = "OpenFuse fixture";
 export const fixtureText = "Stable page text.";
 export const fixturePdf = await readFile(new URL("./fixtures/document.pdf", import.meta.url));
 

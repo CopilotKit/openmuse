@@ -191,7 +191,7 @@ export async function createSamplePdf(): Promise<Uint8Array> {
   return pdfOperation(async () => {
     const doc = await PDFDocument.create();
     doc.setTitle("Community visit - permission form");
-    doc.setAuthor("OpenMuse");
+    doc.setAuthor("OpenFuse");
     const regular = await doc.embedFont(StandardFonts.Helvetica);
     const bold = await doc.embedFont(StandardFonts.HelveticaBold);
     const ink = rgb(0.12, 0.19, 0.2);

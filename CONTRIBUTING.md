@@ -1,6 +1,6 @@
-# Contributing to OpenMuse
+# Contributing to OpenFuse
 
-OpenMuse is an MIT-licensed alpha. Contributions should make delegated work reliable and visible, with honest connector status and useful native interactions.
+OpenFuse is an MIT-licensed alpha. Contributions should make delegated work reliable and visible, with honest connector status and useful native interactions.
 
 ## Local development
 

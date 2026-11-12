@@ -1,6 +1,6 @@
 # CopilotKit Rich Threads and the agent computer
 
-OpenMuse uses `@copilotkit/react-native/headless` for its custom native and web interface. Chat messages, tool cards and task-linked documents render through CopilotKit's AG-UI agent and tool hooks.
+OpenFuse uses `@copilotkit/react-native/headless` for its custom native and web interface. Chat messages, tool cards and task-linked documents render through CopilotKit's AG-UI agent and tool hooks.
 
 ## Rich Threads
 
@@ -17,7 +17,7 @@ Keep the generated key in the API server environment and restart the API:
 CPK_INTELLIGENCE_API_KEY=your-project-key
 ```
 
-Never put the key in an `EXPO_PUBLIC_`, `NEXT_PUBLIC_`, or `VITE_` variable. The server constructs `CopilotKitIntelligence`, and `identifyUser` resolves the owner from the verified OpenMuse session. The existing deployment is a single-user workspace; its access key must not be shared as a multi-user login. See [CopilotKit's runtime setup](https://docs.copilotkit.ai/intelligence/connect-your-runtime) for project-key configuration.
+Never put the key in an `EXPO_PUBLIC_`, `NEXT_PUBLIC_`, or `VITE_` variable. The server constructs `CopilotKitIntelligence`, and `identifyUser` resolves the owner from the verified OpenFuse session. The existing deployment is a single-user workspace; its access key must not be shared as a multi-user login. See [CopilotKit's runtime setup](https://docs.copilotkit.ai/intelligence/connect-your-runtime) for project-key configuration.
 
 With this configuration, the conversation menu uses CopilotKit's native `useThreads` hook to list, rename, archive, restore and paginate conversations. The server saves an owner-bound main thread ID and provisions it through Intelligence before the first message, so reloading during the first run retains the same conversation. Side chats create a fresh client thread ID and persist on their first run. Selecting a saved conversation mounts a private `useAgent({ agentId, runtimeAgentId, threadId })` instance and calls `copilotkit.connectAgent` to replay the thread. Visited chats remain mounted during navigation, preserving their drafts and queues. Stop explicitly requests `copilotkit.stopAgent`.
 
