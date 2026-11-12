@@ -4,7 +4,7 @@ Updated September 16, 2026. Both recordings feature OpenFuse's original capybara
 
 ## Mobile
 
-[Animated hero](../assets/demos/2026-09-16/mobile.gif) · [Cover image](../assets/demos/2026-09-16/mobile.png).
+[Cover image](../assets/demos/2026-09-16/mobile.png).
 
 **OpenFuse 🪁 — ask it to browse, follow along in chat, and take control when you need to.** The native iPhone recording is framed in a 1920 × 1080 (16:9) canvas, with a cream, blue, and lilac background and captions for sound-off viewing.
 
@@ -32,7 +32,7 @@ Captures are trimmed and paced for readability, including brief slowdowns of the
 
 ## Desktop web
 
-[Animated preview](../assets/demos/2026-09-16/web.gif) · [Cover image](../assets/demos/2026-09-16/web.png).
+[Cover image](../assets/demos/2026-09-16/web.png).
 
 A separate recording of the actual desktop web app, placed below the mobile demo in the README. Ask **“Check my emails for the school trip”**, open the school's reminder, then ask **“Research Monterey Bay Aquarium and suggest three exhibits”**. The 1440 × 810 browser capture sits inside a 1920 × 1080 canvas with the same cream, blue, and lilac background and OpenFuse 🪁 branding.
 
