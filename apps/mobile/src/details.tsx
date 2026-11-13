@@ -255,6 +255,7 @@ function EmailEditor({ draft }: { draft?: Partial<EmailDraft> & { id?: string } 
         const action = await api.request<ActionProposal>("/api/actions", {
           kind: "email.send",
           data: parsed.data,
+          draftId: draft?.id,
         });
         await refresh();
         open({ type: "review", action });
@@ -571,7 +572,10 @@ function ReviewDetail({ initial }: { initial: ActionProposal }) {
     try {
       let next: Detail;
       if (action.kind === "email.send")
-        next = { type: "email", draft: emailDraftSchema.parse(action.data) };
+        next = {
+          type: "email",
+          draft: { ...emailDraftSchema.parse(action.data), id: action.draftId },
+        };
       else {
         const draft = eventDraftSchema.parse(action.data);
         if (action.kind === "calendar.update") {
@@ -581,11 +585,16 @@ function ReviewDetail({ initial }: { initial: ActionProposal }) {
           next = { type: "event", event: { ...draft, id: eventId } };
         } else next = { type: "event", draft };
       }
-      await api.request(`/api/actions/${action.id}/decide`, {
+      const result = await api.request<ActionProposal>(`/api/actions/${action.id}/decide`, {
         decision: "deny",
         hash: action.hash,
       });
       await refresh();
+      // A review already replaced or sent elsewhere shows its outcome instead of an editor.
+      if (result.status !== "denied") {
+        setLocal(result);
+        return;
+      }
       open(next);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

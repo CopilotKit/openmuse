@@ -2,11 +2,13 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   type ActionProposal,
   type CalendarEvent,
+  emailDraftSchema,
   type ProposalInput,
   proposalSchema,
 } from "../../../packages/domain/src/index.ts";
 import type { Store } from "./db.ts";
 import { AppError } from "./errors.ts";
+import { backgroundFailure } from "./log.ts";
 
 interface Options {
   execute: (
@@ -27,6 +29,12 @@ interface Options {
   connected: (owner: string) => Promise<boolean>;
   connection?: (owner: string) => Promise<{ id: string; account: string } | null>;
   now?: () => number;
+}
+const draftChanged =
+  "This draft changed while its review was being prepared. Open it again to review the latest version.";
+const draftFields = Object.keys(emailDraftSchema.shape);
+function sameDraft(a: Record<string, unknown>, b: Record<string, unknown>) {
+  return draftFields.every((key) => JSON.stringify(a[key]) === JSON.stringify(b[key]));
 }
 export class ActionService {
   private readonly now: () => number;
@@ -51,6 +59,10 @@ export class ActionService {
       if (existing) return existing;
     }
     const parsed = proposalSchema.parse(raw);
+    const draft =
+      parsed.kind === "email.send" && parsed.draftId
+        ? { id: parsed.draftId, revision: await this.draftRevision(owner, parsed.draftId) }
+        : undefined;
     const connection = await this.options.connection?.(owner);
     if (this.options.connection && !connection)
       throw new AppError("Connect Google before preparing an action", 409);
@@ -66,6 +78,7 @@ export class ActionService {
     const proposal: ActionProposal = {
       id,
       taskId,
+      draftId: draft?.id,
       title,
       kind: input.kind,
       data: input.data,
@@ -96,8 +109,62 @@ export class ActionService {
       if (!existing) throw new AppError("Prepared action could not be loaded", 409);
       return existing;
     }
+    if (draft) {
+      // A save, or another review, while this one was being prepared gave the draft a new
+      // revision. Linking now would let this older review replace, and then delete, the newer
+      // draft, or leave two reviews that cancel each other.
+      const linked = await this.db.compareAndSwap(
+        owner,
+        "drafts",
+        draft.id,
+        { revision: draft.revision },
+        { actionId: saved.id, revision: randomUUID() },
+      );
+      if (!linked) {
+        await this.cancelReview(owner, saved.id, "The draft changed before this review was ready");
+        throw new AppError(draftChanged, 409);
+      }
+      await this.cancelDraftReviews(owner, draft.id, saved.id);
+    }
     await this.record(owner, saved, "Ready for your review");
     return saved;
+  }
+  /** Leaves at most one pending send per draft, so one draft cannot be sent twice. */
+  async cancelDraftReviews(owner: string, draftId: string, keepId?: string) {
+    for (const action of await this.db.listByStatus<ActionProposal>(
+      owner,
+      "actions",
+      "awaiting_review",
+    )) {
+      if (action.draftId !== draftId || action.id === keepId) continue;
+      await this.cancelReview(owner, action.id, "Replaced by a newer version of the draft");
+    }
+  }
+  private async cancelReview(owner: string, id: string, detail: string) {
+    const cancelled = await this.db.compareAndSwap<ActionProposal>(
+      owner,
+      "actions",
+      id,
+      { status: "awaiting_review" },
+      { status: "cancelled" },
+    );
+    if (cancelled) await this.record(owner, cancelled, detail);
+  }
+  /** Drafts saved before revisions existed get one here, unless the draft changes meanwhile. */
+  private async draftRevision(owner: string, draftId: string): Promise<string> {
+    const draft = await this.db.get<Record<string, unknown>>(owner, "drafts", draftId);
+    if (!draft) throw new AppError("Draft not found", 404);
+    if (typeof draft.revision === "string") return draft.revision;
+    const revision = randomUUID();
+    const stamped = await this.db.compareAndSwap<Record<string, unknown>>(
+      owner,
+      "drafts",
+      draftId,
+      {},
+      { revision },
+    );
+    if (!stamped || !sameDraft(stamped, draft)) throw new AppError(draftChanged, 409);
+    return revision;
   }
   async decide(
     owner: string,
@@ -203,6 +270,15 @@ export class ActionService {
     }
     await this.db.put(owner, "actions", finished);
     await this.record(owner, finished, finished.result ?? finished.error ?? finished.status);
+    if (finished.status === "succeeded" && finished.draftId) {
+      // The email has already gone out, so a cleanup failure must not read as a failed send.
+      // A draft saved again after this review no longer links to it and is kept.
+      try {
+        await this.db.removeIf(owner, "drafts", finished.draftId, { actionId: finished.id });
+      } catch (error) {
+        backgroundFailure("sent draft cleanup", error);
+      }
+    }
     return finished;
   }
   private async record(owner: string, action: ActionProposal, detail: string) {
