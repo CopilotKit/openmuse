@@ -132,7 +132,7 @@ export function ThreadsSheet({ onClose }: { onClose: () => void }) {
   }
   return (
     <Sheet
-      title="OpenMuse"
+      title="OpenFuse"
       subtitle={workspace.mode === "sample" ? "Your workspace" : workspace.profile.name}
       onClose={onClose}
     >

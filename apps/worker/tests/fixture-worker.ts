@@ -12,7 +12,7 @@ const fixture = await createBrowserFixture({
 const worker = await createWorkerServer(
   {
     token: process.env.WORKER_TOKEN ?? "",
-    dataDir: process.env.WORKER_DATA_DIR ?? ".openmuse/browser-profiles",
+    dataDir: process.env.WORKER_DATA_DIR ?? ".openfuse/browser-profiles",
   },
   (options) => createBrowserManager(options, fixture.createProxy),
 );

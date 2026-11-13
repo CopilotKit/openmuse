@@ -78,7 +78,7 @@ export class DockerComputer implements ComputerBackend {
     private readonly docker: DockerRunner,
   ) {}
   private image() {
-    const image = this.config.computerImage ?? "openmuse-computer:local";
+    const image = this.config.computerImage ?? "openfuse-computer:local";
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{0,250}$/.test(image))
       throw new AppError("COMPUTER_IMAGE is invalid", 503);
     return image;
@@ -312,7 +312,7 @@ export class DockerComputer implements ComputerBackend {
             "8s",
             "/usr/bin/python3",
             "-I",
-            "/opt/openmuse/files.py",
+            "/opt/openfuse/files.py",
           ],
           { timeoutMs: 10000, input, maxOutputBytes },
         ),
@@ -358,7 +358,7 @@ export class DesktopComputerBackend implements ComputerBackend {
       file: (input, seconds, maxOutputBytes) =>
         this.desktop.run(
           labels,
-          `/usr/bin/timeout --kill-after=1s ${seconds}s /usr/bin/python3 -I /opt/openmuse/files.py`,
+          `/usr/bin/timeout --kill-after=1s ${seconds}s /usr/bin/python3 -I /opt/openfuse/files.py`,
           {
             timeoutMs: (seconds + 2) * 1000,
             input,

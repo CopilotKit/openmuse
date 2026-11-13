@@ -34,7 +34,7 @@ console.log(JSON.stringify(requests));
 `;
 
 async function captureRuntime(envOverrides: Record<string, string> = {}) {
-  const directory = await mkdtemp(join(tmpdir(), "openmuse-telemetry-test-"));
+  const directory = await mkdtemp(join(tmpdir(), "openfuse-telemetry-test-"));
   const env = { ...process.env };
   for (const key of [
     "DO_NOT_TRACK",

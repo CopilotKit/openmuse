@@ -64,7 +64,7 @@ test("createRateLimitStore caps total entries and evicts expired ones to make ro
 
 let db: Store, app: Awaited<ReturnType<typeof createApp>>["app"], config: Config, directory: string;
 before(async () => {
-  directory = await mkdtemp(join(tmpdir(), "openmuse-ratelimit-"));
+  directory = await mkdtemp(join(tmpdir(), "openfuse-ratelimit-"));
   db = await createStore();
   config = {
     mode: "sample",

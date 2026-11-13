@@ -33,7 +33,7 @@ async function read<T>(path: string, body?: unknown, status = 200): Promise<T> {
 }
 
 before(async () => {
-  directory = await mkdtemp(join(tmpdir(), "openmuse-agent-api-"));
+  directory = await mkdtemp(join(tmpdir(), "openfuse-agent-api-"));
   db = await createStore({ dataDir: join(directory, "db") });
   config = {
     mode: "sample",
@@ -81,7 +81,7 @@ test("agent API requires a session and reports the actual worker state", async (
   );
   const workspace = await read<AgentWorkspace>("");
   assert.equal(workspace.worker.running, false);
-  assert.equal(workspace.identity.name, "OpenMuse");
+  assert.equal(workspace.identity.name, "OpenFuse");
   assert.equal(workspace.identity.tone, "warm");
 });
 
@@ -161,7 +161,7 @@ test("agent request validation rejects malformed input with useful JSON errors",
     ["/monitors/missing/control", { action: "delete" }],
     ["/ideas/missing", { action: "accept", prompt: " " }],
     ["/memories", { text: " " }],
-    ["/identity", { name: "OpenMuse", tone: "angry" }],
+    ["/identity", { name: "OpenFuse", tone: "angry" }],
     ["/sample-page", { text: "a".repeat(100001) }],
   ] satisfies [string, unknown][]) {
     const response = await request(path, body);

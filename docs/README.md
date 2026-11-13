@@ -1,6 +1,6 @@
-# OpenMuse documentation
+# OpenFuse documentation
 
-## Watch OpenMuse
+## Watch OpenFuse
 
 [iPhone demo · 38 seconds](../assets/demos/2026-09-16/mobile.mp4) · [Web demo · 42 seconds](../assets/demos/2026-09-16/web.mp4) · [Recording notes and reproduction](DEMO.md)
 

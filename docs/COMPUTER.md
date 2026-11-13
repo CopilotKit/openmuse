@@ -1,20 +1,20 @@
 # The agent computer
 
-OpenMuse combines a persistent browser with an optional Linux workspace for commands and files. The app and CopilotKit tools use the same authenticated computer service, so you can inspect what the agent ran and continue working with its results.
+OpenFuse combines a persistent browser with an optional Linux workspace for commands and files. The app and CopilotKit tools use the same authenticated computer service, so you can inspect what the agent ran and continue working with its results.
 
 ## Start the Linux workspace
 
 The API host needs Docker CLI access to a running Docker engine. Build the image from this repository:
 
 ```sh
-docker build -t openmuse-computer:local apps/computer
+docker build -t openfuse-computer:local apps/computer
 ```
 
 Enable it on the API and any separate task worker, then restart them:
 
 ```dotenv
 COMPUTER_ENABLED=true
-COMPUTER_IMAGE=openmuse-computer:local
+COMPUTER_IMAGE=openfuse-computer:local
 ```
 
 Open **Computer → Terminal → Start computer**. Run `pwd` or `python3 --version`. Commands execute inside the Linux container with `/workspace` as their default working directory. Their output, exit code, and status appear in command history.
@@ -23,17 +23,17 @@ If Docker is unavailable, the app reports the connection error. There is no fall
 
 ### Optional isolated runtime on macOS
 
-Colima is an open-source way to run Docker in a Linux VM. A separate profile keeps OpenMuse independent of other Docker workloads:
+Colima is an open-source way to run Docker in a Linux VM. A separate profile keeps OpenFuse independent of other Docker workloads:
 
 ```sh
 brew install colima
-colima start openmuse --cpus 2 --memory 3 --disk 12 --root-disk 12 \
+colima start openfuse --cpus 2 --memory 3 --disk 12 --root-disk 12 \
   --vm-type vz --activate=false --mount none --ssh-config=false
-DOCKER_CONTEXT=colima-openmuse docker build -t openmuse-computer:local apps/computer
-DOCKER_CONTEXT=colima-openmuse COMPUTER_ENABLED=true pnpm dev
+DOCKER_CONTEXT=colima-openfuse docker build -t openfuse-computer:local apps/computer
+DOCKER_CONTEXT=colima-openfuse COMPUTER_ENABLED=true pnpm dev
 ```
 
-The explicit context applies to that command and its child processes. It does not change the default Docker context. Stop this VM with `colima stop openmuse` when you no longer need it.
+The explicit context applies to that command and its child processes. It does not change the default Docker context. Stop this VM with `colima stop openfuse` when you no longer need it.
 
 ### Run the computer on an E2B desktop (optional)
 
@@ -89,8 +89,8 @@ When the agent uses `use_desktop`, the chat shows a **Desktop** card for each st
 ## Work with files
 
 - **Computer → Files** lists the persistent `/workspace` directory. Create folders, add text files, edit them, and save.
-- **Copy a document here** copies an owned PDF from OpenMuse into the current folder. A matching filename is replaced.
-- Open a PDF in the workspace to save a copy to OpenMuse Documents and view it in the native/web reader.
+- **Copy a document here** copies an owned PDF from OpenFuse into the current folder. A matching filename is replaced.
+- Open a PDF in the workspace to save a copy to OpenFuse Documents and view it in the native/web reader.
 - Browser downloads first enter Documents through **Import PDF downloads**, then can be copied into the Linux workspace.
 - Stopping the computer ends its running commands and keeps the named workspace volume. Starting it again restores those files.
 

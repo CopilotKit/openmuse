@@ -11,16 +11,16 @@ const posixOnly = process.platform === "win32" && "the fake docker CLI is a POSI
 test("Docker subprocess uses literal argv, strips provider credentials, caps output and bounds hangs", {
   skip: posixOnly,
 }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), "openmuse-docker-runner-"));
+  const directory = await mkdtemp(join(tmpdir(), "openfuse-docker-runner-"));
   const previousPath = process.env.PATH;
-  const previousKey = process.env.OPENMUSE_TEST_SECRET;
+  const previousKey = process.env.OPENFUSE_TEST_SECRET;
   await writeFile(
     join(directory, "docker"),
-    `#!${process.execPath}\nconst mode = process.argv[2];\nif (mode === "hang") setInterval(() => {}, 1000);\nelse if (mode === "output") { process.stdout.write("x".repeat(500000)); process.stderr.write("y".repeat(500000)); }\nelse if (mode === "fail") { process.stderr.write("failure"); process.exitCode = 17; }\nelse process.stdout.write(JSON.stringify({ args: process.argv.slice(2), secret: process.env.OPENMUSE_TEST_SECRET }));\n`,
+    `#!${process.execPath}\nconst mode = process.argv[2];\nif (mode === "hang") setInterval(() => {}, 1000);\nelse if (mode === "output") { process.stdout.write("x".repeat(500000)); process.stderr.write("y".repeat(500000)); }\nelse if (mode === "fail") { process.stderr.write("failure"); process.exitCode = 17; }\nelse process.stdout.write(JSON.stringify({ args: process.argv.slice(2), secret: process.env.OPENFUSE_TEST_SECRET }));\n`,
     { mode: 0o700 },
   );
   process.env.PATH = directory;
-  process.env.OPENMUSE_TEST_SECRET = "must-not-reach-docker-process";
+  process.env.OPENFUSE_TEST_SECRET = "must-not-reach-docker-process";
   try {
     const literal = "$(touch /must-not-run) ; echo $HOME";
     const args = await runDocker(["exec", literal], { timeoutMs: 3000 });
@@ -42,8 +42,8 @@ test("Docker subprocess uses literal argv, strips provider credentials, caps out
   } finally {
     if (previousPath === undefined) delete process.env.PATH;
     else process.env.PATH = previousPath;
-    if (previousKey === undefined) delete process.env.OPENMUSE_TEST_SECRET;
-    else process.env.OPENMUSE_TEST_SECRET = previousKey;
+    if (previousKey === undefined) delete process.env.OPENFUSE_TEST_SECRET;
+    else process.env.OPENFUSE_TEST_SECRET = previousKey;
     await rm(directory, { recursive: true, force: true });
   }
 });

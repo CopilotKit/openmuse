@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 const posixOnly = process.platform === "win32" && "the fake docker CLI is a POSIX script";
 
 test("fixture lifecycle releases its server when temporary profile creation fails", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "openmuse-fixture-init-"));
+  const directory = await mkdtemp(join(tmpdir(), "openfuse-fixture-init-"));
   const missing = join(directory, "missing");
   const env: NodeJS.ProcessEnv = { ...process.env, TMPDIR: missing, TMP: missing, TEMP: missing };
   // Start a separate test runner, not another worker of this test's harness.
@@ -44,7 +44,7 @@ test("fixture lifecycle releases its server when temporary profile creation fail
 test("fixture runner preserves isolation and cleans its container when fixture port lookup fails", {
   skip: posixOnly,
 }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), "openmuse-fixture-runner-"));
+  const directory = await mkdtemp(join(tmpdir(), "openfuse-fixture-runner-"));
   const log = join(directory, "calls.jsonl");
   await writeFile(
     join(directory, "docker"),
@@ -99,7 +99,7 @@ if (args[0] === "port" && args[2] === "8791") { process.stderr.write("fixture po
       "tests/fixture-worker.ts",
     ]);
     const name = run[run.indexOf("--name") + 1];
-    assert(name?.startsWith("openmuse-worker-test-"));
+    assert(name?.startsWith("openfuse-worker-test-"));
     assert.deepEqual(calls.at(-1)?.args, ["rm", "--force", "--volumes", name]);
   } finally {
     await rm(directory, { recursive: true, force: true });

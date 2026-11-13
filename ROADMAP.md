@@ -1,4 +1,4 @@
-# OpenMuse roadmap
+# OpenFuse roadmap
 
 The release is a personal-agent alpha: delegate a job, inspect its plan, supply missing information, review an action, and return to a saved result. The [reference inventory](docs/FEATURES.md) is broader than this release.
 

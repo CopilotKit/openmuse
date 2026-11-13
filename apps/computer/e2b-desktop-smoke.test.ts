@@ -18,7 +18,7 @@ test("real E2B desktop runs commands, opens GUI apps, streams, acts, persists fi
   timeout: 300000,
   skip: !apiKey && "set E2B_API_KEY to run the E2B desktop smoke test",
 }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), "openmuse-e2b-desktop-smoke-"));
+  const directory = await mkdtemp(join(tmpdir(), "openfuse-e2b-desktop-smoke-"));
   const db = await createStore();
   const config: Config = {
     mode: "sample",

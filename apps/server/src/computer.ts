@@ -139,14 +139,14 @@ export const runDocker: DockerRunner = (args, options) =>
 export function computerIdentity(config: Config, owner: string) {
   const deployment = hash(config.computerDeploymentId ?? config.publicUrl).slice(0, 16);
   const ownerHash = hash(owner).slice(0, 24);
-  const name = `openmuse-${deployment}-${ownerHash}`;
+  const name = `openfuse-${deployment}-${ownerHash}`;
   return {
     container: `${name}-computer`,
     volume: `${name}-workspace`,
     labels: {
-      "dev.openmuse.managed": "computer-v1",
-      "dev.openmuse.deployment": deployment,
-      "dev.openmuse.owner": ownerHash,
+      "dev.openfuse.managed": "computer-v1",
+      "dev.openfuse.deployment": deployment,
+      "dev.openfuse.owner": ownerHash,
     } as Record<string, string>,
   };
 }

@@ -2,9 +2,9 @@
 
 Inspected September 15, 2026: `CopilotKit/OpenBot` `main` at [`a96d88c6fb75385842529d7db7d463f4a8c4a86e`](https://github.com/CopilotKit/OpenBot/tree/a96d88c6fb75385842529d7db7d463f4a8c4a86e). This is a source inspection, not a running integration. OpenBot is an alpha template whose workspaces are private; depend on public CopilotKit/AG-UI protocols and an HTTP adapter, not OpenBot package imports. [Repository](https://github.com/CopilotKit/OpenBot/blob/a96d88c6fb75385842529d7db7d463f4a8c4a86e/README.md)
 
-## Recommended OpenMuse configuration
+## Recommended OpenFuse configuration
 
-These are proposed **OpenMuse** settings, not upstream environment variables:
+These are proposed **OpenFuse** settings, not upstream environment variables:
 
 ```dotenv
 OPENBOT_ENABLED=false
@@ -13,7 +13,7 @@ OPENBOT_RUNTIME_PATH=/api/copilotkit
 OPENBOT_AGENT_ID=
 ```
 
-Choose the agent ID from authenticated `GET /api/agents` when connecting. Resolve the URL on OpenMuse's server; phone loopback is not the server. Disabled or unreachable must report unavailable, never simulate a successful action. An eventual authenticated transport must preserve each person's OpenBot identity; a shared administrator session is unsuitable.
+Choose the agent ID from authenticated `GET /api/agents` when connecting. Resolve the URL on OpenFuse's server; phone loopback is not the server. Disabled or unreachable must report unavailable, never simulate a successful action. An eventual authenticated transport must preserve each person's OpenBot identity; a shared administrator session is unsuitable.
 
 ## Verified runtime and authentication
 
@@ -35,7 +35,7 @@ OpenBot pins `@copilotkit/runtime` **1.70.1** and always configures Intelligence
 
 All paths below are relative to `OPENBOT_BASE_URL`; encode path IDs.
 
-| OpenMuse capability | OpenBot request |
+| OpenFuse capability | OpenBot request |
 | --- | --- |
 | Start conversation | `POST /api/channels` `{agentIds:[id]}` → `{channel:{id,agentIds,threadId,...}}` |
 | Browser status/read/preview | `GET /api/computers/:botId/status`, `/read`, `/screenshot` |
@@ -54,7 +54,7 @@ Here `...` means `/api/computers/:botId`. [Computer routes](https://github.com/C
 
 ## Adapter and action boundaries
 
-An OpenMuse-owned [OpenBotAdapter](../packages/backends/src/openbot.ts) now exposes capability discovery, conversation creation, browser status/snapshots/navigation and control handover through an injected authenticated transport. It is disabled by default and has 13 contract tests; it is not connected to a deployment. Keep channel ID, thread ID, agent ID, Bot ID and action/proposal ID distinct. Computers belong to Bots, not individual chat sessions.
+An OpenFuse-owned [OpenBotAdapter](../packages/backends/src/openbot.ts) now exposes capability discovery, conversation creation, browser status/snapshots/navigation and control handover through an injected authenticated transport. It is disabled by default and has 13 contract tests; it is not connected to a deployment. Keep channel ID, thread ID, agent ID, Bot ID and action/proposal ID distinct. Computers belong to Bots, not individual chat sessions.
 
 Implemented transport seam (the host supplies authenticated requests):
 
@@ -67,10 +67,10 @@ interface OpenBotTransport {
 
 The adapter's `runtime()` returns an Intelligence descriptor for a compatible CopilotKit client; it is not a raw SSE URL. `probe`, `createConversation`, `computerStatus`, `snapshot`, `navigate` and control methods validate responses and surface refusals. Cancellation is passed through AbortSignal; ambiguous mutations are marked as uncertain and are not retried. Workspace text-file operations and full browser interaction mapping remain extensions.
 
-Navigation, browser actions, file operations and shell commands must use the server gateway, which checks policy and records decisions before acting. Never call computer port 4100 or supervisor endpoints from mobile. Snapshot refs are opaque and require their original `snapshotId`. Human control refuses Bot actions. OpenMuse's durable approval record remains necessary for its reviewed external writes; OpenBot policy decisions do not implement that approval lifecycle. [Architecture](https://github.com/CopilotKit/OpenBot/blob/a96d88c6fb75385842529d7db7d463f4a8c4a86e/docs/architecture.md)
+Navigation, browser actions, file operations and shell commands must use the server gateway, which checks policy and records decisions before acting. Never call computer port 4100 or supervisor endpoints from mobile. Snapshot refs are opaque and require their original `snapshotId`. Human control refuses Bot actions. OpenFuse's durable approval record remains necessary for its reviewed external writes; OpenBot policy decisions do not implement that approval lifecycle. [Architecture](https://github.com/CopilotKit/OpenBot/blob/a96d88c6fb75385842529d7db7d463f4a8c4a86e/docs/architecture.md)
 
 For a later custom AG-UI agent, preserve opaque `forwardedProps.openbotRun` and distinguish `openbotDeploymentTools` from frontend tools. Server-side granted tools call `POST /api/agent-tools/call` with `{name,args,run}` and `x-openbot-agent-token`; OpenBot verifies token and signed run together. These are agent credentials, not mobile login credentials. [Callback implementation](https://github.com/CopilotKit/OpenBot/blob/a96d88c6fb75385842529d7db7d463f4a8c4a86e/server/src/app.ts#L1265)
 
 ## Remaining work
 
-No deployment, session bridge, native transport or live round trip is connected. Next, test sign-in, run/reconnect/stop, browser policy refusal and handover against a pinned deployment. The [roadmap](../ROADMAP.md) also requires mapping scheduled routines and durable task execution before extending the computer infrastructure. Keep Gmail/Calendar integrations in OpenMuse: upstream's catalogue currently ships Drive and Notion. Keep PDF processing in OpenMuse: channel uploads accept selected images and text formats, and reject `application/pdf` with 415. Upstream workspace files and desktop host-folder grants are separate capabilities; neither supplies a native PDF workflow. [Catalogue](https://github.com/CopilotKit/OpenBot/blob/a96d88c6fb75385842529d7db7d463f4a8c4a86e/server/src/plugins/catalogue.ts), [accepted formats](https://github.com/CopilotKit/OpenBot/blob/a96d88c6fb75385842529d7db7d463f4a8c4a86e/shared/attachments.ts#L104)
+No deployment, session bridge, native transport or live round trip is connected. Next, test sign-in, run/reconnect/stop, browser policy refusal and handover against a pinned deployment. The [roadmap](../ROADMAP.md) also requires mapping scheduled routines and durable task execution before extending the computer infrastructure. Keep Gmail/Calendar integrations in OpenFuse: upstream's catalogue currently ships Drive and Notion. Keep PDF processing in OpenFuse: channel uploads accept selected images and text formats, and reject `application/pdf` with 415. Upstream workspace files and desktop host-folder grants are separate capabilities; neither supplies a native PDF workflow. [Catalogue](https://github.com/CopilotKit/OpenBot/blob/a96d88c6fb75385842529d7db7d463f4a8c4a86e/server/src/plugins/catalogue.ts), [accepted formats](https://github.com/CopilotKit/OpenBot/blob/a96d88c6fb75385842529d7db7d463f4a8c4a86e/shared/attachments.ts#L104)

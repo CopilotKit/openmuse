@@ -129,7 +129,7 @@ test("present_choices emits a complete panel and selection uses trusted stored l
 test("invalid and cross-thread actions return a run error without model execution", async (t) => {
   const f = await fixture(t, []);
   const events = await lastValueFrom(
-    f.conversation.run(input("[OpenMuse choice] bad-json")).pipe(toArray()),
+    f.conversation.run(input("[OpenFuse choice] bad-json")).pipe(toArray()),
   );
   assert.equal(events.at(-1)?.type, EventType.RUN_ERROR);
   const cross = await lastValueFrom(

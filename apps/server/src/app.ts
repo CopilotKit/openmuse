@@ -85,7 +85,7 @@ export async function createApp(
       return c.json({ error: error.message }, 422);
     if (error instanceof SyntaxError) return c.json({ error: "Invalid request data" }, 400);
     // Provider and document errors are useful, but raw stack traces and token-bearing responses are not.
-    console.error(`[OpenMuse] ${error.name}`);
+    console.error(`[OpenFuse] ${error.name}`);
     return c.json(
       {
         error:
@@ -122,13 +122,13 @@ export async function createApp(
   });
   app.get("/api/google/callback", async (c) => {
     if (c.req.query("error"))
-      return c.html("<h1>Google connection cancelled</h1><p>You can return to OpenMuse.</p>", 400);
+      return c.html("<h1>Google connection cancelled</h1><p>You can return to OpenFuse.</p>", 400);
     const state = c.req.query("state"),
       code = c.req.query("code");
     if (!state || !code) throw new AppError("Google callback is incomplete");
     await google.callback(state, code);
     return c.html(
-      "<h1>Google is connected</h1><p>Return to OpenMuse and refresh your workspace.</p>",
+      "<h1>Google is connected</h1><p>Return to OpenFuse and refresh your workspace.</p>",
     );
   });
   app.use("/api/*", async (c, next) => {
@@ -357,7 +357,7 @@ export async function createApp(
     return new Response(body, { status: response.status, headers: response.headers });
   });
   app.get("/", (c) =>
-    c.json({ name: "OpenMuse", app: "http://localhost:8081", health: "/api/health" }),
+    c.json({ name: "OpenFuse", app: "http://localhost:8081", health: "/api/health" }),
   );
   return { app, auth, files, actions, workspace, agent, computer };
 }

@@ -934,7 +934,7 @@ export function DelegateSheet({ goalId, milestoneId }: { goalId?: string; milest
   return (
     <Sheet
       title="Hand over an outcome"
-      subtitle="OpenMuse saves a plan and keeps working on the server."
+      subtitle="OpenFuse saves a plan and keeps working on the server."
       onClose={close}
     >
       {milestoneId && (
@@ -1147,7 +1147,7 @@ function IdeaCard({ idea }: { idea: Idea }) {
           <EvidenceList items={idea.evidence} />
           {editing && (
             <Field
-              label="What should OpenMuse do?"
+              label="What should OpenFuse do?"
               value={prompt}
               onChangeText={setPrompt}
               multiline
@@ -1571,7 +1571,7 @@ function MonitorForm({ onDone }: { onDone: () => void }) {
       <Text style={[s.small, { marginBottom: 14 }]}>
         {sample
           ? "Changes to this built-in page stay in your workspace."
-          : "OpenMuse checks this public page on the server and saves meaningful changes in Notifications."}
+          : "OpenFuse checks this public page on the server and saves meaningful changes in Notifications."}
       </Text>
       <ErrorNotice error={error} />
       <Button
@@ -1723,7 +1723,7 @@ export function AppsScreen() {
   const { data, mutate } = useAgentWorkspace();
   const [query, setQuery] = useState("");
   const [settings, setSettings] = useState(false);
-  const [name, setName] = useState(data?.identity.name || "OpenMuse");
+  const [name, setName] = useState(data?.identity.name || "OpenFuse");
   const [tone, setTone] = useState(data?.identity.tone || "warm");
   const [avatar, setAvatar] = useState(data?.identity.avatar || "sky");
   const [showChatUpdates, setShowChatUpdates] = useState(data?.identity.showChatUpdates !== false);
