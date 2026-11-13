@@ -41,7 +41,7 @@ import { JevInteractionContext, JevToolCard } from "./jev-tool-card";
 import { MailToolCard } from "./mail-tool-card";
 import { SearchToolCard } from "./search-tool-card";
 import { FileThreadCard, TaskThreadCard } from "./thread-artifacts";
-import { type Selection, useMuseThread } from "./threads";
+import { type Selection, useFuseThread } from "./threads";
 import { Button, Card, CheckRow, colors, ErrorNotice, s } from "./ui";
 import { useWorkspace } from "./workspace";
 
@@ -214,7 +214,7 @@ export function ChatScreen({
 }) {
   const { api, workspace: w, refresh, navigate } = useWorkspace();
   const { data: agentWorkspace, refresh: refreshAgent } = useAgentWorkspace();
-  const { enabled: richThreads, mainId, claimPrompt } = useMuseThread();
+  const { enabled: richThreads, mainId, claimPrompt } = useFuseThread();
   const selection = thread || { id: "local", existing: false };
   const threadId = richThreads ? selection.id : "local-main";
   const agentId = `openfuse-${threadId}`;

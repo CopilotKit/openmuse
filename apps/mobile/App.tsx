@@ -32,13 +32,13 @@ import {
   IdeasScreen,
 } from "./src/agent-ui";
 import { AgentWorkspaceProvider, useAgentWorkspace } from "./src/agent-workspace";
-import { API_URL, createSession, MuseApi } from "./src/api";
+import { API_URL, createSession, FuseApi } from "./src/api";
 import { ChatScreen, WorkspaceTools } from "./src/chat";
 import { ComputerEntry } from "./src/computer";
 import { ComputerDraftProvider } from "./src/computer-drafts";
 import { Details } from "./src/details";
 import { BrowserScreen, CalendarScreen, FilesScreen, MailScreen } from "./src/screens";
-import { ThreadsProvider, ThreadsSheet, useMuseThread } from "./src/threads";
+import { ThreadsProvider, ThreadsSheet, useFuseThread } from "./src/threads";
 import { Button, Card, colors, ErrorNotice, Field, IconButton, Mascot, s } from "./src/ui";
 import { type Detail, useWorkspace, WorkspaceContext } from "./src/workspace";
 
@@ -142,7 +142,7 @@ export default function App() {
   );
 }
 function WorkspaceApp({ token }: { token: string }) {
-  const api = useMemo(() => new MuseApi(token), [token]);
+  const api = useMemo(() => new FuseApi(token), [token]);
   const [workspace, setWorkspace] = useState<Workspace>();
   const [section, setSection] = useState<Section>("chat");
   const [detail, setDetail] = useState<Detail>();
@@ -250,7 +250,7 @@ function WorkspaceShell({
     error: threadsError,
     retry: retryThreads,
     enabled: richThreads,
-  } = useMuseThread();
+  } = useFuseThread();
   const [threadsOpen, setThreadsOpen] = useState(false);
   const { width } = useWindowDimensions();
   const desktop = width >= 900;
