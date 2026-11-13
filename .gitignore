@@ -5,6 +5,8 @@ build/
 .env
 .env.local
 .env.*.local
+.openfuse/
+# Legacy name, kept so existing installs keep working.
 .openmuse/
 apps/mobile/ios/
 apps/mobile/android/

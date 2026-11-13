@@ -191,7 +191,7 @@ export async function createSamplePdf(): Promise<Uint8Array> {
   return pdfOperation(async () => {
     const doc = await PDFDocument.create();
     doc.setTitle("Community visit - permission form");
-    doc.setAuthor("OpenMuse");
+    doc.setAuthor("OpenFuse");
     const regular = await doc.embedFont(StandardFonts.Helvetica);
     const bold = await doc.embedFont(StandardFonts.HelveticaBold);
     const ink = rgb(0.12, 0.19, 0.2);
@@ -200,7 +200,7 @@ export async function createSamplePdf(): Promise<Uint8Array> {
     const pages = [doc.addPage([612, 792]), doc.addPage([612, 792])];
     for (const [index, page] of pages.entries()) {
       page.drawRectangle({ x: 0, y: 682, width: 612, height: 110, color: rgb(0.9, 0.95, 0.93) });
-      page.drawText("OPENMUSE / COMMUNITY VISIT", {
+      page.drawText("OPENFUSE / COMMUNITY VISIT", {
         x: 48,
         y: 750,
         size: 10,

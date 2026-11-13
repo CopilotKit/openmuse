@@ -1,12 +1,10 @@
 # Demos
 
-Updated September 16, 2026. Both recordings feature OpenMuse's original capybara mascot and the current composer: the send arrow changes to a stop square inside the input pill while OpenMuse replies, then returns when the run ends. The mobile story explores websites; the desktop story starts with email and continues into related research.
+Updated September 16, 2026. Both recordings feature OpenFuse's original capybara mascot and the current composer: the send arrow changes to a stop square inside the input pill while OpenFuse replies, then returns when the run ends. The mobile story explores websites; the desktop story starts with email and continues into related research.
 
 ## Mobile
 
-[Watch the 38-second MP4](../assets/demos/2026-09-16/mobile.mp4) · [Animated hero](../assets/demos/2026-09-16/mobile.gif) · [Cover image](../assets/demos/2026-09-16/mobile.png).
-
-**OpenMuse 🪁 — ask it to browse, follow along in chat, and take control when you need to.** The native iPhone recording is framed in a 1920 × 1080 (16:9) canvas, with a cream, blue, and lilac background and captions for sound-off viewing.
+**OpenFuse 🪁 — ask it to browse, follow along in chat, and take control when you need to.** The native iPhone recording is framed in a 1920 × 1080 (16:9) canvas, with a cream, blue, and lilac background and captions for sound-off viewing.
 
 The model responses use [CopilotKit AI Mock](https://github.com/CopilotKit/aimock). The app runs its actual CopilotKit agent and `browse_web` tool against a real Chromium worker. The script requests a page, waits for the real tool result, and extracts headlines or overview text from that result. It does not supply browser results or invent page content.
 
@@ -14,27 +12,25 @@ The model responses use [CopilotKit AI Mock](https://github.com/CopilotKit/aimoc
 
 | Time | Scene |
 | --- | --- |
-| 0:00–0:04 | Ask OpenMuse to explore Hacker News |
+| 0:00–0:04 | Ask OpenFuse to explore Hacker News |
 | 0:04–0:09 | Read highlights from the live page |
 | 0:09–0:15 | Ask it to summarize CopilotKit |
 | 0:15–0:21 | Follow the inline browser and result, with Stop inside the input pill |
 | 0:21–0:31 | Take control of the same live browser |
-| 0:31–0:38 | Return to chat and the OpenMuse repository |
+| 0:31–0:38 | Return to chat and the OpenFuse repository |
 
 - A chat request to find interesting stories on Hacker News.
 - A server tool call that opens and reads the page, with a browser card inline in the conversation.
 - Highlights extracted from the page the browser just read.
 - A second request to summarize CopilotKit, using the same persistent browser session.
 - **Take control**, which opens that session's live browser console.
-- The open-source repository at [CopilotKit/OpenMuse](https://github.com/CopilotKit/OpenMuse).
+- The open-source repository at [CopilotKit/OpenFuse](https://github.com/CopilotKit/OpenMuse).
 
 Captures are trimmed and paced for readability, including brief slowdowns of the browser card and faster transitions into takeover. This is a reproducible demonstration of the app and tool flow; it is not an evaluation of a live model's reasoning. Site content changes, so your highlights can differ. Personal workspace information is fictional. Live Google, provider quality, Intelligence persistence/replay, and OpenBot require separately configured acceptance runs; see [verification](VERIFICATION.md).
 
 ## Desktop web
 
-[Watch the 42-second web MP4](../assets/demos/2026-09-16/web.mp4) · [Animated preview](../assets/demos/2026-09-16/web.gif) · [Cover image](../assets/demos/2026-09-16/web.png).
-
-A separate recording of the actual desktop web app, placed below the mobile demo in the README. Ask **“Check my emails for the school trip”**, open the school's reminder, then ask **“Research Monterey Bay Aquarium and suggest three exhibits”**. The 1440 × 810 browser capture sits inside a 1920 × 1080 canvas with the same cream, blue, and lilac background and OpenMuse 🪁 branding.
+A separate recording of the actual desktop web app, placed below the mobile demo in the README. Ask **“Check my emails for the school trip”**, open the school's reminder, then ask **“Research Monterey Bay Aquarium and suggest three exhibits”**. The 1440 × 810 browser capture sits inside a 1920 × 1080 canvas with the same cream, blue, and lilac background and OpenFuse 🪁 branding.
 
 | Time | Scene |
 | --- | --- |
@@ -68,7 +64,7 @@ pnpm --dir apps/worker exec playwright install chromium
 pnpm dev:demo
 ```
 
-This starts AI Mock, the normal OpenMuse API on port **8788**, and a separate real browser worker on **8791**. Demo files and profiles stay in ignored `artifacts/demo/`. The runner reads only the Intelligence key from the project's private `.env` and passes it to its isolated API process; it does not pass provider or Google credentials. The Linux computer is disabled for this focused browser recording.
+This starts AI Mock, the normal OpenFuse API on port **8788**, and a separate real browser worker on **8791**. Demo files and profiles stay in ignored `artifacts/demo/`. The runner reads only the Intelligence key from the project's private `.env` and passes it to its isolated API process; it does not pass provider or Google credentials. The Linux computer is disabled for this focused browser recording.
 
 Start the app in another terminal:
 
@@ -95,7 +91,7 @@ For the mobile story, send **“Check out Hacker News for cool stuff”**, then 
 With the app open on a simulator containing fictional personal information:
 
 ```sh
-xcrun simctl io booted recordVideo --codec=h264 openmuse-recording.mp4
+xcrun simctl io booted recordVideo --codec=h264 openfuse-recording.mp4
 # Interact with the app. Press Control-C to finish the video.
 ```
 
@@ -112,4 +108,4 @@ python3 -m http.server 8081 --bind 127.0.0.1 --directory apps/mobile/dist/web
 
 Use port 8081 when the development server is stopped. `--clear` ensures the export uses the requested API URL. Open the page in a clean desktop browser and record the two prompts and takeover flow at 1440 × 810 or larger. Describe the model setup in the accompanying recording notes. Scroll to keep the browser card and resulting text readable.
 
-The original [75-second alpha walkthrough](https://github.com/jerelvelarde/openmuse/releases/download/v0.1.0-alpha/openmuse-demo.mp4) remains available as a historical release archive. OpenMuse's [capybara artwork and provenance](../apps/mobile/assets/README.md) are included under the repository's MIT license.
+OpenFuse's [capybara artwork and provenance](../apps/mobile/assets/README.md) are included under the repository's MIT license.

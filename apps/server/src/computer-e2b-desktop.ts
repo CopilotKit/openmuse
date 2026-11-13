@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { posix, resolve } from "node:path";
 import { z } from "zod";
 import {
   type ComputerState,
+  computerFilesScript,
   computerOutput,
   computerOutputLimit,
   type DockerResult,
@@ -167,7 +168,7 @@ const stopped = () => new AppError("Start the computer before using its terminal
 
 // Marks which URL the running stream belongs to, so a URL cached by this process is
 // never returned after another process restarted the stream with a new password.
-const streamTagFile = "/tmp/openmuse-stream";
+const streamTagFile = "/tmp/openfuse-stream";
 const streamTag = (url: string) => createHash("sha256").update(url).digest("hex").slice(0, 16);
 const streamState = (tag: string) =>
   [
@@ -213,7 +214,7 @@ export function desktopCommand(
     'rm -rf "$o"',
     "exit $s",
   ].join("\n");
-  return `/bin/bash --noprofile --norc -c ${quote(script)} openmuse ${quote(command)}`;
+  return `/bin/bash --noprofile --norc -c ${quote(script)} openfuse ${quote(command)}`;
 }
 
 // One GUI action, shaped like Anthropic's computer-use tool. Coordinates are native
@@ -313,7 +314,7 @@ export function desktopInput(action: DesktopAction) {
 }
 
 // One fixed path: actions on a computer are serialized by the service's lease.
-const screenshotFile = "/tmp/openmuse-screenshot.jpg";
+const screenshotFile = "/tmp/openfuse-screenshot.jpg";
 // A VNC viewer that loses focus mid-shortcut (e.g. Alt+Tab in the user's browser)
 // leaves that modifier held, and every later click, key and wheel event then becomes
 // a shortcut. Input actions release all modifiers first.
@@ -438,15 +439,16 @@ export class E2BDesktopComputer {
     if (cached) await this.control(() => box.keepAlive(this.awake(info, idleMs)));
     if (!cached) this.handles.set(id, { box });
     const script = await loadFilesScript();
+    const scriptPath = computerFilesScript(this.config);
     await this.control(async () => {
       if (
         (await box.setup(
-          `mkdir -p /workspace /opt/openmuse && chown ${user}:${user} /workspace`,
+          `mkdir -p /workspace ${posix.dirname(scriptPath)} && chown ${user}:${user} /workspace`,
           "root",
         )) !== 0
       )
         throw new AppError("Computer workspace could not be prepared", 503);
-      await box.writeRootFile("/opt/openmuse/files.py", script);
+      await box.writeRootFile(scriptPath, script);
       if ((await box.setup(sessionScript, user)) !== 0)
         throw new AppError("Computer desktop session did not start", 503);
     });

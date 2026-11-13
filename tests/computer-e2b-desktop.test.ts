@@ -203,7 +203,7 @@ function fake(
 let db: Store;
 let owners = 0;
 before(async () => {
-  config.dataDir = await mkdtemp(join(tmpdir(), "openmuse-desktop-test-"));
+  config.dataDir = await mkdtemp(join(tmpdir(), "openfuse-desktop-test-"));
   db = await createStore();
 });
 after(async () => {
@@ -215,7 +215,7 @@ function service(f: ReturnType<typeof fake>) {
   const owner = `owner-${++owners}`;
   const ownerLabels = computerIdentity(config, owner).labels;
   for (const info of f.boxes.values())
-    if (info.metadata["dev.openmuse.owner"] === labels["dev.openmuse.owner"])
+    if (info.metadata["dev.openfuse.owner"] === labels["dev.openfuse.owner"])
       info.metadata = { ...info.metadata, ...ownerLabels };
   const desktop = new E2BDesktopComputer(config, f.driver);
   return {
@@ -242,7 +242,7 @@ test("start creates one desktop per owner with pause-on-idle and prepares /works
   assert.equal(f.calls.create[0].template, "desktop");
   assert.deepEqual(f.calls.create[0].metadata, own);
   assert.ok(f.calls.setup.some((s) => s.user === "root" && s.command.includes("/workspace")));
-  assert.deepEqual(f.calls.files, ["/opt/openmuse/files.py"]);
+  assert.deepEqual(f.calls.files, ["/opt/openfuse/files.py"]);
   assert.ok(f.calls.setup.some((s) => s.user === "user" && s.command.includes("startxfce4")));
   await computer.execute(owner, { command: "pwd" });
   assert.ok(!JSON.stringify(f.calls).includes(apiKey), "the API key never enters the sandbox");
@@ -469,7 +469,7 @@ test("file operations send their request on stdin in chunks, never in argv or /w
   // About 4 MB of JSON: the in-box limit grows by a second per MB sent over stdin.
   assert.equal(
     call.command,
-    "/usr/bin/timeout --kill-after=1s 13s /usr/bin/python3 -I /opt/openmuse/files.py",
+    "/usr/bin/timeout --kill-after=1s 13s /usr/bin/python3 -I /opt/openfuse/files.py",
   );
   assert.equal(call.options.timeoutMs, 15000);
   assert.equal(call.options.stdin, true);
@@ -750,7 +750,7 @@ test("a desktop action runs with a screenshot after it, leaves a receipt and kee
     script?.command ?? "",
     /^xdotool keyup Shift_L .*\nxdotool mousemove --sync 640 400 click 1 \|\| exit 3$/,
   );
-  assert.deepEqual(f.calls.reads, ["/tmp/openmuse-screenshot.jpg"]);
+  assert.deepEqual(f.calls.reads, ["/tmp/openfuse-screenshot.jpg"]);
   assert.equal(shot.mimeType, "image/jpeg");
   assert.equal(shot.data, Buffer.from(jpeg).toString("base64"));
   assert.deepEqual([shot.width, shot.height], [1280, 800]);

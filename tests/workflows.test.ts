@@ -19,7 +19,7 @@ let db: Store, server: Awaited<ReturnType<typeof createApp>>, directory: string;
 const owner = "workflow-user";
 const reconcile = () => (server.agent as unknown as { maintain(): Promise<void> }).maintain();
 before(async () => {
-  directory = await mkdtemp(join(tmpdir(), "openmuse-workflows-"));
+  directory = await mkdtemp(join(tmpdir(), "openfuse-workflows-"));
   db = await createStore({ dataDir: join(directory, "db") });
   server = await createApp(db, {
     mode: "sample",
@@ -470,7 +470,7 @@ test("failed, cancelled and review-blocked tasks do not complete milestones", as
 });
 
 test("linked task results and manual completion survive a database restart", async () => {
-  const root = await mkdtemp(join(tmpdir(), "openmuse-milestone-restart-"));
+  const root = await mkdtemp(join(tmpdir(), "openfuse-milestone-restart-"));
   const config = { ...server.agent.config, dataDir: root };
   let store = await createStore({ dataDir: join(root, "db") });
   let app = await createApp(store, config);

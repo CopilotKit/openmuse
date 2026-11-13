@@ -1,12 +1,8 @@
 # Jev generative UI: aquarium school-trip demo
 
-**[Watch the 83-second live Jev web recording](../../assets/demos/2026-09-23/jev-live-web.mp4)**
+A live run calls TypeSafe Jev for each clarification and comparison decision, visibly labeled `Live Jev · model decisions` in the cards. AI Mock scripts the agent's conversation steps, while OpenFuse runs its normal mailbox, real browser worker, and `present_choices` tool. The mailbox is a fictional local Lincoln Middle School sample. The live comparison details are excerpts of the public aquarium pages read during that turn; Jev decides whether to show the agent's prepared cards and ranks those candidates. The revised hands-on preference moves Rocky Shore to first place in this recorded run.
 
-[![Live Jev reranks the aquarium exhibits in OpenMuse](../../assets/demos/2026-09-23/jev-live-web.png)](../../assets/demos/2026-09-23/jev-live-web.mp4)
-
-The live recording calls TypeSafe Jev for each clarification and comparison decision, visibly labeled `Live Jev · model decisions` in the cards. AI Mock scripts the agent's conversation steps, while OpenMuse runs its normal mailbox, real browser worker, and `present_choices` tool. The mailbox is a fictional local Lincoln Middle School sample. The live comparison details are excerpts of the public aquarium pages read during that turn; Jev decides whether to show the agent's prepared cards and ranks those candidates. The revised hands-on preference moves Rocky Shore to first place in this recorded run.
-
-For a repeatable, TypeSafe-key-free walkthrough, [watch the 81-second scripted sample](../../assets/demos/2026-09-23/jev-web.mp4). Its cards are labeled `Sample · scripted decisions`; it does not make a live Jev call.
+For a repeatable, TypeSafe-key-free walkthrough, run the scripted sample. Its cards are labeled `Sample · scripted decisions`; it does not make a live Jev call.
 
 ## Run
 
@@ -61,4 +57,4 @@ With `JEV_MODE=live`, each `present_choices` call makes one request from the API
 - `options`: every candidate's ID, label, details, and source titles and URLs.
 - The question text and the model name, plus `TYPESAFE_API_KEY` as the bearer token.
 
-OpenMuse does not send page text, mail threads, files, or OAuth tokens beyond what the agent put in `context` or the options. Jev returns only a choice between showing the prepared cards or answering in prose, and one fit score per option. It cannot approve, send, book, or run anything. Selections still go through OpenMuse's own checks, and external actions still require a recorded approval. On failure the server logs only the HTTP status and TypeSafe request ID, never the request body. TypeSafe's own terms apply to the data it receives; see its [data handling notes](https://docs.typesafe.ai/models#data-handling).
+OpenFuse does not send page text, mail threads, files, or OAuth tokens beyond what the agent put in `context` or the options. Jev returns only a choice between showing the prepared cards or answering in prose, and one fit score per option. It cannot approve, send, book, or run anything. Selections still go through OpenFuse's own checks, and external actions still require a recorded approval. On failure the server logs only the HTTP status and TypeSafe request ID, never the request body. TypeSafe's own terms apply to the data it receives; see its [data handling notes](https://docs.typesafe.ai/models#data-handling).

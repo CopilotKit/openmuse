@@ -303,7 +303,7 @@ test("browser imports return rejected downloads even when no PDF was accepted", 
 });
 
 test("worker persists unsupported, oversized and interrupted download outcomes", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "openmuse-download-outcomes-"));
+  const directory = await mkdtemp(join(tmpdir(), "openfuse-download-outcomes-"));
   try {
     const cases = [
       { name: "notes.txt", contents: Buffer.from("not a PDF"), code: "UNSUPPORTED_DOWNLOAD" },
@@ -342,7 +342,7 @@ test("worker persists unsupported, oversized and interrupted download outcomes",
 });
 
 test("worker recovery cleans unpublished downloads and retains their interruption failures", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "openmuse-download-recovery-"));
+  const directory = await mkdtemp(join(tmpdir(), "openfuse-download-recovery-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const folder = join(directory, "downloads");
   const outcomes = join(directory, "download-outcomes");
@@ -374,7 +374,7 @@ test("worker recovery cleans unpublished downloads and retains their interruptio
 });
 
 test("worker recovery retries incomplete cleanup before recording failure", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "openmuse-download-recovery-"));
+  const directory = await mkdtemp(join(tmpdir(), "openfuse-download-recovery-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const folder = join(directory, "downloads");
   const outcomes = join(directory, "download-outcomes");
@@ -405,7 +405,7 @@ test("worker recovery retries incomplete cleanup before recording failure", asyn
 });
 
 test("worker recovery preserves downloads when metadata cannot be inspected", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "openmuse-download-recovery-"));
+  const directory = await mkdtemp(join(tmpdir(), "openfuse-download-recovery-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const folder = join(directory, "downloads");
   const outcomes = join(directory, "download-outcomes");
@@ -441,7 +441,7 @@ test("worker recovery reconciles published downloads and transfers without files
     await t.test(
       published ? "published PDF is retained" : "missing files are tolerated",
       async (t) => {
-        const directory = await mkdtemp(join(tmpdir(), "openmuse-download-recovery-"));
+        const directory = await mkdtemp(join(tmpdir(), "openfuse-download-recovery-"));
         t.after(() => rm(directory, { recursive: true, force: true }));
         const folder = join(directory, "downloads");
         const outcomes = join(directory, "download-outcomes");
@@ -554,7 +554,7 @@ test("browser rejects DNS answers containing any private address and pins public
 });
 
 test("worker protects all controls, validates before launch, and health reveals no sessions", async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "openmuse-worker-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "openfuse-worker-"));
   const savedId = "00000000-0000-4000-8000-000000000002";
   const downloadId = "00000000-0000-4000-8000-000000000003";
   const pendingId = "00000000-0000-4000-8000-000000000004";

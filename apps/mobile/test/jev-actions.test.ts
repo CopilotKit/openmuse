@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { JevPanel } from "../../../packages/domain/src/jev.ts";
+import {
+  type JevPanel,
+  jevActionPrefix,
+  legacyJevActionPrefix,
+} from "../../../packages/domain/src/jev.ts";
 import {
   choiceAvailability,
   confirmedJevSelection,
@@ -144,7 +148,7 @@ test("only the failed option can retry while its panel has not been replaced", (
 test("selection uses the bounded server action format and rejects unknown options", () => {
   assert.equal(
     selectionText(panel, "explore"),
-    '[OpenMuse choice] {"panelId":"panel-1","threadId":"thread-1","candidateSetVersion":1,"optionId":"explore"}',
+    '[OpenFuse choice] {"panelId":"panel-1","threadId":"thread-1","candidateSetVersion":1,"optionId":"explore"}',
   );
   assert.throws(() => selectionText(panel, "unknown"), /Unknown choice/);
 });
@@ -157,7 +161,9 @@ test("the transcript shows the trusted option label instead of the action payloa
   ];
   assert.equal(displayJevUserMessage(action, history), "Selected: Explore exhibits");
   assert.equal(displayJevUserMessage("Hello", history), "Hello");
-  assert.equal(displayJevUserMessage("[OpenMuse choice] {broken", history), "Choice unavailable");
+  assert.equal(displayJevUserMessage("[OpenFuse choice] {broken", history), "Choice unavailable");
+  const saved = legacyJevActionPrefix + action.slice(jevActionPrefix.length);
+  assert.equal(displayJevUserMessage(saved, history), "Selected: Explore exhibits");
   assert.equal(displayJevUserMessage(action, []), "Choice unavailable");
 });
 

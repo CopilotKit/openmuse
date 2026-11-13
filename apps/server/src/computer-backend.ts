@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   type ComputerState,
+  computerBrand,
+  computerFilesScript,
   computerIdentity,
   type DockerResult,
   type DockerRunner,
@@ -78,10 +80,18 @@ export class DockerComputer implements ComputerBackend {
     private readonly docker: DockerRunner,
   ) {}
   private image() {
-    const image = this.config.computerImage ?? "openmuse-computer:local";
+    const image = this.config.computerImage ?? "openfuse-computer:local";
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{0,250}$/.test(image))
       throw new AppError("COMPUTER_IMAGE is invalid", 503);
     return image;
+  }
+  /** Images an existing computer may run. Without COMPUTER_IMAGE, an install created before
+   * the rename also keeps the default image its computers were created from. */
+  private images() {
+    if (this.config.computerImage !== undefined || computerBrand(this.config) === "openfuse")
+      return [this.image()];
+    // Legacy name, kept so existing installs keep working.
+    return [this.image(), "openmuse-computer:local"];
   }
   private async checked(args: string[]) {
     const result = await this.docker(args, { timeoutMs: controlTimeout });
@@ -117,7 +127,7 @@ export class DockerComputer implements ComputerBackend {
     const empty = (list: unknown[] | null) => !list?.length;
     const safe =
       c.Name === `/${identity.container}` &&
-      c.Config.Image === this.image() &&
+      this.images().includes(c.Config.Image) &&
       c.Config.User === "1000:1000" &&
       c.Config.WorkingDir === "/workspace" &&
       Object.entries(identity.labels).every(([key, value]) => c.Config.Labels?.[key] === value) &&
@@ -312,7 +322,7 @@ export class DockerComputer implements ComputerBackend {
             "8s",
             "/usr/bin/python3",
             "-I",
-            "/opt/openmuse/files.py",
+            computerFilesScript(this.config),
           ],
           { timeoutMs: 10000, input, maxOutputBytes },
         ),
@@ -358,7 +368,7 @@ export class DesktopComputerBackend implements ComputerBackend {
       file: (input, seconds, maxOutputBytes) =>
         this.desktop.run(
           labels,
-          `/usr/bin/timeout --kill-after=1s ${seconds}s /usr/bin/python3 -I /opt/openmuse/files.py`,
+          `/usr/bin/timeout --kill-after=1s ${seconds}s /usr/bin/python3 -I ${computerFilesScript(this.config)}`,
           {
             timeoutMs: (seconds + 2) * 1000,
             input,

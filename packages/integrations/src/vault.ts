@@ -8,11 +8,15 @@ function decodeKey(key: string): Buffer {
   return bytes;
 }
 
+const credentialAad = Buffer.from("openfuse:credential:v1");
+// Legacy name, kept so existing installs keep working: credentials saved before the rename use it.
+export const legacyCredentialAad = Buffer.from("openmuse:credential:v1");
+
 /** Versioned AES-256-GCM envelope: version.nonce.tag.ciphertext. */
 export function encryptSecret(plaintext: string, key: string): string {
   const nonce = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", decodeKey(key), nonce);
-  cipher.setAAD(Buffer.from("openmuse:credential:v1"));
+  cipher.setAAD(credentialAad);
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   return [
     "v1",
@@ -45,12 +49,15 @@ export function decryptSecret(encrypted: string, key: string): string {
   ) {
     throw new Error("Invalid encrypted secret");
   }
-  try {
-    const decipher = createDecipheriv("aes-256-gcm", keyBytes, nonce);
-    decipher.setAAD(Buffer.from("openmuse:credential:v1"));
-    decipher.setAuthTag(tag);
-    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
-  } catch {
-    throw new Error("Unable to authenticate or decrypt credential");
+  for (const aad of [credentialAad, legacyCredentialAad]) {
+    try {
+      const decipher = createDecipheriv("aes-256-gcm", keyBytes, nonce);
+      decipher.setAAD(aad);
+      decipher.setAuthTag(tag);
+      return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+    } catch {
+      // Authentication failed with this associated data; try the next one.
+    }
   }
+  throw new Error("Unable to authenticate or decrypt credential");
 }

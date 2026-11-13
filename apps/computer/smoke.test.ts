@@ -16,7 +16,7 @@ import { createStore } from "../server/src/db.ts";
 test("real isolated computer executes commands, persists files, bridges PDFs and stops active work", {
   timeout: 120000,
 }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), "openmuse-computer-smoke-"));
+  const directory = await mkdtemp(join(tmpdir(), "openfuse-computer-smoke-"));
   const db = await createStore();
   const config: Config = {
     mode: "sample",
@@ -29,7 +29,7 @@ test("real isolated computer executes commands, persists files, bridges PDFs and
     googleRedirectUri: "http://localhost/callback",
     allowedOrigins: [],
     computerEnabled: true,
-    computerImage: process.env.COMPUTER_IMAGE ?? "openmuse-computer:local",
+    computerImage: process.env.COMPUTER_IMAGE ?? "openfuse-computer:local",
     computerDeploymentId: `smoke-${randomUUID()}`,
   };
   const server = await createApp(db, config);
@@ -68,7 +68,7 @@ test("real isolated computer executes commands, persists files, bridges PDFs and
       (await post("/files/read", { path: "/workspace/notes/hello.txt" })).text,
       "Hello from the API ✓",
     );
-    const denied = await post("/commands", { command: "touch /etc/openmuse-must-fail" });
+    const denied = await post("/commands", { command: "touch /etc/openfuse-must-fail" });
     assert.equal(denied.status, "failed");
     const network = await post("/commands", {
       command: "python3 -c 'import socket; socket.create_connection((\"1.1.1.1\", 443), 1)'",

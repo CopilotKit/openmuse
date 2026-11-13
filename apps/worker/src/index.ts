@@ -1,14 +1,20 @@
+import { existsSync } from "node:fs";
 import { createWorkerServer } from "./server.ts";
 
 const token = process.env.WORKER_TOKEN ?? "";
+const defaultDataDir = ".openfuse/browser-profiles";
+// Legacy name, kept so existing installs keep working.
+const legacyDataDir = ".openmuse/browser-profiles";
 const worker = await createWorkerServer({
   token,
-  dataDir: process.env.WORKER_DATA_DIR ?? ".openmuse/browser-profiles",
+  dataDir:
+    process.env.WORKER_DATA_DIR ??
+    (!existsSync(defaultDataDir) && existsSync(legacyDataDir) ? legacyDataDir : defaultDataDir),
   maxSessions: 3,
   idleTimeoutMs: 30 * 60_000,
 });
 worker.server.listen(8790, process.env.WORKER_HOST ?? "127.0.0.1", () => {
-  console.log("OpenMuse browser worker listening on port 8790");
+  console.log("OpenFuse browser worker listening on port 8790");
 });
 let stopping = false;
 async function stop() {

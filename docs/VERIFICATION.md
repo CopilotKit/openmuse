@@ -8,7 +8,7 @@ September 16, 2026 · Capybara and distinct mobile/web demos, following the agen
 - Biome formatting/lint, server/mobile/browser-worker TypeScript checks, and the server build pass.
 - Expo exports web, iOS Hermes, and Android Hermes bundles. These exports do not produce signed native binaries.
 - The **real Chromium lifecycle test passes**: public page navigation/read, failed profile cleanup, same-UUID reopen, text truncation, and localStorage/profile persistence after restart.
-- The **real Docker computer smoke test passes** against the isolated `colima-openmuse` context: local image build, nonroot commands, read-only system files, disabled network, capped output, text editing, symlink rejection, PDF byte-preserving import/export, stop/start file persistence, and interruption of an actually running command. Its disposable container and volume are removed after the test.
+- The **real Docker computer smoke test passes** against the isolated `colima-openfuse` context: local image build, nonroot commands, read-only system files, disabled network, capped output, text editing, symlink rejection, PDF byte-preserving import/export, stop/start file persistence, and interruption of an actually running command. Its disposable container and volume are removed after the test.
 - CI now includes a separate computer-container build/smoke job. Its YAML parses with unique keys and valid workflow triggers. The existing browser-container CI job was not rerun locally for this release; remote CI results remain separate from these local checks.
 
 ## Agent browser verification
@@ -69,7 +69,7 @@ pnpm --dir apps/mobile exec expo export --platform all --output-dir dist/release
 pnpm --dir apps/worker exec playwright install chromium
 pnpm test:browser
 # Requires a responsive Docker daemon; use DOCKER_CONTEXT if needed:
-docker build -t openmuse-computer:local apps/computer
+docker build -t openfuse-computer:local apps/computer
 pnpm test:computer
 # Separate browser-container acceptance (not run locally for this release):
 pnpm --dir apps/worker test:docker

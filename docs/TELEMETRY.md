@@ -1,11 +1,11 @@
-# Intelligence signup and OpenMuse usage tracking
+# Intelligence signup and OpenFuse usage tracking
 
-OpenMuse uses the CopilotKit SDK's existing telemetry transport. There is no
+OpenFuse uses the CopilotKit SDK's existing telemetry transport. There is no
 separate PostHog SDK or PostHog key to configure in this application.
 
 ## Configure the server
 
-Run these commands from the OpenMuse root:
+Run these commands from the OpenFuse root:
 
 ```sh
 npx copilotkit@latest login
@@ -30,8 +30,8 @@ add `CPK_TELEMETRY_ID` in the API service's Environment settings and redeploy th
 tracking commit; adding it to the Blueprint does not populate an existing service.
 
 The SDK sends existing runtime events to
-`https://telemetry.copilotkit.ai/ingest`. OpenMuse adds
-`accessibility_title: "OpenMuse"` and defaults
+`https://telemetry.copilotkit.ai/ingest`. OpenFuse adds
+`accessibility_title: "OpenFuse"` and defaults
 `COPILOTKIT_TELEMETRY_SAMPLE_RATE` to `1` so setup and usage events are not
 randomly sampled away. It respects an explicit sampling override.
 
@@ -44,7 +44,7 @@ and automated test fixtures disable telemetry.
 
 - `intelligence_signup`: an Intelligence account created in Clerk, emitted by
   the existing backend sync with the Clerk user ID as its PostHog `distinct_id`.
-- `oss.runtime.instance_created`: the OpenMuse runtime handler was created.
+- `oss.runtime.instance_created`: the OpenFuse runtime handler was created.
 - `oss.runtime.copilot_request_created`: a request reached the runtime; this is
   usage evidence, not proof of a successful model answer.
 
@@ -53,10 +53,10 @@ when that identity resolves. Runtime and signup events can have different
 PostHog `distinct_id` values: join the runtime `clerk_user_id` property to the
 signup `distinct_id` rather than assuming a standard person funnel joins them.
 
-This connects completed signups to OpenMuse usage. It does not prove OpenMuse
-was the acquisition source: the account might predate OpenMuse. Measuring
+This connects completed signups to OpenFuse usage. It does not prove OpenFuse
+was the acquisition source: the account might predate OpenFuse. Measuring
 acquisition requires carrying a source through the Intelligence signup flow.
-OpenMuse does not emit a duplicate signup event on startup, login or key entry.
+OpenFuse does not emit a duplicate signup event on startup, login or key entry.
 
 ## Validate in PostHog
 
@@ -73,7 +73,7 @@ WHERE event IN (
     'oss.runtime.instance_created',
     'oss.runtime.copilot_request_created'
   )
-  AND properties.accessibility_title = 'OpenMuse'
+  AND properties.accessibility_title = 'OpenFuse'
   AND timestamp >= now() - INTERVAL 1 DAY
 ORDER BY timestamp DESC
 LIMIT 20
@@ -81,16 +81,16 @@ LIMIT 20
 
 Confirm the tag, the expected telemetry identity and the resolved Clerk subject.
 Then find that subject's `intelligence_signup` event. To count accounts signed
-up in the last 30 days that also used OpenMuse in that period:
+up in the last 30 days that also used OpenFuse in that period:
 
 ```sql
-SELECT count(DISTINCT signup.distinct_id) AS signups_with_openmuse_usage
+SELECT count(DISTINCT signup.distinct_id) AS signups_with_openfuse_usage
 FROM events AS signup
 INNER JOIN (
   SELECT DISTINCT properties.clerk_user_id AS clerk_user_id
   FROM events
   WHERE event = 'oss.runtime.copilot_request_created'
-    AND properties.accessibility_title = 'OpenMuse'
+    AND properties.accessibility_title = 'OpenFuse'
     AND timestamp >= now() - INTERVAL 30 DAY
     AND notEmpty(toString(properties.clerk_user_id))
 ) AS usage ON signup.distinct_id = usage.clerk_user_id
@@ -110,7 +110,7 @@ reporting surface is [dashboard 664553](https://eu.posthog.com/project/26816/das
 
 `pnpm test` disables production telemetry for ordinary fixtures. The telemetry
 tests start fresh processes, intercept SDK fetch calls before importing it,
-and check the OpenMuse tag, CLI-issued identity header, full sampling, explicit
+and check the OpenFuse tag, CLI-issued identity header, full sampling, explicit
 sampling override, both opt-outs and absence of the project key in the payload.
 These checks prove the local SDK contract; production delivery and identity
 resolution require the PostHog checks above.

@@ -23,8 +23,8 @@ if (!Number.isInteger(port) || port < 1 || port > 65535)
   throw new Error("DEMO_API_PORT must be an integer from 1 to 65535");
 const publicUrl = `http://127.0.0.1:${port}`;
 const workerUrl = process.env.DEMO_WORKER_URL ?? "http://127.0.0.1:8791";
-const workerToken = process.env.DEMO_WORKER_TOKEN ?? "openmuse-local-demo-worker-token-2026";
-const sessionToken = "openmuse-local-demo-session-token-2026";
+const workerToken = process.env.DEMO_WORKER_TOKEN ?? "openfuse-local-demo-worker-token-2026";
+const sessionToken = "openfuse-local-demo-session-token-2026";
 const worker = new URL(workerUrl);
 if (!(["127.0.0.1", "localhost", "[::1]"].includes(worker.hostname) && worker.protocol === "http:"))
   throw new Error("DEMO_WORKER_URL must point to a local HTTP browser worker");
@@ -101,7 +101,7 @@ const api = spawn(
   },
 );
 console.log(
-  `OpenMuse recording demo: AI Mock scripts the agent; ${jevMode === "live" ? "Jev decisions call TypeSafe" : "Jev decisions are scripted"}; browser visits use the real worker.`,
+  `OpenFuse recording demo: AI Mock scripts the agent; ${jevMode === "live" ? "Jev decisions call TypeSafe" : "Jev decisions are scripted"}; browser visits use the real worker.`,
 );
 console.log(`Demo API: ${publicUrl}; browser worker: ${workerUrl}`);
 console.log(`Isolated demo data: ${dataDir}`);

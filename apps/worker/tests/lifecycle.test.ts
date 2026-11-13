@@ -23,7 +23,7 @@ test("real Chromium cleans failed profiles and restores a saved UUID after worke
       assert.deepEqual(fixture.unexpected, []);
     }
   });
-  const dataDir = await mkdtemp(join(tmpdir(), "openmuse-browser-lifecycle-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "openfuse-browser-lifecycle-"));
   const id = randomUUID();
   const failedId = randomUUID();
   let browser: Awaited<ReturnType<typeof createBrowserManager>> | undefined;
@@ -106,7 +106,7 @@ test("real Chromium cleans failed profiles and restores a saved UUID after worke
         .find((item: { origin: string }) => item.origin === fixtureOrigin)
         ?.localStorage.some(
           (item: { name: string; value: string }) =>
-            item.name === "openmuse-profile-test" && item.value === "retained",
+            item.name === "openfuse-profile-test" && item.value === "retained",
         ),
     );
   } finally {
@@ -115,7 +115,7 @@ test("real Chromium cleans failed profiles and restores a saved UUID after worke
     } finally {
       await rm(dataDir, { recursive: true, force: true });
       for (const sessionId of [id, failedId])
-        await rm(join("/tmp", `openmuse-downloads-${sessionId}`), { recursive: true, force: true });
+        await rm(join("/tmp", `openfuse-downloads-${sessionId}`), { recursive: true, force: true });
     }
   }
 });
@@ -123,7 +123,7 @@ test("real Chromium cleans failed profiles and restores a saved UUID after worke
 test("real worker API preserves fixture downloads and browser storage across process restart", {
   timeout: 90_000,
 }, async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "openmuse-worker-fixtures-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "openfuse-worker-fixtures-"));
   const token = randomBytes(32).toString("hex");
   let child: ChildProcess | undefined;
   let output = "";
@@ -174,7 +174,7 @@ test("real worker API preserves fixture downloads and browser storage across pro
       await stop();
     } finally {
       for (const id of await readdir(dataDir))
-        await rm(join("/tmp", `openmuse-downloads-${id}`), { recursive: true, force: true });
+        await rm(join("/tmp", `openfuse-downloads-${id}`), { recursive: true, force: true });
       await rm(dataDir, { recursive: true, force: true });
     }
   }

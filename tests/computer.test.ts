@@ -121,6 +121,32 @@ test("attaching an existing container fails closed on unsafe isolation or owner 
   }
 });
 
+test("an install from before the rename keeps attaching to the computer it created", async () => {
+  const legacy = { ...config, computerLegacyNames: true };
+  const inspect = sandbox(true, "owner", legacy);
+  // Legacy names, kept so existing installs keep working.
+  inspect.Config.Image = "openmuse-computer:local";
+  assert.match(inspect.Name, /^\/openmuse-/);
+  const f = fixture({
+    inspect,
+    config: legacy,
+    command: async () => ok(JSON.stringify({ path: "/workspace/note.txt" })),
+  });
+  const service = new ComputerService(db, legacy, f.runner);
+  await service.write("owner", "/workspace/note.txt", "kept");
+  const call = f.calls.find((c) => c.args[0] === "exec");
+  assert.equal(call?.args.at(-1), "/opt/openmuse/files.py");
+  // A new install never attaches to a container running that image.
+  const renamed = sandbox();
+  renamed.Config.Image = inspect.Config.Image;
+  const fresh = fixture({ inspect: renamed });
+  await assert.rejects(
+    new ComputerService(db, config, fresh.runner).execute("owner", { command: "pwd" }),
+    /isolation|ownership/,
+  );
+  assert.ok(!fresh.calls.some((c) => c.args[0] === "exec"));
+});
+
 test("paths cannot escape the workspace and file contents travel on stdin", async () => {
   const f = fixture({ command: async () => ok(JSON.stringify({ path: "/workspace/note.txt" })) });
   const service = new ComputerService(db, config, f.runner);

@@ -16,7 +16,7 @@ let db: Store, app: Awaited<ReturnType<typeof createApp>>["app"], token: string,
 const headers = () => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" });
 
 before(async () => {
-  directory = await mkdtemp(join(tmpdir(), "openmuse-resource-ids-"));
+  directory = await mkdtemp(join(tmpdir(), "openfuse-resource-ids-"));
   db = await createStore();
   const config: Config = {
     mode: "sample",
@@ -61,7 +61,7 @@ test("file names never collapse to an empty display name", () => {
 });
 
 test("file lookups reject malformed IDs instead of probing storage", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "openmuse-file-id-"));
+  const dir = await mkdtemp(join(tmpdir(), "openfuse-file-id-"));
   t.after(async () => rm(dir, { recursive: true, force: true }));
   const store = await createStore();
   t.after(() => store.close());

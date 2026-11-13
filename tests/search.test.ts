@@ -41,7 +41,7 @@ test("search preserves citations, reuses session IDs and sends project identity 
   assert.notEqual(args[0].session_id, args[2].session_id);
   assert.ok(!requests.some(({ rpc }) => rpc.method === "tools/list"));
   for (const { headers } of requests) {
-    assert.equal(headers["user-agent"], "openmuse/0.1.0");
+    assert.equal(headers["user-agent"], "openfuse/0.1.0");
     assert.equal(headers.authorization, undefined);
     assert.equal(headers["x-api-key"], undefined);
   }

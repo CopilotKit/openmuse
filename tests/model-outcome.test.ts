@@ -39,7 +39,7 @@ for (const scenario of [
       // A provider failure after the outcome must not replace it with a failed task.
       errorStatus: (index) => (index > 0 ? 503 : undefined),
     });
-    const directory = await mkdtemp(join(tmpdir(), "openmuse-model-outcome-"));
+    const directory = await mkdtemp(join(tmpdir(), "openfuse-model-outcome-"));
     const db = await createStore();
     const server = await createApp(db, {
       mode: "sample",
@@ -83,7 +83,7 @@ test("a model task keeps every earlier answer when it asks again", async (t) => 
         ? { name: "ask_user", arguments: { question: "What time works?" } }
         : { name: "finish_task", arguments: { summary: "Planned." } },
   );
-  const directory = await mkdtemp(join(tmpdir(), "openmuse-model-answers-"));
+  const directory = await mkdtemp(join(tmpdir(), "openfuse-model-answers-"));
   const db = await createStore();
   const server = await createApp(db, {
     mode: "sample",

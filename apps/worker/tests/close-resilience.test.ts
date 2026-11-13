@@ -29,7 +29,7 @@ async function candidateUrls(): Promise<string[]> {
 test("closeSession releases the session slot when cookie persistence fails", {
   timeout: 120_000,
 }, async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "openmuse-browser-close-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "openfuse-browser-close-"));
   const browser = await createBrowserManager({ dataDir, maxSessions: 1 });
   const urls = await candidateUrls();
   const firstUrl = urls[0];

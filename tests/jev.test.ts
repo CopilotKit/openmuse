@@ -7,7 +7,12 @@ import {
   LiveJevAdapter,
   rankJevOptions,
 } from "../apps/server/src/jev/adapter.ts";
-import { encodeJevAction, jevPanelSchema, parseJevAction } from "../packages/domain/src/jev.ts";
+import {
+  encodeJevAction,
+  jevPanelSchema,
+  legacyJevActionPrefix,
+  parseJevAction,
+} from "../packages/domain/src/jev.ts";
 
 const option = (id: string) => ({
   id,
@@ -44,10 +49,13 @@ test("actions round trip and malformed prefixed actions reject", () => {
   const action = { panelId: "p", threadId: "t", candidateSetVersion: 1, optionId: "a" };
   assert.deepEqual(parseJevAction(encodeJevAction(action)), action);
   assert.equal(parseJevAction("ordinary message"), null);
-  assert.throws(() => parseJevAction("[OpenMuse choice] bad-json"));
+  // Choices saved in threads before the rename still parse.
+  const saved = legacyJevActionPrefix + JSON.stringify(action);
+  assert.deepEqual(parseJevAction(saved), action);
+  assert.throws(() => parseJevAction("[OpenFuse choice] bad-json"));
   assert.throws(() =>
     parseJevAction(
-      '[OpenMuse choice] {"panelId":"p","threadId":"t","candidateSetVersion":1,"optionId":"a","label":"untrusted"}',
+      '[OpenFuse choice] {"panelId":"p","threadId":"t","candidateSetVersion":1,"optionId":"a","label":"untrusted"}',
     ),
   );
 });

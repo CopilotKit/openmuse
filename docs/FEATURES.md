@@ -1,4 +1,4 @@
-# OpenMuse feature inventory
+# OpenFuse feature inventory
 
 The native and web agent core runs locally. This inventory describes the current implementation and remaining extensions. Live providers and optional infrastructure require separate configuration and validation.
 

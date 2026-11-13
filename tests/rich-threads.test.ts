@@ -11,7 +11,7 @@ let db: Store, directory: string, token: string;
 let app: Awaited<ReturnType<typeof createApp>>["app"];
 const headers = () => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" });
 before(async () => {
-  directory = await mkdtemp(join(tmpdir(), "openmuse-rich-threads-"));
+  directory = await mkdtemp(join(tmpdir(), "openfuse-rich-threads-"));
   db = await createStore();
   ({ app } = await createApp(db, {
     mode: "sample",

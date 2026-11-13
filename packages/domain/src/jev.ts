@@ -77,7 +77,13 @@ export const jevActionSchema = z
     optionId: id,
   })
   .strict();
-export const jevActionPrefix = "[OpenMuse choice] ";
+export const jevActionPrefix = "[OpenFuse choice] ";
+// Legacy name, kept so existing installs keep working: older threads and clients send it.
+export const legacyJevActionPrefix = "[OpenMuse choice] ";
+/** The choice prefix `text` starts with, if it is a choice message. */
+export function jevActionPrefixOf(text: string): string | undefined {
+  return [jevActionPrefix, legacyJevActionPrefix].find((prefix) => text.startsWith(prefix));
+}
 export type JevSource = z.infer<typeof jevSourceSchema>;
 export type JevOption = z.infer<typeof jevOptionSchema>;
 export type JevPanel = z.infer<typeof jevPanelSchema>;
@@ -87,6 +93,7 @@ export function encodeJevAction(action: JevAction): string {
   return jevActionPrefix + JSON.stringify(jevActionSchema.parse(action));
 }
 export function parseJevAction(text: string): JevAction | null {
-  if (!text.startsWith(jevActionPrefix)) return null;
-  return jevActionSchema.parse(JSON.parse(text.slice(jevActionPrefix.length)));
+  const prefix = jevActionPrefixOf(text);
+  if (prefix === undefined) return null;
+  return jevActionSchema.parse(JSON.parse(text.slice(prefix.length)));
 }
