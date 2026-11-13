@@ -3,7 +3,7 @@ import {
   type JevAction,
   type JevPanel,
   type JevToolResult,
-  jevActionPrefix,
+  jevActionPrefixOf,
   jevToolResultSchema,
   parseJevAction,
 } from "../../../packages/domain/src/jev";
@@ -146,7 +146,7 @@ function panelForAction(messages: readonly unknown[], action: JevAction): JevPan
 }
 
 export function displayJevUserMessage(text: string, precedingMessages: readonly unknown[]): string {
-  if (!text.startsWith(jevActionPrefix)) return text;
+  if (jevActionPrefixOf(text) === undefined) return text;
   const action = actionFromText(text);
   if (!action) return "Choice unavailable";
   const option = panelForAction(precedingMessages, action)?.options.find(

@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { posix, resolve } from "node:path";
 import { z } from "zod";
 import {
   type ComputerState,
+  computerFilesScript,
   computerOutput,
   computerOutputLimit,
   type DockerResult,
@@ -438,15 +439,16 @@ export class E2BDesktopComputer {
     if (cached) await this.control(() => box.keepAlive(this.awake(info, idleMs)));
     if (!cached) this.handles.set(id, { box });
     const script = await loadFilesScript();
+    const scriptPath = computerFilesScript(this.config);
     await this.control(async () => {
       if (
         (await box.setup(
-          `mkdir -p /workspace /opt/openfuse && chown ${user}:${user} /workspace`,
+          `mkdir -p /workspace ${posix.dirname(scriptPath)} && chown ${user}:${user} /workspace`,
           "root",
         )) !== 0
       )
         throw new AppError("Computer workspace could not be prepared", 503);
-      await box.writeRootFile("/opt/openfuse/files.py", script);
+      await box.writeRootFile(scriptPath, script);
       if ((await box.setup(sessionScript, user)) !== 0)
         throw new AppError("Computer desktop session did not start", 503);
     });

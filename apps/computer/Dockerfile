@@ -8,6 +8,8 @@ RUN apt-get update \
 
 COPY files.py /opt/openfuse/files.py
 RUN chmod 0555 /opt/openfuse/files.py
+# Legacy path, kept so existing installs keep working.
+RUN ln -s /opt/openfuse /opt/openmuse
 
 ENV HOME=/workspace LANG=C.UTF-8
 WORKDIR /workspace

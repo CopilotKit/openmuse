@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { JevPanel } from "../../../packages/domain/src/jev.ts";
+import {
+  type JevPanel,
+  jevActionPrefix,
+  legacyJevActionPrefix,
+} from "../../../packages/domain/src/jev.ts";
 import {
   choiceAvailability,
   confirmedJevSelection,
@@ -158,6 +162,8 @@ test("the transcript shows the trusted option label instead of the action payloa
   assert.equal(displayJevUserMessage(action, history), "Selected: Explore exhibits");
   assert.equal(displayJevUserMessage("Hello", history), "Hello");
   assert.equal(displayJevUserMessage("[OpenFuse choice] {broken", history), "Choice unavailable");
+  const saved = legacyJevActionPrefix + action.slice(jevActionPrefix.length);
+  assert.equal(displayJevUserMessage(saved, history), "Selected: Explore exhibits");
   assert.equal(displayJevUserMessage(action, []), "Choice unavailable");
 });
 

@@ -67,22 +67,28 @@ test("new installs get their own computer name, shared by concurrent first start
     computerIdentity(other, "local-user").volume,
     computerIdentity(starts[0], "local-user").volume,
   );
-  assert.deepEqual(await readdir(first), ["computer-deployment-id"]);
+  for (const start of starts)
+    assert.match(computerIdentity(start, "local-user").volume, /^openfuse-/);
+  assert.deepEqual((await readdir(first)).sort(), ["computer-deployment-id", "computer-name"]);
 });
 
 test("a new install keeps its computer name after restart", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "openfuse-deployment-restart-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const names: (string | undefined)[] = [];
+  const containers: string[] = [];
   for (let start = 0; start < 2; start++) {
     const db = await createStore();
     t.after(() => db.close());
     const started = { ...config(directory), intelligenceApiKey: "test-project-key-never-sent" };
     await createApp(db, started);
     names.push(started.computerDeploymentId);
+    containers.push(computerIdentity(started, "local-user").container);
   }
   assert.match(names[0] ?? "", /^[0-9a-f]{32}$/);
   assert.equal(names[1], names[0]);
+  assert.match(containers[0] ?? "", /^openfuse-/);
+  assert.equal(containers[1], containers[0]);
 });
 
 test("existing installs and explicit names keep their computer", async (t) => {
@@ -90,12 +96,17 @@ test("existing installs and explicit names keep their computer", async (t) => {
   t.after(() => rm(directory, { recursive: true, force: true }));
   await writeFile(join(directory, "session-signing-key"), Buffer.alloc(32, 7).toString("base64"));
   const legacy = config(directory);
-  const before = computerIdentity(legacy, "local-user");
+  const renamed = JSON.stringify(computerIdentity(legacy, "local-user"));
   await resolveComputerDeployment(legacy);
   assert.equal(legacy.computerDeploymentId, undefined);
-  assert.deepEqual(computerIdentity(legacy, "local-user"), before);
+  // An install from before the rename keeps the computer names it already created.
+  assert.deepEqual(
+    computerIdentity(legacy, "local-user"),
+    JSON.parse(renamed.replaceAll("openfuse", "openmuse")),
+  );
   const named = { ...config(directory), computerDeploymentId: "fixture-deployment" };
   await resolveComputerDeployment(named);
   assert.equal(named.computerDeploymentId, "fixture-deployment");
+  assert.equal(named.computerLegacyNames, true);
   assert.deepEqual(await readdir(directory), ["session-signing-key"]);
 });

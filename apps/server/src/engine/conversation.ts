@@ -11,7 +11,7 @@ import {
   monitorInputSchema,
 } from "../../../../packages/domain/src/agent.ts";
 import { calendarRangeSchema } from "../../../../packages/domain/src/index.ts";
-import { jevActionPrefix, parseJevAction } from "../../../../packages/domain/src/jev.ts";
+import { jevActionPrefixOf, parseJevAction } from "../../../../packages/domain/src/jev.ts";
 import { computerInstructions, computerTools } from "../computer-tools.ts";
 import type { Config } from "../config.ts";
 import { createJevAdapter, type JevAdapter } from "../jev/adapter.ts";
@@ -50,7 +50,7 @@ export class ConversationAgent extends AbstractAgent {
         ? null
         : new JevService({ store: this.service.db, adapter: this.jevAdapter, mode: jevMode });
     const latestText = typeof latest?.content === "string" ? latest.content : "";
-    if (latestText.startsWith(jevActionPrefix))
+    if (jevActionPrefixOf(latestText) !== undefined)
       return new Observable((subscriber) => {
         let subscription: { unsubscribe(): void } | undefined;
         let cancelled = false;

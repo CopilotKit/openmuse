@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
+  accessKeyFromEnv,
   assertApiDeploymentConfig,
   browserWorkerUrl,
   type Config,
+  defaultDataDir,
   readConfig,
   shadowedEnvKeys,
 } from "../apps/server/src/config.ts";
@@ -153,4 +158,22 @@ test("computer provider defaults to Docker and e2b-desktop requires a server-sid
       else process.env[key] = value;
     }
   }
+});
+
+test("installs from before the rename keep their access key and data directory", async (t) => {
+  const key = "k".repeat(24);
+  assert.equal(accessKeyFromEnv({ OPENFUSE_ACCESS_KEY: key }), key);
+  assert.equal(accessKeyFromEnv({ OPENFUSE_ACCESS_KEY: key, OPENMUSE_ACCESS_KEY: "old" }), key);
+  // Legacy names, kept so existing installs keep working.
+  assert.equal(accessKeyFromEnv({ OPENMUSE_ACCESS_KEY: key }), key);
+  assert.equal(accessKeyFromEnv({ OPENFUSE_ACCESS_KEY: "", OPENMUSE_ACCESS_KEY: key }), key);
+  assert.equal(accessKeyFromEnv({}), undefined);
+
+  const root = await mkdtemp(join(tmpdir(), "openfuse-data-dir-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  assert.equal(defaultDataDir(root), ".openfuse");
+  await mkdir(join(root, ".openmuse"));
+  assert.equal(defaultDataDir(root), ".openmuse");
+  await mkdir(join(root, ".openfuse"));
+  assert.equal(defaultDataDir(root), ".openfuse");
 });

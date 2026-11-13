@@ -26,8 +26,8 @@ export const ok = (stdout = ""): DockerResult => ({
   interrupted: false,
   truncated: false,
 });
-export function sandbox(running = true, owner = "owner") {
-  const identity = computerIdentity(config, owner);
+export function sandbox(running = true, owner = "owner", settings: Config = config) {
+  const identity = computerIdentity(settings, owner);
   return {
     Id: "container-id",
     Name: `/${identity.container}`,
@@ -71,16 +71,17 @@ export function fixture(
     inspect?: ReturnType<typeof sandbox>;
     missing?: boolean;
     owner?: string;
+    config?: Config;
   } = {},
 ) {
-  const identity = computerIdentity(config, options.owner ?? "owner");
+  const identity = computerIdentity(options.config ?? config, options.owner ?? "owner");
   const calls: { args: string[]; timeoutMs: number; input?: string }[] = [];
   const runner: DockerRunner = async (args, opts) => {
     calls.push({ args, timeoutMs: opts.timeoutMs, input: opts.input });
     if (args[0] === "container" && args[1] === "ls")
       return ok(options.missing ? "" : "container-id\n");
     if (args[0] === "container" && args[1] === "inspect")
-      return ok(JSON.stringify([options.inspect ?? sandbox(true, options.owner)]));
+      return ok(JSON.stringify([options.inspect ?? sandbox(true, options.owner, options.config)]));
     if (args[0] === "volume" && args[1] === "ls") return ok(identity.volume);
     if (args[0] === "volume" && args[1] === "inspect")
       return ok(

@@ -10,6 +10,7 @@
       "!**/ios",
       "!**/android",
       "!**/.openfuse",
+      "!**/.openmuse",
       "!**/artifacts"
     ]
   },
