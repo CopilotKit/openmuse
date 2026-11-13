@@ -31,7 +31,7 @@ tracking commit; adding it to the Blueprint does not populate an existing servic
 
 The SDK sends existing runtime events to
 `https://telemetry.copilotkit.ai/ingest`. OpenFuse adds
-`accessibility_title: "OpenMuse"` and defaults
+`accessibility_title: "OpenFuse"` and defaults
 `COPILOTKIT_TELEMETRY_SAMPLE_RATE` to `1` so setup and usage events are not
 randomly sampled away. It respects an explicit sampling override.
 
@@ -73,7 +73,7 @@ WHERE event IN (
     'oss.runtime.instance_created',
     'oss.runtime.copilot_request_created'
   )
-  AND properties.accessibility_title = 'OpenMuse'
+  AND properties.accessibility_title = 'OpenFuse'
   AND timestamp >= now() - INTERVAL 1 DAY
 ORDER BY timestamp DESC
 LIMIT 20
@@ -84,13 +84,13 @@ Then find that subject's `intelligence_signup` event. To count accounts signed
 up in the last 30 days that also used OpenFuse in that period:
 
 ```sql
-SELECT count(DISTINCT signup.distinct_id) AS signups_with_openmuse_usage
+SELECT count(DISTINCT signup.distinct_id) AS signups_with_openfuse_usage
 FROM events AS signup
 INNER JOIN (
   SELECT DISTINCT properties.clerk_user_id AS clerk_user_id
   FROM events
   WHERE event = 'oss.runtime.copilot_request_created'
-    AND properties.accessibility_title = 'OpenMuse'
+    AND properties.accessibility_title = 'OpenFuse'
     AND timestamp >= now() - INTERVAL 30 DAY
     AND notEmpty(toString(properties.clerk_user_id))
 ) AS usage ON signup.distinct_id = usage.clerk_user_id
@@ -110,7 +110,7 @@ reporting surface is [dashboard 664553](https://eu.posthog.com/project/26816/das
 
 `pnpm test` disables production telemetry for ordinary fixtures. The telemetry
 tests start fresh processes, intercept SDK fetch calls before importing it,
-and check the OpenMuse tag, CLI-issued identity header, full sampling, explicit
+and check the OpenFuse tag, CLI-issued identity header, full sampling, explicit
 sampling override, both opt-outs and absence of the project key in the payload.
 These checks prove the local SDK contract; production delivery and identity
 resolution require the PostHog checks above.

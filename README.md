@@ -195,7 +195,7 @@ Intelligence is a separate service and is not included in this repository's MIT 
 
 ## Signup and runtime tracking
 
-The CopilotKit SDK sends runtime telemetry through the shared CopilotKit sink to PostHog with `accessibility_title: "OpenMuse"`. Telemetry defaults to full capture; explicit SDK opt-outs and sampling settings take precedence. Keep the CLI-generated `CPK_TELEMETRY_ID` alongside the server-only project key when deploying. Intelligence records completed account signups separately; OpenMuse runtime usage can be joined to those accounts after the sink resolves the identity. [Setup, opt-out and PostHog validation](docs/TELEMETRY.md).
+The CopilotKit SDK sends runtime telemetry through the shared CopilotKit sink to PostHog with `accessibility_title: "OpenFuse"`. Telemetry defaults to full capture; explicit SDK opt-outs and sampling settings take precedence. Keep the CLI-generated `CPK_TELEMETRY_ID` alongside the server-only project key when deploying. Intelligence records completed account signups separately; OpenFuse runtime usage can be joined to those accounts after the sink resolves the identity. [Setup, opt-out and PostHog validation](docs/TELEMETRY.md).
 
 ## Architecture
 
