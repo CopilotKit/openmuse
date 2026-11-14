@@ -648,12 +648,14 @@ export class AgentService {
     if (idea.status === "dismissed" || (idea.status === "accepted" && action === "dismiss"))
       return idea;
     if (action === "dismiss")
-      return this.db.compareAndSwap<Idea>(
-        owner,
-        "ideas",
-        id,
-        { status: "new" },
-        { status: "dismissed" },
+      return (
+        (await this.db.compareAndSwap<Idea>(
+          owner,
+          "ideas",
+          id,
+          { status: "new" },
+          { status: "dismissed" },
+        )) ?? this.db.get<Idea>(owner, "ideas", id)
       );
     if (idea.status === "new") {
       // A task already working on (or done with) the same email is opened instead of copied.
