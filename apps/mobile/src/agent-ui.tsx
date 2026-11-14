@@ -164,21 +164,6 @@ export function TaskCard({
     </Pressable>
   );
 }
-export function ChatWork() {
-  const { data } = useAgentWorkspace();
-  const tasks = [...(data?.tasks || [])]
-    .filter(activeTask)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, 2);
-  if (!tasks.length) return null;
-  return (
-    <View style={{ gap: 10 }}>
-      {tasks.map((task) => (
-        <TaskCard task={task} key={task.id} compact />
-      ))}
-    </View>
-  );
-}
 export function AgentActivityScreen() {
   const { data } = useAgentWorkspace();
   const [filter, setFilter] = useState("All");
