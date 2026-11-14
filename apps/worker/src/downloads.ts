@@ -60,6 +60,14 @@ export async function readDownloadFailures(directory: string, recoverInterrupted
   return failures.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+/**
+ * Whether a new download exceeds the documented 20-PDF per-session cap.
+ * pendingCount must include the download being decided: the session handler
+ * adds the current transfer to its pending set before this is evaluated.
+ */
+export function downloadLimitReached(savedCount: number, pendingCount: number): boolean {
+  return savedCount + pendingCount > 20;
+}
 export async function capturePdfDownload(options: {
   directory: string;
   tempDirectory: string;
