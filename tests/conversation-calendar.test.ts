@@ -6,6 +6,7 @@ import { lastValueFrom, toArray } from "rxjs";
 import { createApp } from "../apps/server/src/app.ts";
 import { ConversationAgent } from "../apps/server/src/engine/conversation.ts";
 import type { CalendarEvent } from "../packages/domain/src/index.ts";
+import { MAX_READ_RETRIES } from "../packages/integrations/src/google.ts";
 import { encryptSecret } from "../packages/integrations/src/vault.ts";
 import { browserFixture } from "./helpers/browser.ts";
 import { modelFixture } from "./helpers/model.ts";
@@ -298,19 +299,21 @@ test("chat reports Google permission, server and network failures without claimi
       { status: failure === "permission" ? 403 : 503 },
     );
   });
-  for (const [kind, expected] of [
-    ["permission", /403.*scope denied/],
-    ["server", /503.*unavailable/],
-    ["network", /Could not reach Google/],
+  for (const [kind, expected, attempts] of [
+    ["permission", /403.*scope denied/, 1],
+    ["server", /503.*unavailable/, 1 + MAX_READ_RETRIES],
+    ["network", /Could not reach Google/, 1 + MAX_READ_RETRIES],
   ] as const) {
     failure = kind;
+    const readsBefore = reads;
     const result = await read(f.conversation);
+    assert.equal(reads - readsBefore, attempts, `${kind} request count`);
     assert.match(result.error, expected);
     assert.equal("events" in result, false);
   }
-  assert.equal(reads, 3);
   assert.ok(requests[1].body.includes("Calendar scope denied"));
   assert.ok(requests[3].body.includes("Calendar unavailable"));
+  assert.ok(requests[5].body.includes("Could not reach Google"));
   assert.equal((await f.db.list("local-user", "tasks")).length, 0);
   assert.equal((await f.db.list("local-user", "actions")).length, 0);
 });
