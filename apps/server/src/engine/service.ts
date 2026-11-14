@@ -42,6 +42,7 @@ import {
   pageLines,
   withoutRelativeTimes,
 } from "./page-diff.ts";
+import { matchesPrice } from "./price.ts";
 import { LostLeaseError, type TaskContext, TaskWorker } from "./worker.ts";
 
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -1104,7 +1105,7 @@ export class AgentService {
         ? Boolean(previousHash && previousHash !== currentHash)
         : monitor.condition === "contains"
           ? text.toLowerCase().includes(wanted)
-          : this.matchesPrice(text, Number(monitor.value));
+          : matchesPrice(text, Number(monitor.value));
     const previouslyMatched = Boolean(task.state.matched);
     // For change watches, keep the page lines and a relative-time-free fingerprint of the whole text.
     const change = monitor.condition === "change";
@@ -1201,9 +1202,5 @@ export class AgentService {
       ],
       plan: task.plan.map((s) => ({ ...s, status: "succeeded" })),
     };
-  }
-  private matchesPrice(text: string, threshold: number) {
-    const matches = [...text.matchAll(/(?:\$|USD)\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)/g)];
-    return matches.some((m) => Number(m[1].replace(/,/g, "")) < threshold);
   }
 }
