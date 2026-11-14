@@ -149,27 +149,65 @@ function decodeHeader(value: string): string {
   // RFC 2047: ignore linear whitespace, including folding, between encoded words.
   return value
     .replace(/(\?=)(?:[ \t]|\r\n[ \t])+(?==\?)/g, "$1")
-    .replace(
-      /=\?([^?]+)\?([bq])\?([^?]*)\?=/gi,
-      (original, charset: string, encoding: string, text: string) => {
+    .replace(/(?:=\?[^?]+\?[bq]\?[^?]*\?=)+/gi, (run) => {
+      // Valid words keep independent decoder boundaries (including their BOMs).
+      // Tolerate split UTF-8 only when the words cannot decode independently.
+      const word = /=\?([^?]+)\?([bq])\?([^?]*)\?=/gi;
+      const decoded: string[] = [];
+      const utf8 = new TextDecoder("utf-8", { fatal: true });
+      let pending: Buffer[] = [];
+      let pendingFallback: string[] = [];
+      const flush = () => {
+        if (pending.length === 0) return;
         try {
-          const bytes =
-            encoding.toLowerCase() === "b"
-              ? Buffer.from(text, "base64")
-              : Buffer.from(
-                  text
-                    .replace(/_/g, " ")
-                    .replace(/=([0-9a-f]{2})/gi, (_, code: string) =>
-                      String.fromCharCode(Number.parseInt(code, 16)),
-                    ),
-                  "latin1",
-                );
-          return new TextDecoder(charset.split("*")[0]).decode(bytes);
+          // One concatenate per malformed group, never one per incoming word.
+          decoded.push(utf8.decode(Buffer.concat(pending)));
         } catch {
-          return original;
+          for (const text of pendingFallback) decoded.push(text);
         }
-      },
-    );
+        pending = [];
+        pendingFallback = [];
+      };
+      for (const match of run.matchAll(word)) {
+        const [original, charset, encoding, text] = match;
+        const normalized = charset.split("*")[0].toLowerCase();
+        const bytes =
+          encoding.toLowerCase() === "b"
+            ? Buffer.from(text, "base64")
+            : Buffer.from(
+                text
+                  .replace(/_/g, " ")
+                  .replace(/=([0-9a-f]{2})/gi, (_, code: string) =>
+                    String.fromCharCode(Number.parseInt(code, 16)),
+                  ),
+                "latin1",
+              );
+        let decoder: TextDecoder;
+        try {
+          decoder = new TextDecoder(normalized);
+        } catch {
+          flush();
+          decoded.push(original);
+          continue;
+        }
+        if (decoder.encoding === "utf-8") {
+          if (bytes.length === 0) continue;
+          try {
+            const text = utf8.decode(bytes);
+            flush();
+            decoded.push(text);
+          } catch {
+            pending.push(bytes);
+            pendingFallback.push(decoder.decode(bytes));
+          }
+        } else {
+          flush();
+          decoded.push(decoder.decode(bytes));
+        }
+      }
+      flush();
+      return decoded.join("");
+    });
 }
 function decodeSnippet(value: string): string {
   const entities: Record<string, string> = {
