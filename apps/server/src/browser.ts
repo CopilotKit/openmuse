@@ -7,6 +7,7 @@ import type { Config } from "./config.ts";
 import type { Store } from "./db.ts";
 import { AppError } from "./errors.ts";
 import type { Files } from "./files.ts";
+import { clipText } from "./text.ts";
 
 const sessionSchema = z.object({
   id: z.string(),
@@ -220,7 +221,7 @@ export class BrowserService {
       return {
         sessionId: id,
         ...page,
-        text: page.text.slice(0, 30_000),
+        text: clipText(page.text, 30_000),
         truncated: page.truncated || page.text.length > 30_000,
       };
     });

@@ -43,6 +43,7 @@ import {
   withoutRelativeTimes,
 } from "./page-diff.ts";
 import { LostLeaseError, type TaskContext, TaskWorker } from "./worker.ts";
+import { clipText } from "../text.ts";
 
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 /** A change watch's last saved page: its hash, relative-time-free fingerprint and lines. */
@@ -735,7 +736,7 @@ export class AgentService {
     await this.db.insertIfAbsent(owner, "notifications", value);
   }
   mailEvidence(mail: Mail): Evidence {
-    return { id: mail.id, kind: "mail", title: mail.subject, excerpt: mail.body.slice(0, 400) };
+    return { id: mail.id, kind: "mail", title: mail.subject, excerpt: clipText(mail.body, 400) };
   }
   async artifact(
     owner: string,
@@ -1140,7 +1141,7 @@ export class AgentService {
         checks: monitor.checks + 1,
         lastCheckedAt: date(),
         lastHash: currentHash,
-        lastValue: text.slice(0, 1000),
+        lastValue: clipText(text, 1000),
         nextCheckAt,
         error: null,
       },
@@ -1156,11 +1157,11 @@ export class AgentService {
     await ctx.event(
       "observation",
       previousHash ? "Checked for changes" : "Saved the first observation",
-      text.slice(0, 1000),
+      clipText(text, 1000),
     );
     if (shouldNotify) {
       await ctx.guard();
-      await ctx.event("result", "A meaningful change was found", changes || text.slice(0, 500));
+      await ctx.event("result", "A meaningful change was found", changes || clipText(text, 500));
     }
     const count = diff ? countPageDiff(diff) : "";
     return {
@@ -1184,7 +1185,7 @@ export class AgentService {
               title: monitor.title,
               body: changes
                 ? `Changed at ${observation.url}\n${changes}`
-                : `Condition met at ${observation.url}: ${text.slice(0, 240)}`,
+                : `Condition met at ${observation.url}: ${clipText(text, 240)}`,
               key: `monitor:${monitor.id}:${alertSequence}:${currentHash}`,
             }
           : null,
@@ -1196,7 +1197,7 @@ export class AgentService {
           kind: "web",
           title: observation.title,
           url: observation.url,
-          excerpt: text.slice(0, 600),
+          excerpt: clipText(text, 600),
         },
       ],
       plan: task.plan.map((s) => ({ ...s, status: "succeeded" })),
