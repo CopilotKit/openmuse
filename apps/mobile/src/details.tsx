@@ -33,6 +33,7 @@ import {
   type ProposalInput,
 } from "../../../packages/domain/src";
 import { DelegateSheet, NotificationsSheet, TaskDetail } from "./agent-ui";
+import { readNativePayload } from "./api-response";
 import BrowserConsole from "./BrowserConsole";
 import { browserAddress, browserSite } from "./browser-address";
 import { ComputerSheet } from "./computer";
@@ -777,9 +778,17 @@ function FileDetail({ file: f }: { file: Artifact }) {
         return;
       }
       const target = `${FileSystem.cacheDirectory}${f.id}.pdf`;
-      await FileSystem.downloadAsync(url, target, {
+      const download = await FileSystem.downloadAsync(url, target, {
         headers: { Authorization: `Bearer ${api.token}` },
       });
+      if (download.status < 200 || download.status >= 300) {
+        // downloadAsync saves an error response to the file instead of failing, so read
+        // the server's message from it and never offer that file as a PDF.
+        const body = await FileSystem.readAsStringAsync(target).catch(() => "");
+        await FileSystem.deleteAsync(target, { idempotent: true });
+        // Always throws here, with the server's message when it sent one.
+        await readNativePayload({ status: download.status, body }, "Could not download this PDF.");
+      }
       if (await Sharing.isAvailableAsync())
         await Sharing.shareAsync(target, { mimeType: "application/pdf", UTI: "com.adobe.pdf" });
       else throw new Error("Sharing is not available on this device.");

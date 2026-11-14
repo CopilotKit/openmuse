@@ -3,6 +3,13 @@ import { Text, View } from "react-native";
 import DateFields from "./DateFields";
 import { isCompleteInstant, localDateTime, zonedInstant } from "./date-time";
 import { colors, s } from "./ui";
+
+// An unknown time zone surfaces as Intl's RangeError; the other errors are already readable.
+function editorError(e: unknown) {
+  if (e instanceof RangeError) return "Choose a valid time zone.";
+  return e instanceof Error ? e.message : String(e);
+}
+
 export default function DateTimeEditor({
   label,
   value,
@@ -23,13 +30,19 @@ export default function DateTimeEditor({
     try {
       if (allDay) {
         setDate(value.slice(0, 10));
+        setError("");
       } else if (isCompleteInstant(value)) {
         const local = localDateTime(value, timeZone);
         setDate(local.date);
         setTime(local.time);
+        setError("");
+      } else if (value === `${date} ${time}`) {
+        // A date or time entered while the zone was invalid; convert it now the zone changed.
+        onChange(zonedInstant(date, time, timeZone));
+        setError("");
       }
-    } catch {
-      setError("Choose a valid time zone.");
+    } catch (e) {
+      setError(editorError(e));
     }
   }, [value, timeZone, allDay]);
   function change(nextDate: string, nextTime: string) {
@@ -44,7 +57,7 @@ export default function DateTimeEditor({
       onChange(zonedInstant(nextDate, nextTime, timeZone));
     } catch (e) {
       onChange(`${nextDate} ${nextTime}`);
-      setError(e instanceof Error ? e.message : String(e));
+      setError(editorError(e));
     }
   }
   return (

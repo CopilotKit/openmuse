@@ -39,6 +39,7 @@ import type {
   EmailDraft,
 } from "../../../packages/domain/src";
 import { API_URL } from "./api";
+import { readNativePayload } from "./api-response";
 import { browserAddress } from "./browser-address";
 import { localDateTime, startOfZonedDay, zonedInstant } from "./date-time";
 import {
@@ -964,10 +965,7 @@ export function FilesScreen() {
           mimeType: "application/pdf",
           headers: { Authorization: `Bearer ${api.token}` },
         });
-        const payload = JSON.parse(result.body);
-        if (result.status < 200 || result.status >= 300)
-          throw new Error(payload.error || "Could not import this PDF.");
-        artifact = payload;
+        artifact = await readNativePayload<Artifact>(result, "Could not import this PDF.");
       }
       await refresh();
       open({ type: "file", file: artifact });

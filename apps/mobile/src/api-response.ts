@@ -22,3 +22,14 @@ export async function readApiPayload<T>(response: Response, fallback?: string): 
     throw new Error(`The server returned an unreadable response (${response.status}).`);
   return payload as T;
 }
+
+/**
+ * Same as readApiPayload, for the native upload and download helpers, which
+ * return the status and body text instead of a Response.
+ */
+export function readNativePayload<T>(
+  result: { status: number; body: string },
+  fallback?: string,
+): Promise<T> {
+  return readApiPayload<T>(new Response(result.body, { status: result.status }), fallback);
+}
