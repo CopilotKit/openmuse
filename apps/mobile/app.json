@@ -11,6 +11,7 @@
     "android": { "package": "app.openfuse.mobile" },
     "web": { "bundler": "metro", "name": "OpenFuse — a little room for everything" },
     "plugins": [
+      "./plugins/withIOSSceneLifecycle",
       "expo-document-picker",
       "@config-plugins/react-native-blob-util",
       "@config-plugins/react-native-pdf"
